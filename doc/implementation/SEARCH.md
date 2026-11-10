@@ -8,7 +8,7 @@ live in [plans](../plans/README.md); historical evidence does not validate this 
 ## Header parsing and verified display
 
 Header parsing decodes and unfolds RFC 2047 Subject values before catalog and
-FTS insertion. `mailsearch` displays that catalog value directly. The verified
+FTS insertion. `ect-search` displays that catalog value directly. The verified
 MBOX traversal in `refresh-index` rederives that catalog field while rebuilding
 FTS, so existing archives acquire newly supported legacy-header decoding without
 rewriting canonical mail.
@@ -132,7 +132,7 @@ unchanged. A bounded, ordered worker pool verifies source hashes and parses
 MIME content in parallel (all detected CPU cores by default, or two if the
 count is unavailable, configurable with `refresh-index --workers`); a sole main-thread SQLite writer retains stable
 catalog/update order and never shares a SQLite connection across threads.
-Ordinary `mailsearch` listings and reports select only `Sent` and `Archive`;
+Ordinary `ect-search` listings and reports select only `Sent` and `Archive`;
 the authoritative catalog still retains every quarantine record.
 Bounded date-sorted listings materialize an indexed, ordered candidate page
 before joining recipient rows. Year-scoped reports use half-open ISO 8601

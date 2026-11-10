@@ -8,8 +8,13 @@ standard MBOX files inside a native BagIt 1.0 / Mailbag 1.0 package, records
 where each message came from, and uses SHA-256 hashes to check integrity.
 Its local search index can be discarded and rebuilt.
 
-**This program is under active development. Do not use it operationally until
-version 1.0 ships.**
+**Email Collection Toolkit is in alpha testing and is safe to test with your email.**
+Imports leave your source files and mail accounts unchanged. The archive file
+format is stable: original message data is preserved in standard MBOX files
+inside a BagIt / Mailbag package, with SHA-256 checksums to detect corruption.
+
+The application is not yet ready for production use because usability and
+performance are still being improved. Testing and feedback are welcome.
 
 Progress and window updates follow actual work and native change notifications.
 Warnings stay expanded until you collapse or dismiss them. When enabled, installed
@@ -33,7 +38,7 @@ See [Versioning and updating](#versioning-and-updating) for update choices.
 
 ## Goals
 
-`mailarchiver` is preservation infrastructure for personal and research email
+Email Collection Toolkit is preservation infrastructure for personal and research email
 collections, not a mail client or a compliance appliance. Its goals are to:
 
 * harvest email from backup drives and active sources into one persistent,
@@ -96,22 +101,32 @@ requires the Microsoft Edge WebView2 Runtime.
 For source installation, build prerequisites, and testing, see
 [For developers](doc/FOR_DEVELOPERS.md).
 
-## Apache Tika
+## Command-line tools
 
-We plan to use Apache Tika for optional text extraction from PDF and Office
-attachments so their contents can be searched. Extracted text will be derived
-data; original messages and attachments will remain preserved.
+Install the CLI with [uv](https://docs.astral.sh/uv/getting-started/installation/):
 
-Tika is not connected to ingest or search yet. Today, `--index-attachments`
-indexes text attachments only. Ordinary importing and searching do not require
-Java. Developer preparation for Tika is described in
-[For developers](doc/FOR_DEVELOPERS.md#apache-tika-preparation).
+```sh
+uv tool install 'git+https://github.com/simsong/email-collection-toolkit.git'
+ect-create collection.mailarchive --owner sam@example.org
+ect-import --archive collection.mailarchive /path/to/exported-mail
+ect-search --archive collection.mailarchive budget
+ect verify collection.mailarchive
+```
 
-## CLI and archive workflows
+For an IMAP source, use `ect-import --archive collection.mailarchive --imap`.
+The generic `ect` command exposes all application operations: `ect create`,
+`ect import` and `ect search` are equivalent to the shortcuts above.
+From a source checkout, prefix commands with `uv run --locked`.
 
-The [CLI reference](doc/CLI_REFERENCE.md) covers local import, IMAP downloads,
-message listing/search, processing, verification, reports, and diagnostics.
-The [user manual](doc/USER_MANUAL.md) explains the workflows and desktop interface.
+The CLI uses Python 3.12+ and requires a native ClamAV runtime and definitions
+for scanning; desktop installers bundle these components. PST/OST imports also
+need their native helpers. The [command-line guide](doc/CLI_REFERENCE.md) covers
+installation, prerequisites, options and examples. For source builds and tests,
+see [For developers](doc/FOR_DEVELOPERS.md) and [Developer commands](doc/DEVELOPER_COMMANDS.md).
+
+`make security-lock` refreshes the affected dependency packages across the application,
+converter, optional name-matcher research environment and Rust workspace. Patched minimum
+versions are recorded in their manifests; commit the refreshed lockfiles together.
 
 ### Search matching
 
@@ -128,6 +143,19 @@ native macOS or Windows secret store. Downloads leave source messages and flags
 unchanged. Gmail downloads use All Mail, excluding messages found only in Spam
 or Trash. See [IMAP downloads](doc/CLI_REFERENCE.md#imap-downloads) for account
 requirements and commands.
+
+Validate saved credentials without opening mailboxes or writing the archive with
+`ect imap --archive /path/to/archive.mailarchive --check-credentials`.
+Ingests offers **Update IMAP Password…** to test a replacement before saving it.
+Temporary login limits back off and retry automatically; the CLI shows the reason
+and next delay even before any download completes. Downloads default to 8
+connections per account. **Preferences → Maximum IMAP connections per account**
+accepts 1–15, independently of the processing worker count. All configured
+processing workers remain available.
+
+Invalid archive settings produce an actionable warning with the configuration
+filename and repair guidance. Saved Ingests history remains available; invalid
+settings must be repaired before importing.
 
 ### Archive care
 
@@ -167,6 +195,7 @@ reference; their workflows are in [For developers](doc/FOR_DEVELOPERS.md).
 | `CARGO_BUILD_JOBS` | Limit native Rust compilation parallelism |
 | `OPENSSL_DIR`, `OPENSSL_LIB_DIR`, `OPENSSL_INCLUDE_DIR` | Select the OpenSSL installation for Rust dependencies |
 | `OPENSSL_NO_VENDOR`, `PKG_CONFIG_PATH` | Control vendored OpenSSL and package metadata lookup |
+| `TMPDIR` | Optional disposable-test temporary root; all test subprocesses share it so lock tests stay separate from a running desktop import |
 | `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, `UV_PYTHON_BIN_DIR` | Locations for uv's cache, managed Python, and interpreter links |
 | `UV_PROJECT_ENVIRONMENT`, `PYTHONPATH` | Isolated packaging environment and repository-local test import path |
 | `FQDN` | Disposable IMAP tests use `localhost` to avoid reverse DNS |
@@ -205,8 +234,8 @@ Versions follow the semantic-versioning pattern **MAJOR.MINOR.PATCH**:
 
 During development, a numbered `a` or `b` suffix marks an alpha or beta, such as
 `1.0.0a1` or `1.0.0b1`. Higher numbers advance that preview series; beta follows
-alpha, and the unsuffixed `1.0.0` is the stable release. Previews are for testing
-and may change before the stable release.
+alpha, and the unsuffixed `1.0.0` is the production release. Preview application
+interfaces and performance may change; the archive file format is already stable.
 
 ### Program updates
 

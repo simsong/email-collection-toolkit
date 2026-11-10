@@ -10,12 +10,14 @@
   </head>
   <body>
     <div id="antivirus-warning" role="alert" hidden><span id="antivirus-detail"></span> <button id="install-antivirus" type="button">Install ClamAV…</button></div>
+    <div id="configuration-warning" role="status" hidden></div>
     <main class="ingest-browser">
       <aside class="ingest-history">
         <header><h1>Ingests</h1><span id="history-count"></span></header>
         <div class="ingest-actions"><button id="import-directory" type="button" disabled>Import Directory…</button>
           <button id="suspend-import" type="button" disabled>Suspend Import</button>
           <button id="resume-import" type="button" disabled>Continue Import</button>
+          <button id="update-imap-password" type="button" hidden>Update IMAP Password…</button>
           <p id="import-control-status" role="status" hidden></p></div>
         <div id="starting-import" role="status" hidden><span class="state-dot running" aria-hidden="true">✓</span><span>Starting — preparing archive…</span></div>
         <div id="history-list" role="listbox" aria-label="Ingest history"></div>
@@ -25,6 +27,18 @@
         <p class="empty">No ingest history is available for this archive.</p>
       </article>
     </main>
+    <dialog id="imap-password-dialog">
+      <form id="imap-password-form">
+        <h2>Update IMAP Password</h2>
+        <p>Test the replacement before saving it in the OS credential store. No mail is downloaded.</p>
+        <label for="imap-account">Account</label><select id="imap-account"></select>
+        <label for="imap-password">New password or app password</label>
+        <input id="imap-password" type="password" autocomplete="new-password" required>
+        <p id="imap-password-status" role="status"></p>
+        <button id="save-imap-password" type="submit">Test and Save</button>
+        <button id="cancel-imap-password" type="button">Cancel</button>
+      </form>
+    </dialog>
     <div id="error" role="alert" hidden></div>
     <script src="rust-panel.js"></script>
     <script src="coordination.js"></script>

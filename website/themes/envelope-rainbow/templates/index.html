@@ -17,7 +17,10 @@
     </div>
     <div class="hero shell release-downloads" id="installer-downloads">
       <p class="lede">Collect, preserve, search, and understand email across old computers, backup drives, and exported accounts — while keeping the archive local and verifiable.</p>
-      {% if not releases.stable.tag and releases.preview.tag %}<p><strong>Preview release:</strong> alpha/beta software for testing.</p>{% endif %}
+      {% if not releases.stable.tag %}
+      <p><strong>Alpha testing — safe to test with your email.</strong> Imports leave your source files and mail accounts unchanged. The archive file format is stable, preserving original message data in standard MBOX files with SHA-256 checksums to detect corruption.</p>
+      <p>The application is not yet ready for production use while usability and performance are being improved. Testing and feedback are welcome.</p>
+      {% endif %}
       <div class="actions">
         <a class="button primary" id="download-windows" href="{% if primary.windows_url %}{{ primary.windows_url }}{% else %}{{ config.extra.releases }}/{% endif %}">Signed Windows Installers</a>
         <a class="button primary" id="download-macos" href="{% if primary.mac_url %}{{ primary.mac_url }}{% else %}{{ config.extra.releases }}/{% endif %}">Signed macOS Installer</a>

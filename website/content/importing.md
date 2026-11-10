@@ -69,93 +69,41 @@ cancel remaining work while keeping archived
 messages and history. A new explicit import can read the source again; use
 explicit reprocessing to regenerate previously cancelled derived work.
 
-## Standalone IMAP CLI
+## Import from the command line
 
-The Python `mailarchiver-imap` command runs without the desktop on macOS and
-Windows. `--new ARCHIVE` creates an archive and prompts for connection settings
-and a hidden password/app password, saved in the native OS keyring. Later use
-`--archive ARCHIVE` to synchronize once and exit. `--workers` overrides the saved
-worker preference, which defaults to half the logical CPUs (maximum twice the CPU count);
-`--show-messages` adds per-download output to five-minute status. Ctrl-C saves
-completed progress for the next run.
+Install the CLI with uv, then create an archive and import a directory:
 
-Generic IMAP excludes mailbox names containing `spam`, ignoring case. Gmail
-downloads only All Mail and records Gmail IDs and labels; Spam and Trash-only
-messages are outside that coverage. Complete messages and attachments use normal
-ingest, including its current attachment-extraction limits. Scheduling and the
-graphical source configuration below remain planned.
-
-## Planned configured sources
-
-The general saved-source interface described below is planned
-work. They are separate from the local-file import interface available today.
-
-## Sources belong to an archive
-
-The planned top-level `archive.yaml` file gives every source a permanent ID.
-That lets Email Collection Toolkit associate later observations and checkpoints with the
-same source.
-
-| Source | Contents |
-| --- | --- |
-| **FILE** | One supported local mail file, such as MBOX, EML, Babyl, or EMLX |
-| **LOCAL FOLDER** | A directory recursively searched for supported mail files |
-| **IMAP** | A remote mailbox identified by server, port, and username |
-
-```yaml
-version: 1
-sources:
-  - id: takeout-2026
-    kind: file
-    path: /Users/your.name/Downloads/takeout-mail.mbox
-  - id: historical-mail
-    kind: local-folder
-    path: /Volumes/Archive/Old Mail
-  - id: personal-imap
-    kind: imap
-    server: imap.example.org
-    port: 993
-    username: your.name@example.org
-    tls: implicit
-    authentication: password
-    credential_ref: keyring://mail-archiver/personal-imap
-    folders: all
+```sh
+uv tool install 'git+https://github.com/simsong/email-collection-toolkit.git'
+ect-create collection.mailarchive --owner sam@example.org
+ect-import --archive collection.mailarchive /path/to/exported-mail
 ```
 
-The configuration contains no password, app password, access token, or refresh
-token. `credential_ref` names an item in the operating-system keychain or
-configured secrets provider. An interactive import prompts securely when a
-password is missing. OAuth sources instead open the provider's browser sign-in.
+For a read-only IMAP account, use the same import command:
 
-## Import/Refresh
+```sh
+ect-import --archive collection.mailarchive --imap
+```
 
-**Import/Refresh** visits every enabled source. It walks local folders to find
-new files, but does not open or hash a previously imported file when that
-file's recorded modification time is unchanged. Changed and new files are
-processed normally. IMAP sources use saved folder and UID checkpoints to
-retrieve new or changed messages without marking them read.
+The first run prompts for connection settings and a hidden password or app
+password. Settings are saved in the archive's `config.yaml`; passwords stay in
+macOS Keychain or Windows Credential Manager. Run the command again to download
+new mail and resume completed checkpoints. Use `--show-messages` for per-message
+output and `--source SOURCE_ID` to select one saved account.
 
-This fast path deliberately trusts modification times. It will not detect a
-file whose bytes changed while its old modification time was preserved.
+Generic IMAP excludes mailbox names containing `spam`. Gmail downloads All Mail
+and records Gmail IDs and labels; messages found only in Spam or Trash are outside
+that coverage. OAuth and a graphical account-setup interface are not available.
+See [Gmail acquisition](@/gmail-authorization.md) for supported Gmail paths.
 
-## Import/Rebuild
+Imports scan for malware by default; the CLI needs the native antivirus runtime
+and verified definitions. The desktop installers include these components.
+The [command-line guide](https://github.com/simsong/email-collection-toolkit/blob/main/doc/CLI_REFERENCE.md)
+covers prerequisites, options, adding accounts, interruption and verification.
+A general source registry and Refresh/Rebuild interface remain
+[planned work](https://github.com/simsong/email-collection-toolkit/blob/main/doc/plans/ACQUISITION.md).
 
-**Import/Rebuild** also visits every enabled source, but ignores the local
-modification-time shortcut and recomputes the complete SHA-256 of every local
-file. A matching hash can skip parsing after that check. Changed content is
-processed through the normal importer. IMAP sources receive a complete folder
-and UID reconciliation instead of only an incremental cursor check.
-
-Both actions are idempotent: an exact message already found in a backup,
-Takeout export, local cache, or IMAP account is not added to the canonical
-archive twice. Every source observation is retained, and neither action deletes
-canonical mail.
-
-Import/Rebuild differs from a search-index refresh, which reads messages already in the
-archive and replaces only the disposable search index.
-
-See [Advanced → Command Line](@/advanced.md#command-line) for terminal commands
-and the full command reference.
+## Processing saved mail
 
 While **Processing saved mail** is displayed, ECT is finishing metadata, body and
 attachment extraction, and search indexing for mail already stored locally.
@@ -164,11 +112,15 @@ separates downloading/importing from processing and reports its own finished-tas
 count. Several processing tasks can belong to one email. IMAP source progress is
 reported as download partitions rather than files.
 
+**Messages requiring processing** counts archived emails with unfinished work,
+once per email even when several tasks remain. Pending, running, failed and
+blocked work is included; mail still on the server is excluded. Each email leaves
+the count after its final task finishes.
 
-**Messages requiring processing** counts archived emails with unfinished work, once
-per email even when several body or attachment tasks remain. Pending, running,
-failed and blocked work is included; mail still on the server is excluded.
-The count refreshes during processing and can increase if more saved-message
-work is discovered. Each email leaves the count only after its last task finishes.
-The count can stay level while earlier stages extract bodies and attachments and
-queue later work for the same emails. Older runs may show Unavailable.
+## Verifying archived messages and saving checksums
+
+This status means the application is checking saved message bytes and updating
+the archive's local integrity files, message inventory and checksum manifests.
+The step reads the whole archive, so it can take time after a small import while
+download workers are idle. It does not upload or share email. The download
+percentage does not measure this final step.

@@ -6,18 +6,20 @@
 
 API v2 runs both executable test plugins and production CLI processing.
 Python plugins execute in the host interpreter; no Python plugin subprocesses
-are created. The Rust PST importer remains an external executable. Use a fresh directory;
-there is no requirement to migrate or preserve existing generated archive
-formats. Source mail remains immutable.
+are created. The Rust PST importer remains an external executable.
+The `ect processor` harness uses disposable fixture directories; its working
+storage is not a canonical archive. Production `ect import` and `ect process`
+retain the documented archive format and preservation contract. Source mail
+remains immutable.
 
-The [processor harness reference](CLI_REFERENCE.md#processor-harness) documents
+The [processor harness reference](CLI_REFERENCE.md#other-commands) documents
 disposable fixtures and execution. Production uses the local archive commands.
 
-The plugins command prints manifests; status and run print typed JSON reports
+Within `ect processor`, `plugins` prints manifests; `status` and `run` print typed JSON reports
 with persistent invocation counts and timings. A failed run exits 1.
 Ctrl-C stops CLI processing, retains unfinished jobs, prints statistics and exits 130.
-Run with --retry to retry failed jobs while retaining successful checkpoints.
-Code or manifest edits never trigger reprocessing. Use reprocess explicitly to
+Use `ect processor ... run --retry` to retry failed jobs while retaining successful checkpoints.
+Code or manifest edits never trigger reprocessing. Use the harness `reprocess` command explicitly to
 supersede unfinished jobs and queue originals in a fresh generation, even when
 the registry is unchanged. Manual identity/tag data and invocation history remain.
 Ordinary resume reuses completed invocations and accepts legacy registry hashes.
@@ -76,10 +78,10 @@ selection, attached messages and the real Rust PST adapter.
 
 See [CLI_REFERENCE.md](CLI_REFERENCE.md#local-archive-commands) for execution recipes.
 
-`ingest` finishes ingest/message jobs before running content. `--defer-content`
+`ect import` finishes ingest/message jobs before running content. `--defer-content`
 leaves content pending. `process --phase ingest|content|all` resumes stored jobs
 without needing source files; continuing an unfinished source traversal still
-requires repeating `ingest` with that source. `--max-jobs` bounds a content pass.
+requires repeating `ect import` with that source. `--max-jobs` bounds a content pass.
 Failed work is retried; successful invocations are reused. Registry, processor
 code, policy and effective settings changes never queue an automatic generation.
 `process --reprocess` or confirmed **File → Reprocess Saved Mail…** explicitly

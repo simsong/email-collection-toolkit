@@ -111,6 +111,9 @@ processing jobs and the current processor instead of a source percentage/ETA.
 IMAP accounts from local configuration without keyring or network access; missing
 or invalid configuration falls back to an unavailable-account label. Raw
 `source_roots` and saved history files retain their resumable locators.
+Expected configuration problems also populate typed history warnings and the
+Ingests warning banner. A per-window warning cache logs each changed condition
+once, without validator frames or configuration values; history remains read-only.
 
 `gui_processing.unfinished_work` groups typed unfinished run snapshots by source,
 stopping at a completion or explicit abort. Rootless processing does not hide
@@ -183,12 +186,14 @@ are written explicitly as UTF-8 and atomically replaced in the platform
 application-data directory; their randomly generated temporary filename has no
 user-derived component. They are treated as optional, discardable state.
 
-Version-three application preferences store `WorkerPreferences` (half/all/custom
+Version-four application preferences store a separate `imap_connections` budget
+(default 8, range 1–15) alongside `WorkerPreferences` (half/all/custom
 mode and remembered custom count). `worker_preferences.py` shares CPU detection,
 positive-integer validation, the twice-CPU cap and typed UI snapshots. The Cocoa
 Preferences window uses a radio matrix and numeric text field; Windows' Preferences
 HTML uses equivalent controls. The document controller atomically persists worker
-and update choices together. CLI overrides disable only worker controls and omit
+and update choices together, including the independent IMAP numeric control.
+CLI overrides disable only worker controls and omit
 worker changes when saving. New/continued GUI requests and CLI adapters resolve the
 current setting; IMAP root partition counts follow the resolved worker limit.
 Active pools keep their current size. `make test-worker-preferences` exercises
@@ -296,7 +301,7 @@ Before creating NSApplication, `configure_macos_application` registers the
 process-local `NSTreatUnknownArgumentsAsOpen` default with string value `NO`.
 This prevents Cocoa from reopening the source launcher and option values as
 documents; argparse and the Finder delegate retain their existing roles.
-`make self-test-gui` launches the actual `mailsearch-gui` entry point using the
+`make self-test-gui` launches the actual `ect gui` entry point using the
 same isolated diagnostics as the packaged app and rejects unexpected startup
 errors. The native application probe also checks startup notices and opens its
 fixture through the document-open delegate.
@@ -452,7 +457,7 @@ use pywebview's native JavaScript bridge; there is currently no HTTP API.
 
 The `gui/` interface uses pywebview's Cocoa/WKWebView backend on macOS.  Its
 Python API delegates query parsing, SQLite reads, and direct MBOX retrieval to
-the same typed functions used by `mailsearch`. A nonempty query directly asks
+the same typed functions used by `ect-search`. A nonempty query directly asks
 the shared catalog/FTS predicate for up to 2,000 ordered headers. This avoids
 placing an exact or threshold count on the interactive path; SQLite FTS5 has no
 reliable approximate cardinality for arbitrary combined full-text/filter
@@ -883,7 +888,7 @@ macOS packaging retains its frozen Python builder.
 `reader_fixture.py` constructs only a newly reserved synthetic fixture, without
 enabling the POSIX archive publisher on Windows. Make targets exercise shared
 search/render/export, byte preservation, native promise bridging, and relocated
-MSIX execution. [PYTHON_WEBVIEW.md](../PYTHON_WEBVIEW.md) tracks actual validation
+MSIX execution. [WINDOWS.md](../WINDOWS.md) tracks actual validation
 and outstanding native/signing gates; earlier Rust packaging evidence is not
 evidence for this Python payload.
 

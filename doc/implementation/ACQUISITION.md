@@ -12,6 +12,19 @@ checked at host boundaries; GUI/standalone CLI use the notifying `ChangeEvent`.
 Current implementation and validation boundaries. Deferred feature designs
 live in [plans](../plans/README.md); historical evidence does not validate this revision.
 
+## Public command-line entry points
+
+`cli.py` dispatches `ect` and the create/import/search executable names from one
+implementation. It passes argument lists directly to the existing engines;
+there is no Make or shell dependency. Local imports reuse `add_ingest_arguments`
+and the shared command error policy; IMAP imports reuse `synchronize` and its
+native credential store. Archive creation uses `create_empty_archive`, including
+optional owner rules saved under the creation lease. Local import requires an
+existing archive. Console metadata registers only the four ECT names.
+`make test-cli` exercises installed scripts, byte preservation, deduplication,
+search/display, verification and refusal to overwrite existing content; the IMAP
+suite exercises ECT against a disposable TLS server.
+
 ## Provider implementation boundaries
 
 `imap_credentials` uses the native vault directly for CLI and packaged apps.
@@ -305,7 +318,7 @@ Date sorting/repacking, integrated verification, richer
 text extraction, Eudora, working IMAP cache directories, direct Gmail API/OAuth,
 redaction, and research-oriented metadata remain planned work. The standalone
 password-based IMAP CLI is described below. The delivered
-`mailsearch` command reads both databases without writing:
+`ect-search` command reads both databases without writing:
 it applies `to:`/`from:`/`subject:` catalog filters, worldwide calendar-date
 `date:`/`before:`/`after:` filters, and ANDed FTS5 terms; it prints stable
 `message_pk` header lines and reads a numbered message directly from its
@@ -380,7 +393,9 @@ command is currently implemented.
 
 ## Standalone IMAP CLI
 
-`imap_cli` exposes `mailarchiver-imap` and `make imap IMAP_ARGS=...`. It reuses
+`cli.py` exposes `ect import --imap`; `imap_cli` owns account setup and
+synchronization. `make imap` invokes `ect imap` for the advanced combined setup
+flow. It reuses
 `create_empty_archive`, archive validation, the writer lease and `run_ingest`,
 with the shared worker preference and terminal scoreboard output disabled. A separate
 catalog reader prints committed totals on native archive/status change notifications and optional message lines.
@@ -388,6 +403,70 @@ The SIGINT handler acknowledges interruption immediately, requests cooperative
 cancellation and retains the lease until
 the ingest engine has stopped and checkpointed. No desktop window or OS scheduler
 is started. Setup is interactive; subsequent invocations can be unattended.
+
+Credential-only mode branches before archive opening, worker preferences and lease
+acquisition. It requires an existing `config.yaml`, reads native-vault credentials,
+and uses sequential `ImapSession(authentication_only=True)` sessions. These stop
+after LOGIN/SASL PLAIN, before post-login capability negotiation or mailbox access.
+`--set-password` requires an interactive terminal and exactly one selected account;
+the Ingests password form calls the same session mode and saves only after success.
+Login errors retain a control-free, bounded server reply after redacting password,
+escaped password and base64 credential forms. Temporary capacity/rate refusals in
+the greeting, login or initial CAPABILITY/ENABLE exchange raise `ImapServerBusy`; the
+source adapter closes the rejected session and retries with 1-to-60-second capped
+exponential backoff. Progress events show the reason and next delay; the plugin's
+framework cancellation Event wakes the wait for Suspend/Quit. The retry loop is
+limited to session initialization and cannot replay a downloaded body. Other
+refusals raise `ImapAuthenticationError`, recorded without traceback or unrelated
+message bytes. Credential-only checks retain one-attempt/exit-75 behavior.
+Initialization also replaces raw imaplib errors with sanitized exceptions of the
+same protocol category and suppresses private causes. Malformed parser aborts do
+not become capacity retries merely because their text includes capacity wording.
+Capacity classification uses original response text separately from bounded,
+redacted diagnostics, so a password matching a refusal word or code cannot erase
+retry evidence. The redactor covers raw, IMAP-escaped, Python bytes-repr and base64 credentials,
+including repr of the already IMAP-escaped wire value. The shared client command-
+completion boundary retains CAPABILITY/STARTTLS NO replies before imaplib can
+discard their reasons. A private protocol exception carries structured BYE
+evidence out of construction before the session can own the client. The constructor
+boundary retains actual BYE evidence; tagged setup refusals carry a separate marker.
+Invalid NO/BAD greetings therefore remain protocol errors, not capacity retries.
+The public ECT dispatcher prints complete sanitized authentication errors separately
+from its bounded generic status messages, preserving server reasons and repair guidance. Both TLS
+modes reuse stdlib handshakes; no duplicate commands or TLS bypass are introduced.
+Version-four application preferences store `imap_connections` separately from workers
+(default 8, strict whole-number range 1–15). CLI acquisition reads the current saved
+value; desktop starts and continuations supply their controller’s current value.
+The launch-only request value is excluded from saved archive requests so continuation
+reloads personal preferences. `PluginContext` carries the budget to the IMAP source’s
+instance capabilities; the concurrency-key scheduler applies it per account without
+reducing the configured processing worker pool. `make test-imap-auth`
+covers real TLS replies, automatic retry, cancellation, credential-only
+immutability, replacement safety, connection counts and the shipped browser form.
+Both desktop Ingests entry points expose the same explicit bridge methods used by
+the browser recovery test. The password dialog locks account/password controls,
+rejects duplicate submission and blocks native cancel/Escape while its Test and Save call is pending and restores ordinary cancellation afterward. Initial discovery rejection saves the accepted source
+request before pipeline creation, allowing password repair and Continue Import
+after application restart without losing the chosen import policy. Early backoff
+cancellation also persists the request before pipeline initialization. Backoff
+uses `await_activity` with cancellation futures and the existing native console
+notification, including discovery on the CLI main thread. `SyncReporter` reads
+current status phases and emits changed retry reasons/delays independently of
+unchanged download totals. Retry phases retain up to600 printable characters in
+status, while the terminal dashboard keeps its normal short labels. Ingests history treats unreadable account configuration
+as an unavailable account list while retaining saved status records.
+The shared `configuration_diagnostics.ConfigurationError` summarizes archive and
+installation schema, YAML and access problems without
+raw values or chained validator exceptions, with printable single-line messages
+and repair guidance naming the affected file. CLI entry points print the complete
+repair message and stop cleanly; expected configuration diagnostics omit traceback
+frames. Ingests exposes the warning visibly and logs it once per changed condition.
+`read_plugin_configuration` checks built-in setting schemas after merging layers and
+identifies the layer supplying an invalid value. Production startup checks all selected
+processor namespaces before processing, after any explicit replay invalidation so stale
+search results remain cleared on failed replay. Custom plugin/runtime defects retain diagnostics.
+`make test-config-diagnostics` exercises real malformed fixtures, public/module CLI
+paths, saved-history preservation and the shipped warning banner.
 
 Strict `ImapAccount` records live in `config.yaml.imap_sources`; nonempty lists
 select configuration version 3. Existing version-1/2 files remain readable. The
@@ -573,7 +652,7 @@ Native initialization has a 120-second deadline; production scans retain a
 reaped. Owned extraction/message temporaries are removed. Scan threads persist
 typed evidence directly, and processor invocation history retains it too.
 
-The h3 review prototype (see [CLI limitations](../CLI_REFERENCE.md#research-and-diagnostic-commands))
+The h3 review prototype (see [CLI limitations](../DEVELOPER_COMMANDS.md#research-and-diagnostic-commands))
 writes hash-verified ambiguous classes to a new private directory outside both
 source stores. Refresh validates manifest paths and hashes; it does not import
 or deduplicate. Its writable SQLite comparison index enables URI handling and

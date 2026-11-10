@@ -15,9 +15,10 @@ Fundamental dependents:
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
+from concurrent.futures import Future
 from hashlib import sha256
-from contextlib import closing
+from contextlib import ExitStack, closing
 from math import ceil
 from pathlib import Path
 import sqlite3
@@ -27,18 +28,37 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 from pydantic import BaseModel, Field
 
 from .archive_config import load_archive_config
+from .change_signal import ActivityCallback, ChangeEvent, await_activity
 from .imap_credentials import password_for
 from .imap_models import ImapAccount, ImapDownload, ImapMailbox, ImapMessageMetadata
-from .imap_protocol import ImapSession, UID_BATCH_SIZE
+from .imap_preferences import DEFAULT_IMAP_CONNECTIONS
+from .imap_protocol import ImapServerBusy, ImapSession, UID_BATCH_SIZE
 from .imap_state import known_observation
 from .plugin_api import (
     IntegrityDecision, IntegrityEvidence, MailContainer, MailObject, PluginCapabilities,
-    ProgressEvent, SkippedInput, SourceIntegrityControls, SourceObservation, SourcePlugin,
+    PluginContext, ProgressEvent, SkippedInput, SourceIntegrityControls, SourceObservation, SourcePlugin,
     SourceReference, SourceSpec,
 )
 from .sqlite_paths import sqlite_uri
 
 UID_SEARCH_WINDOW = 65536
+IMAP_RETRY_INITIAL = 1.0
+IMAP_RETRY_MAXIMUM = 60.0
+IMAP_BUSY_PHASE = "IMAP server busy;"
+
+
+def _backoff_cancelled(cancellation: ChangeEvent, delay: float) -> bool:
+    """Wake for native console signals as well as worker/GUI cancellation, without polling."""
+    result: Future[bool] = Future()
+
+    def check() -> None:
+        if cancellation.is_set() and not result.done():
+            result.set_result(True)
+
+    try:
+        return await_activity(result, ActivityCallback(check, (cancellation.changed,)), delay)
+    except TimeoutError:
+        return False
 
 
 def normalize_download(raw: bytes, metadata: ImapMessageMetadata) -> tuple[bytes, ImapMessageMetadata]:
@@ -92,18 +112,40 @@ class ImapIntegrityControls(SourceIntegrityControls):
 
 class ImapSourcePlugin(SourcePlugin):
     kind = "imap"
-    capabilities = PluginCapabilities(resumable=False, stable_inventory=False, network_access=True)
+    # Limit acquisition connections independently of the shared processing worker pool.
+    capabilities = PluginCapabilities(resumable=False, stable_inventory=False, network_access=True,
+                                      max_concurrency=DEFAULT_IMAP_CONNECTIONS)
     integrity_controls = ImapIntegrityControls()
 
-    def __init__(self, *, credentials: Callable[[ImapAccount], str] = password_for,
+    def __init__(self, services: PluginContext | None = None, *, credentials: Callable[[ImapAccount], str] = password_for,
                  context: ssl.SSLContext | None = None) -> None:
         self.credentials = credentials
         self.context = context
+        if services is not None:
+            self.capabilities = self.capabilities.model_copy(update={"max_concurrency": services.imap_connections})
+        self.cancellation = services.cancellation if services and services.cancellation is not None else ChangeEvent()
+
+    def _connect(self, account: ImapAccount, connections: ExitStack, work_id: str
+                 ) -> Generator[ProgressEvent, None, ImapSession | None]:
+        """Retry only unopened sessions; never replay a body or discard committed progress."""
+        delay = IMAP_RETRY_INITIAL
+        while not self.cancellation.is_set():
+            try:
+                return connections.enter_context(ImapSession(account, self.credentials(account), self.context))
+            except ImapServerBusy as error:
+                detail = error.detail
+            yield ProgressEvent(work_id=work_id,
+                                phase=f"{IMAP_BUSY_PHASE} retrying in {delay:g}s: {detail}")
+            # This user-requested retry deadline also wakes immediately for Suspend/Quit.
+            if _backoff_cancelled(self.cancellation, delay):
+                return None
+            delay = min(delay * 2, IMAP_RETRY_MAXIMUM)
+        return None
 
     def recognizes(self, source: SourceSpec) -> bool:
         return source.kind == "imap" or source.locator.startswith("imap://")
 
-    def discover(self, source: SourceSpec) -> Iterator[MailContainer | ProgressEvent | SkippedInput]:
+    def discover(self, source: SourceSpec) -> Generator[MailContainer | ProgressEvent | SkippedInput, None, None]:
         parsed = urlparse(source.locator)
         query = parse_qs(parsed.query, strict_parsing=True)
         archive_values = query.get("archive", [])
@@ -120,7 +162,10 @@ class ImapSourcePlugin(SourcePlugin):
         account = matches[0]
         if not account.enabled:
             return
-        with ImapSession(account, self.credentials(account), self.context) as session:
+        with ExitStack() as connections:
+            session = yield from self._connect(account, connections, account.id)
+            if session is None:
+                return
             for listed in session.mailboxes():
                 mailbox = session.select(listed)
                 # Escaped display components satisfy the provider-neutral hierarchy contract.
@@ -140,10 +185,13 @@ class ImapSourcePlugin(SourcePlugin):
                         concurrency_key=account.id, plugin_data_json=work.model_dump_json())
 
     def messages(self, container: MailContainer, resume_cursor: str | None
-                 ) -> Iterator[MailObject | SourceObservation | ProgressEvent]:
+                 ) -> Generator[MailObject | SourceObservation | ProgressEvent, None, None]:
         del resume_cursor
         work = ImapWork.model_validate_json(container.plugin_data_json)
-        with ImapSession(work.account, self.credentials(work.account), self.context) as session:
+        with ExitStack() as connections:
+            session = yield from self._connect(work.account, connections, container.work_id)
+            if session is None:
+                return
             selected = session.select(work.mailbox)
             if selected.uid_validity != work.mailbox.uid_validity or session.gmail != work.gmail:
                 raise RuntimeError("IMAP mailbox epoch or capabilities changed; retry synchronization")

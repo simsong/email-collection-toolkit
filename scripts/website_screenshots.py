@@ -184,6 +184,14 @@ def capture_site(browser_channel: str | None = None) -> None:
             page.goto(base + "advanced/")
             page.locator("#date-handling").scroll_into_view_if_needed()
             page.screenshot(path=str(previews / "advanced-dates.png"))
+            for name, suffix, heading in (
+                ("advanced-cli", "advanced/", "#command-line"),
+                ("importing-cli", "importing/", "#import-from-the-command-line"),
+                ("gmail", "gmail-authorization/", "h1"),
+            ):
+                page.goto(base + suffix)
+                page.locator(heading).scroll_into_view_if_needed()
+                page.screenshot(path=str(previews / f"{name}.png"))
         finally:
             browser.close()
 

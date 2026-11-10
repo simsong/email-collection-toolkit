@@ -49,14 +49,17 @@ from tabulate import tabulate
 
 from .scan_evidence import ScanEvidence, ScanFailure
 from .future_coordinator import BoundedWorkers, FutureCoordinator, WORKER_NUMBER
-from .application import configured_workers, validate_ingest_paths
+from .application import configured_imap_connections, configured_workers, validate_ingest_paths
+from .configuration_diagnostics import ConfigurationError
+from .imap_source import IMAP_BUSY_PHASE
+from .imap_preferences import ImapConnectionLimit
 from .worker_preferences import half_cpus, worker_argument
 from .archive_integrity import ArchiveIntegrityWarning, MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
 from .contacts import contacts, load_owner_addresses, print_contacts
 from .document_options import DocumentOptions, read_owner_names
 from .ingest_diagnostics import add_message_context, format_failure, format_source_identity
-from .imap_protocol import ImapPaused
+from .imap_protocol import ImapAuthenticationError, ImapPaused
 from .owner_rules import OwnerRules
 from .catalog import (
     PROCESSING_DATABASE,
@@ -195,6 +198,7 @@ class IngestRequest(BaseModel):
     roots: list[str] = Field(default_factory=list)
     earliest_year: int = Field(default=1900, ge=1)
     workers: int = Field(default_factory=half_cpus, ge=1)
+    imap_connections: ImapConnectionLimit | None = Field(default=None, exclude=True)
     plugin_dir: list[Path] = Field(default_factory=list)
     index_attachments: bool = False
     scan_policy: Literal["clamav", "not-scanned"] = "clamav"
@@ -469,10 +473,10 @@ def formatted_duration(seconds: float) -> str:
     return " ".join(fields)
 
 
-def safe_status_text(value: str) -> str:
+def safe_status_text(value: str, *, limit: int = 80) -> str:
     """Collapse untrusted plug-in status text to one bounded printable line."""
     printable = "".join(character if character.isprintable() else " " for character in value)
-    return " ".join(printable.split())[:80] or "working"
+    return " ".join(printable.split())[:limit] or "working"
 
 
 def overall_progress(state: ProgressState, now: float) -> OverallProgress:
@@ -634,7 +638,7 @@ class ProgressReporter:
 
     def record_plugin_event(self, event: ProgressEvent, path: Path | str, *, source_kind: str | None = None) -> None:
         """Render a typed plug-in event without letting plug-ins print directly."""
-        phase = safe_status_text(event.phase)
+        phase = safe_status_text(event.phase, limit=600 if event.phase.startswith(IMAP_BUSY_PHASE) else 80)
         if event.unit == "bytes" and event.completed is not None and event.total is not None:
             self._send(phase, path, event.completed, event.total, operation="downloading" if source_kind == "imap" else "importing")
             return
@@ -972,7 +976,7 @@ class ProgressReporter:
             top_line = self._fit(overall_line(self.state, now), self.terminal_columns).ljust(self.terminal_columns)
             lines = [
                 f"{TOP_LINE_STYLE}{top_line}{ANSI_RESET}",
-                f"mailarchiver ingest  [{display_label}]",
+                f"mailarchiver ingest  [{safe_status_text(display_label)}]",
                 (f"Processed: {state.processed:,} messages in {state.files_processed:,} files  "
                 f"Rate: {state.processed / elapsed:.2f} messages/s  Elapsed: {elapsed:.0f}s"),
                 f"Workers:   {active:,} active; peak {state.peak_active_files:,}; {len(state.workers):,} configured",
@@ -1380,7 +1384,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         if stop_event.is_set():
             stop.set()
     plugins = load_plugins(request.plugin_dir, archive=request.archive, installation_config=request.installation_config,
-                           scan_policy=request.scan_policy, cancellation=stop)
+                           scan_policy=request.scan_policy, cancellation=stop,
+                           imap_connections=request.imap_connections if request.imap_connections is not None
+                           else configured_imap_connections())
     source_specs = [SourceSpec(locator=str(Path(root).resolve())
                               if "://" not in root and Path(root).exists() else root) for root in request.roots]
     selected_sources: list[tuple[SourceSpec, LoadedPlugin]] = []
@@ -2171,7 +2177,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     if report_skipped:
                         progress.record_skipped_file(item.source.display_name, item.detail)
                 elif isinstance(item, ProgressEvent):
-                    progress.display(safe_status_text(item.phase))
+                    progress.display(safe_status_text(item.phase, limit=600 if item.phase.startswith(IMAP_BUSY_PHASE) else 80))
                 else:
                     raise TypeError(
                         f"source plug-in {plugin.manifest.kind} yielded unsupported {type(item).__name__}"
@@ -2245,6 +2251,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                                       (pipeline.policy.model_dump_json(exclude={"scanner_configuration"}),))
         if request.reprocess:
             pipeline.reprocess()
+        pipeline.validate_configuration()
         def process_content(_unused: int, *, fail_on_error: bool = True) -> None:
             assert pipeline is not None
             try:
@@ -2303,12 +2310,25 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         progress.announce_interrupt()
         interrupted = True
         failure_detail = type(error).__name__
+        if pipeline is None:
+            with closing(processing_connection(archive, create=not (archive / PROCESSING_DATABASE).exists(),
+                                               production=True)) as database, database:
+                save_processing_request(database, saved_request)
         catalog.commit()
         search.commit()
         raise
     except DiskFullError as error:
         disk_full = True
         failure_detail = format_failure(error)
+        catalog.rollback()
+        search.rollback()
+        raise
+    except ImapAuthenticationError as error:
+        failure_detail = str(error)
+        if pipeline is None:
+            with closing(processing_connection(archive, create=not (archive / PROCESSING_DATABASE).exists(),
+                                               production=True)) as database, database:
+                save_processing_request(database, saved_request)
         catalog.rollback()
         search.rollback()
         raise
@@ -2648,33 +2668,39 @@ def refresh_index(args: argparse.Namespace) -> None:
     rebuild_search_index(Path(args.archive), args.index_attachments, configured_workers(args.workers))
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    add_archive_argument(parser, "canonical archive directory")
-    commands = parser.add_subparsers(dest="command", required=True)
-    ingest_parser = commands.add_parser("ingest")
-    ingest_parser.add_argument("--owner-names-file", help="Legacy include-rule file; otherwise use archive config.yaml")
-    ingest_parser.add_argument(
+def add_ingest_arguments(parser: argparse.ArgumentParser, *, require_scan: bool = True,
+                         require_roots: bool = True) -> None:
+    """Share local import options between the public CLI and the archive engine."""
+    parser.add_argument("--owner-names-file", help="Legacy include-rule file; otherwise use archive config.yaml")
+    parser.add_argument(
         "--earliest-year",
         type=positive_integer,
         default=1900,
         help="reject earlier message dates and use normal fallbacks (default: 1900)",
     )
-    scanning = ingest_parser.add_mutually_exclusive_group(required=True)
+    scanning = parser.add_mutually_exclusive_group(required=require_scan)
     scanning.add_argument("--clamav", action="store_true", help="scan new messages with on-demand ClamAV")
     scanning.add_argument("--no-scan", action="store_true", help="explicitly import without antivirus; record messages as not scanned")
-    ingest_parser.add_argument("--workers", type=worker_argument, help="override worker preferences (default: half CPUs; maximum: twice CPUs)")
-    ingest_parser.add_argument(
+    parser.add_argument("--workers", type=worker_argument, help="override worker preferences (default: half CPUs; maximum: twice CPUs)")
+    parser.add_argument(
         "--plugin-dir",
         action="append",
         type=Path,
         default=[],
         help="trusted plug-in root to load (repeatable; Python code in this directory will execute)",
     )
-    ingest_parser.add_argument("--index-attachments", action="store_true", help="index text attachments; non-text attachments require the planned Tika extractor")
-    ingest_parser.add_argument("--defer-content", action="store_true", help="file messages and extract headers; leave content jobs pending")
-    ingest_parser.add_argument("--installation-config", type=Path, help="installation plugin settings override")
-    ingest_parser.add_argument("roots", nargs="+", metavar="ROOT")
+    parser.add_argument("--index-attachments", action="store_true", help="index text attachments; non-text attachments require the planned Tika extractor")
+    parser.add_argument("--defer-content", action="store_true", help="file messages and extract headers; leave content jobs pending")
+    parser.add_argument("--installation-config", type=Path, help="installation plugin settings override")
+    parser.add_argument("roots", nargs="+" if require_roots else "*", metavar="SOURCE")
+
+
+def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=prog)
+    add_archive_argument(parser, "canonical archive directory")
+    commands = parser.add_subparsers(dest="command", required=True)
+    ingest_parser = commands.add_parser("ingest")
+    add_ingest_arguments(ingest_parser)
     ingest_parser.set_defaults(function=ingest)
     processing = commands.add_parser("process", help="resume saved processing jobs without rereading source mailboxes")
     processing.add_argument("--phase", choices=("ingest", "content", "all"), default="content")
@@ -2720,7 +2746,19 @@ def main() -> int:
         help="verified-message workers; override preferences (default: half CPUs; maximum: twice CPUs)",
     )
     refresh_parser.set_defaults(function=refresh_index)
-    args = parser.parse_args()
+    for child in commands.choices.values():
+        child.add_argument("--archive", type=Path, default=argparse.SUPPRESS,
+                           help="archive directory; defaults to $MAIL_ARCHIVE_DIR")
+    return parser
+
+
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    parser = build_parser(prog)
+    return execute(parser.parse_args(argv), parser)
+
+
+def execute(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Run a parsed archive command with the shared error and interruption policy."""
     args.archive = require_archive(parser, args.archive)
     try:
         args.function(args)
@@ -2737,6 +2775,12 @@ def main() -> int:
     except ImapPaused as error:
         print(f"paused: {error}", file=sys.stderr, flush=True)
         return 75
+    except ImapAuthenticationError as error:
+        print(str(error), file=sys.stderr, flush=True)
+        return 1
+    except ConfigurationError as error:
+        print(str(error), file=sys.stderr, flush=True)
+        return 1
     except KeyboardInterrupt:
         print("interrupted: archive state committed through the last completed message", file=sys.stderr, flush=True)
         print_report(Path(args.archive), None, DEFAULT_REPORT_TOP)

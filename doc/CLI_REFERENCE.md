@@ -1,576 +1,258 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# CLI reference
+# Command-line guide
 
-This is the command reference for the current checkout. Run commands from the
-repository root with locked dependencies (`uv sync --locked`). Installed packages
-provide the same console names without `uv run --locked`. Development and test
-workflows use Makefile targets; tests may keep their recipes in testing guides.
-PST/OST stream examples also remain in [PST_IMPORTER.md](PST_IMPORTER.md).
+Use `ect` to create, import, search and maintain an email archive. The three
+shortcuts `ect-create`, `ect-import` and `ect-search` run the same operations as
+`ect create`, `ect import` and `ect search`. The old `mailarchiver` and
+`mailsearch` executable names have been removed.
 
-`ARCHIVE` below means a full archive directory, normally ending in `.mailarchive`.
-Local ingest/search accept `--archive` or `MAIL_ARCHIVE_DIR`; the explicit option
-wins. IMAP requires its own explicit `--new` or `--archive`.
-Do not put passwords in arguments, environment variables or shell history.
+## Install
 
-## Quick examples
-
-Packaged ECT provides a headless definition downloader before normal GUI startup:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then install
+the CLI from the project repository:
 
 ```sh
-"/Applications/Email Collection Toolkit.app/Contents/MacOS/Email Collection Toolkit" --update-virus-definitions --directory /new/build/definitions
+uv tool install 'git+https://github.com/simsong/email-collection-toolkit.git'
+ect --version
 ```
 
-The Windows package uses its private `python.exe -I -m mailarchiver.desktop_entry`
-with the same arguments. `--directory` is required and must not already exist.
-Success prints typed JSON with versions, publication date and output directory;
-failure exits nonzero without publishing partial definitions. Downloads retain
-cooldown state in a sibling `.DIRECTORY.clamav-update` directory and validate
-signatures and real clean/EICAR scans before publication. No user update generation
-is selected or replaced. `--state-directory PATH` instead retains cooldown state
-outside disposable build workspaces; it must not overlap the output directory.
-Final publication atomically refuses a destination created during the download.
-Development invokes this entry through
-`make download-definitions DEFINITIONS_DIRECTORY=/new/build/definitions`.
+From a source checkout, use `uv sync --locked` once and prefix commands with
+`uv run --locked`, for example `uv run --locked ect-create collection.mailarchive`.
+All examples below use the installed commands directly. No Make installation is
+needed to run them. Build and test commands are in [Developer commands](DEVELOPER_COMMANDS.md).
+
+Python 3.12 or newer is required; uv can provide it. Antivirus scanning also
+needs a native `libclamav` runtime, its one-shot updater and verified definitions;
+the CLI package does not bundle these native components. Desktop installers
+include them. See [antivirus setup](EMBEDDED_CLAMAV.md#definitions-and-platform-paths).
+PST/OST import additionally needs the [importer helpers](PST_IMPORTER.md).
+
+## Create an archive
 
 ```sh
-# Configure a new IMAP archive, synchronize once, then exit.
-make imap IMAP_ARGS='--new /path/to/archive.mailarchive'
-# Resume saved accounts and print each completed download.
-make imap IMAP_ARGS='--archive /path/to/archive.mailarchive --show-messages'
-# List every normal, searchable message; omit --limit for ten results.
-make search ARGS='--archive /path/to/archive.mailarchive --limit 0'
-# Search and then read a result by stable message number.
-make search ARGS='--archive /path/to/archive.mailarchive to:alice@example.org budget'
-make search ARGS='--archive /path/to/archive.mailarchive 42'
-# Import local sources; owner-names.txt contains owner include rules.
-make run ARGS='--archive /path/to/archive.mailarchive ingest --owner-names-file owner-names.txt --clamav /path/to/source'
-make verify ARCHIVE=/path/to/archive.mailarchive
+ect-create collection.mailarchive --owner sam@example.org
 ```
 
-Ingest mutates only the destination archive. Keep sources unchanged and use a
-new/disposable destination for experiments. Verification/search are read-only;
-run integrity checks with writers stopped. Back up the whole archive, including
-configuration, operational history and manual decisions in databases.
+Repeat `--owner` for additional owner email addresses or include rules. These
+rules distinguish Sent mail from received mail. An empty/new destination is
+required; existing archives and nonempty directories are never overwritten.
+Omit `--owner` to configure rules later through the desktop or IMAP setup.
+Creation does not download or import mail.
 
-## Local archive commands
+## Ingest
 
-The root command is `mailarchiver --archive ARCHIVE COMMAND [OPTIONS]`. Its
-Makefile wrapper is `make run ARGS='--archive ARCHIVE COMMAND ...'`. Put the
-archive option before the subcommand. Every parser supports `-h` / `--help`.
+Import a directory or one or more supported files:
 
-| Command | Purpose |
+```sh
+ect-import --archive collection.mailarchive /path/to/exported-mail
+ect import --archive collection.mailarchive /path/to/first.mbox /path/to/second.mbox
+```
+
+The destination must already exist. Sources are read without modification;
+subdirectories are searched for supported mail files. Exact duplicate messages
+are not stored twice. Repeat the command to resume an interrupted import.
+Back up the whole archive, including databases and configuration.
+
+Antivirus scanning is on by default. `--no-scan` explicitly records unscanned
+mail; positive detections are retained in the archive's INFECTED MBOX files.
+Scanner failures are recorded and messages retained.
+
+| Option | Purpose |
 | --- | --- |
-| `ingest ROOT [ROOT ...]` | Discover supported sources, preserve messages, scan and index |
-| `review [--run ID]` | Show source observations and dispositions |
-| `report [--year YEAR_OR_RANGE] [--top N]` | Catalog counts and top correspondents (default top 10); `--top 0` suppresses lists |
-| `refresh-index [--index-attachments] [--workers N]` | Verify canonical messages and atomically replace the search index |
-| `processors [--plugin-dir DIR ...]` | List registered production processors |
-| `processing-status` | Show persisted jobs and invocation statistics |
-| `process [--phase ingest|content|all] [--max-jobs N] [--workers N] [--reprocess]` | Resume saved work; `--reprocess` requests a fresh generation |
-| `identities ACTION [OPTIONS]` | Read identity evidence or commit a manual decision |
-| `human-contacts [OPTIONS]` | Read likely human direct correspondents |
-
-### Ingest
-
-Choose exactly one of `--clamav` and `--no-scan`. The first uses embedded
-libclamav in a run-owned worker; the latter explicitly records unscanned mail.
-There is no resident daemon. Positive detections are retained in numbered
-`INFECTED` MBOX parts. Errors retain evidence rather than silently dropping mail.
-
-| Option | Meaning |
-| --- | --- |
-| `--owner-names-file FILE` | Legacy owner include rules; otherwise use archive `config.yaml` |
-| `--earliest-year N` | First plausible routing year; default 1900 |
-| `--workers N` | Override saved worker preferences; default half the logical CPUs, maximum twice that count |
-| `--index-attachments` | Index supported text attachments; does not add PDF/Office extraction |
-| `--defer-content` | File messages now, leave content processing pending |
-| `--plugin-dir DIR` | Repeatable trusted Python plugin root; code executes locally |
-| `--installation-config FILE` | Installation plugin settings override |
-
-Ctrl-C requests checkpointing and exits 130. Repeat ingest with the same source
-to resume traversal; `process` alone cannot discover unread source messages.
-`process` also accepts repeatable `--plugin-dir` and `--installation-config`.
-It uses the current application worker preference unless `--workers N` overrides it.
-Content-only processing defaults to phase `content`; already successful work is
-reused. `refresh-index` uses the same worker preference and leaves the old
-index intact if interrupted before publication.
-
-### Identities and Contacts
-
-Identity actions are `addresses`, `organizations`, `rename-person`, `merge-person`,
-`rename-organization` and `affiliate`. Filters/options are `--name`, `--mailbox`,
-`--domain`, inclusive `--start` / `--end` (`YYYY-MM-DD`), and positive numeric
-`--subject` / `--target` entity IDs. Rename/merge/affiliation actions write durable
-manual decisions under the writer lease; read actions return JSON.
-
-Contacts options: `--owner-address-file FILE`, repeatable `--owner-address ADDRESS`,
-`--all`, and `--format table|tsv|json` (default table). The default selects direct
-correspondents using exact owner addresses resolved from Sent mail. `--all`
-includes all human header addresses, still applying the versioned contact policy.
-Policy configuration is documented in [USER_MANUAL.md](USER_MANUAL.md#contact-filter-policy).
+| `--workers N` | Override the saved worker limit; maximum twice the logical CPU count |
+| `--owner-names-file FILE` | Read owner include rules from a legacy text file |
+| `--index-attachments` | Include supported text attachments in search; PDF/Office extraction is not connected |
+| `--defer-content` | Preserve messages now and process their content later |
+| `--earliest-year YEAR` | Earliest plausible message date, default 1900 |
+| `--plugin-dir DIR` | Load trusted local plugin code; repeatable |
+| `--installation-config FILE` | Select installation plugin settings |
 
 ## IMAP downloads
 
-Wrapper: `make imap IMAP_ARGS='OPTIONS'`; entry point: `mailarchiver-imap`.
+Check the saved password without opening mailboxes, downloading mail or writing
+the archive. Optionally select a saved source ID:
 
-```text
-usage: imap_cli.py [-h] (--new ARCHIVE | --archive ARCHIVE) [--source SOURCE]
-                   [--configure | --add-source] [--workers WORKERS]
-                   [--show-messages] [--no-scan]
-
-Configure and synchronize read-only IMAP sources from a terminal.
-
-options:
-  -h, --help         show this help message and exit
-  --new ARCHIVE      create an empty new archive; never overwrite
-  --archive ARCHIVE  synchronize an existing archive
-  --source SOURCE    synchronize only this saved source ID
-  --configure        prompt for settings and update saved credentials
-  --add-source       prompt for another account
-  --workers WORKERS  override worker preferences (default: half CPUs; maximum: twice CPUs)
-  --show-messages    print each completed message download and disposition
-  --no-scan          explicitly import without antivirus; retain not-scanned
-                     evidence
+```sh
+ect imap --archive collection.mailarchive --check-credentials
+ect imap --archive collection.mailarchive --source SOURCE_ID --check-credentials
+# Test a hidden replacement, saving only after successful login; no import.
+ect imap --archive collection.mailarchive --source SOURCE_ID --set-password
 ```
 
-Initial setup prompts for server, port, verified TLS mode, username and hidden
-password/app password. Only native macOS Keychain or Windows Credential Manager
-stores the secret. Nonsecret accounts live in `config.yaml`; `--source ID`
-selects one saved account. `--configure` updates it; `--add-source` adds another.
-Do not combine `--source` with `--new` or `--add-source`.
+Checks need only the archive's existing `config.yaml` and may run while an import
+holds the writer lease. `--set-password` needs an interactive terminal and exactly
+one selected account. Ingests offers **Update IMAP Password…** while no import is
+active. Rejected replacements retain the old password; saving never starts an
+import. Errors include a sanitized server reason; credential-only checks return 75 for
+temporary connection/rate limits. Imports stay running and retry after 1, 2, 4,
+8 seconds, up to 60 seconds between attempts, until accepted or cancelled. Downloads
+use the saved IMAP connection preference (default 8, range 1–15) per account;
+the full processing worker pool is retained. Set it in **Preferences → Maximum
+IMAP connections per account**; `--workers` controls processing independently.
 
-One invocation scans once and exits; there is no scheduler or background agent.
-The saved worker preference defaults to half the logical CPUs (at least one).
-Explicit `--workers` values must be positive whole numbers and cannot exceed twice
-the logical CPU count; unavailable CPU detection counts as one. Status prints at startup, on committed progress changes and
-on exit; `--show-messages` adds disposition and subject for each download.
-Ctrl-C checkpoints and exits 130; a blocked network operation has a 30-second
-socket timeout. Rerunning resumes committed progress.
-Timeouts and lost connections record a paused run and exit 75 with saved progress;
-rerun the command when connected, or choose **Resume** in the desktop Ingests window.
+```sh
+ect-import --archive collection.mailarchive --imap
+```
 
-Generic IMAP includes selectable mailboxes except names containing `spam`,
-case-insensitively. Gmail fetches bodies only from special-use All Mail and uses
-`X-GM-MSGID` for account-scoped identity and `X-GM-LABELS` for membership/hierarchy.
-Spam/Trash-only messages are outside this mode. OAuth is not implemented.
+The first run prompts for server, port, TLS mode, username and a hidden password
+or app password. Nonsecret settings are saved in the archive; the password goes
+in macOS Keychain or Windows Credential Manager. Do not put passwords in command
+arguments, environment variables or configuration files. Initial setup needs an
+interactive terminal and a supported native credential store.
 
-The main counter includes newly archived messages only; duplicate downloads,
-exclusions and errors have separate UTC hourly totals. Metadata refreshes do not
-count as downloads. Full MIME and attachments enter the ingest pipeline, with
-attachment indexing enabled and existing text-extraction limits. UID checkpoints
-prevent repeat transfers; changed generic UID epochs may require a refetch that
-canonical content deduplication then recognizes.
+Subsequent runs download from saved accounts and exit:
+
+```sh
+ect import --archive collection.mailarchive --imap --show-messages
+ect import --archive collection.mailarchive --imap --source SOURCE_ID
+ect import --archive collection.mailarchive --imap --add-source
+ect import --archive collection.mailarchive --imap --source SOURCE_ID --configure
+```
+
+`SOURCE_ID` is the ID printed during setup and saved in `config.yaml`.
+`--configure` updates a saved account; `--add-source` prompts for another one.
+`--workers N` and `--no-scan` also apply. Local paths and local-only import
+options cannot be combined with `--imap`.
+
+Acquisition uses read-only IMAP operations and does not mark messages read.
+Gmail downloads All Mail and records Gmail labels; Spam/Trash-only messages are
+outside this coverage. Other servers exclude mailbox names containing `spam`.
+OAuth is not implemented. See [Gmail](GMAIL.md) and [Microsoft 365](M365.md).
+
+Ctrl-C saves completed progress and exits 130. A connection timeout or disconnect
+pauses acquisition and exits 75; rerun when connected. There is no background
+scheduler. IMAP converts CRLF to LF before archiving and records the original
+wire hash/size; local-file imports retain their original message bytes.
 
 ## Search and message display
 
-Search ignores case and accents and treats `ß`/`ẞ` as `ss`, without stemming.
-Existing indexes need no rebuild. Quoted symbols remain significant: `"CACM-"`
-requires the hyphen and `"Ham+Sandwhich"` requires the plus. Word boundaries apply.
-Use `mailsearch --query '"Ham+Sandwhich"'` to preserve quoted search-box syntax
-through the shell.
-
-Wrapper: `make search ARGS='OPTIONS SEARCH ...'`; entry point: `mailsearch`.
-With no search terms it lists normal indexed messages. Infected/excluded records
-are outside ordinary search; use `review` for source dispositions.
-
-```text
-usage: mailsearch [-h] [--archive ARCHIVE] [--limit LIMIT] [--headers]
-                  [--html | --mime]
-                  [SEARCH ...]
-
-Read-only search of a mailarchiver archive.
-
-positional arguments:
-  SEARCH
-
-options:
-  -h, --help         show this help message and exit
-  --archive ARCHIVE  directory containing archive.sqlite3 and search.sqlite3;
-                     defaults to $MAIL_ARCHIVE_DIR
-  --limit LIMIT      maximum matches to print; 0 prints all (default: 10)
-  --headers          with a message number, show all headers
-  --html             with a message number, print decoded text/html parts
-  --mime             with a message number, print the full RFC 5322/MIME
-                     source
-
-Ordinary words search indexed headers and message text. Every term is ANDed.
-
-Search selectors:
-  any:ADDRESS           sender or To, Cc, or Bcc recipient address
-  from:ADDRESS          sender address
-  to:ADDRESS            To recipient address
-  cc:ADDRESS            Cc recipient address
-  bcc:ADDRESS           Bcc recipient address
-  subject:TEXT          subject text
-  date:YYYY-MM-DD       messages during that worldwide calendar date
-  before:YYYY-MM-DD     messages before that date begins anywhere
-  after:YYYY-MM-DD      messages after that date ends everywhere
-
-A sole message number prints selected headers and the preferred text part. Use
---headers, --html, or --mime for alternate views.
-
-Examples:
-  mailsearch to:alice@example.com budget
-  mailsearch --limit 0 after:2024-01-01
-  mailsearch --archive OTHER_ARCHIVE 42
+```sh
+ect-search --archive collection.mailarchive budget
+ect-search --archive collection.mailarchive to:alice@example.org budget
+ect-search --archive collection.mailarchive --query 'subject:"annual report" after:2024-01-01'
+ect-search --archive collection.mailarchive --limit 0
 ```
 
-The displayed number identifies a message: supplying it alone reads that
-message. `--headers` adds all headers, `--html` prints decoded HTML and `--mime`
-prints complete MIME source. `--limit 0` removes the result limit.
-The GUI search guide in [USER_MANUAL.md](USER_MANUAL.md#search-with-the-graphical-interface)
-explains shared selectors and date interpretation. The selector inventory above
-matches the current parser.
+The default limit is ten; `--limit 0` lists all matches. With no search terms,
+the command lists normal indexed messages. Infected/excluded messages are outside
+ordinary search. Search is read-only, ignores case and accents, and ANDs terms.
+Quoted punctuation remains significant; `--query` preserves search-box syntax.
 
-## Desktop
+| Selector | Meaning |
+| --- | --- |
+| `any:ADDRESS` | Sender or any recipient |
+| `from:ADDRESS` | Sender |
+| `to:ADDRESS`, `cc:ADDRESS`, `bcc:ADDRESS` | Recipient in the named header |
+| `subject:TEXT` | Subject text |
+| `date:YYYY-MM-DD` | That date anywhere in the world |
+| `before:YYYY-MM-DD` | Before that date begins anywhere |
+| `after:YYYY-MM-DD` | After that date ends everywhere |
 
-Use `make gui ARGS='--archive ARCHIVE'` or `mailsearch-gui`. Without a path the
-application uses its recent/open/new startup flow. `--new` requests new setup.
-The parser also has `--smoke-report PATH` and `--smoke-html-find` for native test
-drivers; use the dedicated testing targets rather than personal mail.
+Read a result using its stable message number:
 
-### Packaged macOS executable
+```sh
+ect-search --archive collection.mailarchive 42
+ect-search --archive collection.mailarchive --headers 42
+ect-search --archive collection.mailarchive --mime 42
+```
 
-The bundled executable accepts `--self-test`, `--self-test-gui` and
-`--cli` (dispatch the remaining arguments to `mailarchiver`). Ordinary launches
-start the desktop. These are package diagnostics, not extra local ingest modes.
+`--headers` shows all headers, `--html` prints decoded HTML, and `--mime` prints
+the complete stored RFC 5322/MIME source. See the [search guide](USER_MANUAL.md#search-with-the-graphical-interface)
+for shared query and date behavior.
 
 ## Verification
 
-`make verify ARCHIVE=ARCHIVE` runs `verify-mail-archive ARCHIVE` (also copied
-into an archive as `verify_mail_archive.py`). `-q` / `--quiet` suppresses progress
-and success output but retains errors. Supply the path explicitly: the portable
-script's default is its containing directory, not the shell's current directory.
-It checks BagIt/Mailbag files, manifests and message integrity without source mail
-or a database rebuild. Ctrl-C exits 130. See [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md).
+```sh
+ect verify collection.mailarchive
+```
 
-The separate Rust `archive-verifier` checks catalog/MBOX/search consistency;
-it is not a replacement for complete portable BagIt verification.
+Stop archive writers first. Verification reads the archive without modifying it
+and checks BagIt/Mailbag metadata, checksum manifests and message integrity.
+Failures exit nonzero; `--quiet` suppresses normal progress. It does not repair
+mail or require source accounts. The archive-local portable equivalent is:
+
+```sh
+python3 collection.mailarchive/verify_mail_archive.py collection.mailarchive
+```
+
+The portable script is installed/refreshed during import. See [integrity controls](INTEGRITY_CONTROLS.md).
+
+## Local archive commands
+
+Use `ect COMMAND --archive ARCHIVE [OPTIONS]`. For import, search and these
+commands, `MAIL_ARCHIVE_DIR` can supply the archive; explicit `--archive` wins.
+
+```sh
+ect report --archive collection.mailarchive --year 2024 --top 10
+ect review --archive collection.mailarchive
+ect processors --archive collection.mailarchive
+ect processing-status --archive collection.mailarchive
+ect process --archive collection.mailarchive --phase content
+ect refresh-index --archive collection.mailarchive
+```
+
+`process` resumes saved work. `--phase` is `ingest`, `content` (default), or `all`;
+`--max-jobs N` bounds a run; `--reprocess` explicitly queues a fresh generation.
+`refresh-index` verifies stored messages and replaces only the rebuildable search
+index. Both accept `--workers N`; `refresh-index --index-attachments` includes
+supported text attachments. Source acquisition requires `ect import`.
+
+## Identities and Contacts
+
+```sh
+ect identities --archive collection.mailarchive addresses
+ect identities --archive collection.mailarchive organizations
+ect human-contacts --archive collection.mailarchive --format tsv
+```
+
+`ect identities --help` lists filters and the manual rename, merge and affiliation
+actions. Those actions write durable decisions. `human-contacts` reads likely
+direct correspondents; `--all` includes all human header addresses. See
+[Contacts policy](USER_MANUAL.md#contact-filter-policy).
+
+## Desktop
+
+```sh
+ect gui --archive collection.mailarchive
+```
+
+Without a path, the desktop offers its recent/open/new flow. `--new` starts new
+setup; `--workers N` overrides the worker preference for that launch. Native
+runtime and GUI assets are provided by the desktop installers or source checkout.
 
 ## Apple Mail comparison
 
-Wrapper: `make compare-apple-mail ARGS='OPTIONS'`; entry point:
-`mailarchiver-compare-apple-mail`. Reads cache and archive without importing.
-
-```text
-usage: apple_mail_compare.py [-h] [--apple-mail APPLE_MAIL]
-                             [--archive ARCHIVE]
-                             [--progress-every PROGRESS_EVERY] [--json]
-
-Compare complete Apple Mail EMLX records with an Email Collection Toolkit
-archive read-only.
-
-options:
-  -h, --help            show this help message and exit
-  --apple-mail APPLE_MAIL
-  --archive ARCHIVE
-  --progress-every PROGRESS_EVERY
-  --json
+```sh
+ect compare-apple-mail --apple-mail /path/to/Mail --archive collection.mailarchive
 ```
 
-A local cache cannot prove server completeness. Keep the cache intact; see
-[APPLE_MAIL_CACHE.md](APPLE_MAIL_CACHE.md) for interpretation and source-safety
-preflight.
+Read-only comparison reports exact, semantic-only and unmatched messages.
+A local cache cannot prove server completeness; see [cache limits](APPLE_MAIL_CACHE.md).
 
 ## Printed-email PDF extraction
 
-Wrapper: `make extract-pdf-mail ARGS='PDF --output NEW.mboxrd'`; entry point:
-`extract-pdf-mail`.
-
-```text
-usage: pdf_mail.py [-h] --output OUTPUT [--handwritten-page HANDWRITTEN_PAGE]
-                   pdf
-
-extract printed email from a standalone PDF into derived MBOX
-
-positional arguments:
-  pdf
-
-options:
-  -h, --help            show this help message and exit
-  --output OUTPUT       new .mboxrd output file
-  --handwritten-page HANDWRITTEN_PAGE
-                        source page containing useful handwritten annotations;
-                        repeatable
+```sh
+ect extract-pdf-mail printed-mail.pdf --output recovered.mboxrd
 ```
 
 Requires Poppler `pdftotext`. The output must be new and outside the source.
-Repeated `--handwritten-page N` records useful annotation pages. Extraction
-creates a derivative; it does not ingest it or modify the PDF. See
-[PDF/OCR plan](plans/PDF_OCR.md) for remaining OCR requirements.
+`--handwritten-page N` records useful annotation pages and can be repeated.
+This creates a derivative; it does not alter the PDF or import the result.
 
-## Local summaries
+## Other commands
 
-`summarize` reads text from standard input and sends it to the local Apple
-Foundation Models helper. It takes no CLI options or archive path. The first
-run compiles a content-addressed Swift helper in the user's cache; it requires
-the Apple SDK/runtime and model availability. It is not a Windows feature.
-`make summary-smoke` is the synthetic developer exercise.
+Use `ect COMMAND --help` for each command's actual options.
 
-## Validation corpus CLI
-
-`mailarchiver-validation` is wrapped by the Makefile targets below.
-Global options: `--config-dir DIR`, `--data-dir DIR`, `--owner-names-file FILE`.
-Commands: `list`; `fetch DATASET`; `prepare DATASET`; `run DATASET`; `run-all`;
-`aws-start DATASET --stack STACK`; `aws-start-all --stack STACK`. Downloads and
-AWS runs are explicit operations; `list` does not start either. AWS commands
-require separately provisioned credentials, stack and authorization. See
-[REGRESSION.md](REGRESSION.md) for retention and comparison policy.
-
-| Make target | Parameters / purpose |
+| Command | Purpose |
 | --- | --- |
-| `validation-list` | List configured datasets |
-| `validation-fetch` | `DATASET=NAME`: acquire input |
-| `validation-prepare` | `DATASET=NAME`: prepare extracted input |
-| `validation-run` | `DATASET=NAME`: run one corpus |
-| `validation-run-all` | Run all configured local corpora |
-| `validation-aws-start` | `DATASET=NAME STACK=NAME`: start one remote run |
-| `validation-aws-start-all` | `STACK=NAME`: start remote configured runs |
-| `validation-sam-build`, `validation-sam-validate`, `validation-sam-deploy` | Infrastructure preparation/validation/deployment; deployment requires authorization |
+| `ect update-definitions` | Refresh application antivirus definitions; `--seed DIR` verifies/copies an existing set, `--directory NEW_DIR` downloads into a new directory |
+| `ect imap` | Advanced account synchronization, including the combined `--new ARCHIVE` setup flow |
+| `ect h3-review` | Export a private semantic-hash review with explicit input/output paths |
+| `ect summarize` | Summarize standard input locally using Apple Foundation Models; requires the Apple SDK/runtime and available model |
+| `ect validation` | List, fetch, prepare or run explicitly selected validation corpora; cloud runs need separately provisioned credentials and authorization |
+| `ect processor` | Disposable plugin-development harness; not a canonical archive creator |
 
-## Processor harness
-
-`make processor ARGS='--archive DEMO --plugin-dir tests/processing_plugins COMMAND'`
-runs `python -m mailarchiver.processing`. This is a disposable framework harness,
-not a canonical Mailbag creator or substitute for production `ingest`/`process`.
-
-Global options are required `--archive`, repeatable `--plugin-dir` and optional
-`--installation-config`. Commands: `init`, `plugins`, `submit FILE`,
-`run [--retry] [--max-jobs N]`, `status`, `reprocess`. It snapshots submitted
-objects, persists jobs and prints typed JSON. Ctrl-C retains work and exits 130;
-a failed run exits 1. Only load trusted plugin directories.
-[PLUGINS.md](PLUGINS.md) owns the API/dispatch/storage contract.
-
-## Research and diagnostic commands
-
-These create private derivatives outside source stores. They do not infer
-authoritative identities or replace archive content.
-
-| Target | Required parameters and purpose |
-| --- | --- |
-| `data-quality-audit` | `ARCHIVE=PATH EARLY_SOURCE=PATH AUDIT_OUTPUT=NEW_DIR`: verified early-message/missing-sender evidence |
-| `data-quality-babyl-audit` | `EARLY_SOURCE=PATH AUDIT_OUTPUT=DIR`: inspect Babyl inputs |
-| `data-quality-summary` | `AUDIT_OUTPUT=DIR`: summarize exported evidence |
-| `name-matcher-observations` | `ARCHIVE=PATH OUTPUT=NEW.sqlite3 ARGS='--limit N --workers N'`: read-only identity/signature evidence |
-| `addressbook-export` | `ARGS='--archive PATH --output NEW.txt [--owner ADDRESS ...] [--owners-from-sent] [--owner-name NAME]'`: experimental ePADD replacement address book |
-| `h3-ambiguous-review` | Intended private semantic-hash review export; its Make recipe currently references an unregistered console entry point. Not a working supported CLI |
-
-For the h3 prototype's actual interface, `python -m mailarchiver.h3_review` accepts
-`--apple-mail`, `--archive`, required `--output`, `--limit` (default 20),
-`--progress-every` (default 10000), and `--refresh-existing` (rebuild reports from existing output without rereading source stores). Use only in an explicitly
-authorized private diagnostic run. See source safety in
-[APPLE_MAIL_CACHE.md](APPLE_MAIL_CACHE.md), historical results in
-[DATA_QUALITY_AUDIT.md](DATA_QUALITY_AUDIT.md) and the
-[name research notebook](research/name-matcher/README.md).
-
-## Rust tools
-
-`make rust-programs` builds the supported workspace release binaries in
-`target/release/` (`RUST_TARGET_DIR` overrides it). Build a single tool with
-`make TOOL_NAME`. Runtime syntax:
-
-| Binary | Interface |
-| --- | --- |
-| `archive-verifier` | `ARCHIVE`: read-only catalog/MBOX/search consistency; stop writers first |
-| `mcti-generator` | `COUNT`: synthetic API mboxrd to stdout; zero emits an empty stream |
-| `mdti-validator` | `[--max-message-bytes N]`: validate stdin, discard input, nonzero on failure |
-| `mcti-scan` | `INPUT.mboxrd`: scan reconstructed messages and emit API stream |
-| `pst-importer` | `[--only-invalid] [--offset N] [--limit N] [--] FILE`: read-only PST extraction to stdout |
-| `pst-downloader` | Corpus planning/downloading; use wrappers below and [pst/README.md](../pst/README.md) for manifest/retry details |
-
-Generator, validator and PST importer accept `--api-version` / `--version`;
-`--help` is supported by those tools and archive-verifier. `mcti-scan` requires
-an input file rather than `--help`. Extraction diagnostics go to stderr; nonzero
-status can mean partial results, which must be retained and reported.
-
-PST downloader options: `--inventory-dir DIR` (default `pst`), `--output DIR`
-(default `var/pst`), `--scope fixtures|archives|all` (default all), `--dry-run`,
-`--limit N` source URLs, `--max-download-bytes N` (default 16 GiB),
-`--max-expanded-bytes N` (default 64 GiB) and `--timeout-seconds N` (default 1800).
-`PST_DOWNLOAD_ARGS` passes these options through both acquisition wrappers.
-
-The separate Python `pff-converter FILE` accepts `--receipt FILE`,
-`--diagnostics FILE`, `--timeout-seconds N` (default 60),
-`--max-message-bytes N` (default 64 MiB), `--max-folder-depth N` (default 64),
-`--offset N` (default 0) and `--limit N`. Build through `make pff-converter`;
-its dependencies live in a separate environment and are not imported by the host.
-See [PST_IMPORTER.md](PST_IMPORTER.md) for OST scope and stream composition.
-
-`make verify-database ARCHIVE=ARCHIVE` builds/runs the independent Rust verifier.
-`make pst-import PST=FILE ARGS='OPTIONS'` runs the importer;
-`make pst-download-plan` inspects acquisition and `make pst-download` downloads
-into ignored `var/pst/`. PST-specific pipeline examples are intentionally kept
-in [PST_IMPORTER.md](PST_IMPORTER.md) and [MCT_IMPORTER_API.md](MCT_IMPORTER_API.md).
-The supported MIME decoder is a library, not another CLI.
-The Rust GUI is retired; its old commands are history in
-[RUST_GUI_EXPERIMENTS.md](RUST_GUI_EXPERIMENTS.md).
-
-## Windows packaging
-
-These targets run on a Windows development/CI host; outputs are local artifacts
-unless a workflow explicitly publishes them.
-
-| Target | Parameters / purpose |
-| --- | --- |
-| `prepare-windows-clamav` | Stage verified x64 runtime and baseline definitions |
-| `prepare-windows-updater` | Stage pinned WinSparkle SDK and notices |
-| `msix-test` | `MSIX_ARGS='-Architecture x64'`: build Python payload |
-| `test-msix` | `MSIX_PACKAGE=PATH MSIX_EVIDENCE=NEW_DIR`: validate extracted payload |
-| `msix-bundle` | `MSIX_PAYLOADS=DIR MSIX_ARGS='OPTIONS'`: assemble/sign bundle; `-PublicSigning` prepares Microsoft-action input |
-| `verify-public-msix` | `MSIX_PUBLISHER='approved subject'`: validate public trust/timestamp/identity |
-
-[WINDOWS_MSIX_TEST.md](WINDOWS_MSIX_TEST.md) owns package/trust boundaries;
-[WINDOWS_PUBLIC_SIGNING.md](WINDOWS_PUBLIC_SIGNING.md) owns Azure provisioning.
-
-## Build, release and maintenance entry points
-
-Makefile variables are parameters to targets, not automatically process
-environment variables. The root [README](../README.md) documents environment
-variable names and purposes; no secret values belong in documentation.
-
-| Target | Purpose / parameters |
-| --- | --- |
-| `sync-dependencies` | Synchronize Python environment |
-| `build-sdist` | Source distribution; `DIST_DIR` output |
-| `gui` | Launch supported desktop; `ARGS` passes its options |
-| `dmg`, `python-dmg` | Build Python macOS application/DMG; `ARGS`, optional `SIGNING_IDENTITY` |
-| `dmg-signed`, `list-signatures` | Build with Developer ID / list available identities |
-| `notarize-dmg` | Submit/staple local signed DMG; `DMG`, `ARGS` |
-| `check-release`, `test-dmg`, `test-mounted-dmg` | Candidate and mounted-artifact acceptance; see distribution guide |
-| `preview-dmg` | Explicit preview package, not publication |
-| `sparkle-tools`, `sparkle-keys` | Verify/stage pinned tooling / key operation |
-| `update-appcast`, `check-appcast` | Construct/validate selected feed; `RELEASE_TAG`, `DMG`, `APPCAST`, `ARGS` |
-| `release-files`, `release-tag-check` | Stage validated assets / enforce metadata-matching immutable tag |
-| `release-candidate-base`, `release-candidate-feed`, `release-appcast-base` | Shared candidate/feed preparation gates |
-| `release-package-check` | Package acceptance prerequisite |
-| `sign-historical-appcast` | One-time reviewed historical migration; requires explicit pinned historical inputs |
-| `freshclam` | Seed/update checkout definitions in `etc/clamdb` |
-| `clamav-update` | Refresh application per-user definition generation |
-| `clamav-seed` | Explicit baseline preparation; consult Makefile parameters |
-| `website-check`, `website-build-check`, `website-download-check` | Asset/link, built-site and rendered download acceptance |
-| `website-preview` | Build/open local site preview |
-| `website-release-data` | Derive installer metadata; `RELEASES_JSON` |
-| `website-screenshots`, `website-preview-screenshots` | Synthetic interface/site screenshots |
-| `website-icons`, `website-gmail-illustrations` | Developer illustration generation |
-| `install-mac`, `install-linux`, `install-test-browser`, `install-tika` | Explicit developer prerequisite installation; not ordinary application startup |
-| `ocr-inventory`, `ocr-profile`, `ocr-analyze`, `ocr-run`, `ocr-experiment` | Experimental OCR fixture pipeline; see PDF strategy |
-| `check`, `check-static`, `check-tests` | Ordered full/static/test verification |
-| `ruff`, `pylint`, `ty`, `pyright`, `lint`, `types`, `syntax-check` | Individual static checks |
-| `rust-check`, `rust-fmt`, `rust-lock`, `rust-toolchain` | Workspace validation/format, dependency update, selected compiler |
-| `runtime-license-check`, `runtime-license-bundle`, `copyright-check`, `distribution-check` | Distribution/license/source audits |
-
-The remaining `test-*`, `fixture-*`, smoke, native-check and golden-update
-targets are test interfaces documented in [END_TO_END_TESTING.md](END_TO_END_TESTING.md),
-[REGRESSION.md](REGRESSION.md) and beside their Makefile recipes. Running a build
-or check is not authorization to sign with production credentials, install
-trust, create cloud infrastructure, publish a release or change a source account.
-
-## Platform signing recipes
-
-These are explicit maintainer operations. Read the linked credential, signing
-and publication prerequisites first. Examples do not authorize installing trust,
-using production credentials or publishing a tag.
-
-### Build the Python DMG
-
-Preconditions and interpretation: [MACOS_DISTRIBUTION](MACOS_DISTRIBUTION.md).
-
-```sh
-make dmg
-```
-
-### Check the installed macOS executable
-
-Preconditions and interpretation: [MACOS_DISTRIBUTION](MACOS_DISTRIBUTION.md).
-
-```sh
-"/Applications/Email Collection Toolkit.app/Contents/MacOS/Email Collection Toolkit" --self-test
-"/Applications/Email Collection Toolkit.app/Contents/MacOS/Email Collection Toolkit" --self-test-gui
-"/Applications/Email Collection Toolkit.app/Contents/MacOS/Email Collection Toolkit" --cli --help
-```
-
-### Select a Developer ID identity
-
-Preconditions and interpretation: [MACOS_DISTRIBUTION](MACOS_DISTRIBUTION.md).
-
-```sh
-make list-signatures
-make dmg-signed
-```
-
-### Publish a matching annotated tag
-
-Preconditions and interpretation: [MACOS_DISTRIBUTION](MACOS_DISTRIBUTION.md).
-
-```sh
-git switch main
-git pull --ff-only origin main
-release_tag=vVERSION  # Replace VERSION with the canonical version in pyproject.toml.
-make release-tag-check GITHUB_REF_NAME="$release_tag"
-git tag -a "$release_tag" -m "Release $release_tag"
-make release-tag-check GITHUB_REF_NAME="$release_tag" ARGS=--require-annotated
-git push origin "refs/tags/$release_tag"
-```
-
-### Inspect signing identities
-
-Preconditions and interpretation: [CERTIFICATE_MANAGEMENT](CERTIFICATE_MANAGEMENT.md).
-
-```sh
-security find-identity -v -p codesigning
-```
-
-### Copy the encrypted certificate export
-
-Preconditions and interpretation: [CERTIFICATE_MANAGEMENT](CERTIFICATE_MANAGEMENT.md).
-
-```sh
-base64 -i "$HOME/Signing/DeveloperIDApplication.p12" | pbcopy
-```
-
-### Clear the credential clipboard
-
-Preconditions and interpretation: [CERTIFICATE_MANAGEMENT](CERTIFICATE_MANAGEMENT.md).
-
-```sh
-pbcopy < /dev/null
-```
-
-### Build with an explicit signing identity
-
-Preconditions and interpretation: [CERTIFICATE_MANAGEMENT](CERTIFICATE_MANAGEMENT.md).
-
-```sh
-make dmg ARGS='--signing-identity "Developer ID Application: YOUR NAME (TEAMID)"'
-```
-
-### Build an unsigned local artifact
-
-Preconditions and interpretation: [CERTIFICATE_MANAGEMENT](CERTIFICATE_MANAGEMENT.md).
-
-```sh
-make dmg ARGS='--signing-identity -'
-```
-
-### Submit a signed DMG for notarization
-
-Preconditions and interpretation: [CERTIFICATE_MANAGEMENT](CERTIFICATE_MANAGEMENT.md).
-
-```sh
-DMG="$PWD/dist/Email-Collection-Toolkit-VERSION-ARCH.dmg"
-NOTARY_PROFILE='mail-archiver-release'
-
-# Prompts securely for authentication; do not enter passwords in shell history.
-xcrun notarytool store-credentials "$NOTARY_PROFILE"
-xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" \
-  --wait --timeout 30m --output-format json > "$DMG.notarization.json"
-```
-
-### Hash the validated DMG
-
-Preconditions and interpretation: [CERTIFICATE_MANAGEMENT](CERTIFICATE_MANAGEMENT.md).
-
-```sh
-(cd "$(dirname "$DMG")" && shasum -a 256 "$(basename "$DMG")")
-```
+[Developer commands](DEVELOPER_COMMANDS.md) covers builds, signing, tests, Rust
+helpers and research scripts. [The documentation guide](README.md) locates the
+maintained user, developer and format references.

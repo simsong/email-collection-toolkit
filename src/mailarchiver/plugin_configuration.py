@@ -25,12 +25,14 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, PrivateAttr, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, PrivateAttr, TypeAdapter, ValidationError
 from yaml import YAMLError, safe_dump, safe_load
 
 from .standalone_verify import read_shared_text
 from .application import application_preferences_path
 from .archive_config import config_path, load_archive_config
+from .configuration_diagnostics import ConfigurationError, VALIDATION_LOCATION
+from .builtin_configuration import settings_model
 from .storage_sync import replace_file, sync_directory
 
 ConfigValues = dict[str, JsonValue]
@@ -122,14 +124,25 @@ def load_installation_config(path: Path) -> InstallationConfig:
     except FileNotFoundError:
         return InstallationConfig()
     except (OSError, ValueError, TypeError, YAMLError) as error:
-        raise ValueError(f"invalid installation configuration {path}: {error}") from error
+        raise ConfigurationError.from_error(path, error, "installation") from None
 
 
 def read_plugin_configuration(archive: Path, name: str, installation_path: Path | None = None) -> PluginConfiguration:
     recover_config_transaction(archive)
     installation = load_installation_config(installation_path or installation_config_path())
     local = load_archive_config(archive)
-    return PluginConfiguration(installation=installation.plugins.get(name, {}), archive=local.plugins.get(name, {}))
+    configuration = PluginConfiguration(installation=installation.plugins.get(name, {}), archive=local.plugins.get(name, {}))
+    schema = settings_model(name)
+    if schema is not None:
+        try:
+            schema.model_validate(configuration.get_my_config())
+        except ValidationError as error:
+            field = error.errors(include_input=False, include_context=False, include_url=False)[0][VALIDATION_LOCATION][0]
+            scope: ConfigScope = "archive" if field in configuration.archive else "installation"
+            path = config_path(archive) if scope == "archive" else installation_path or installation_config_path()
+            detail = ConfigurationError.from_error(path, error, scope, max_issues=1)
+            raise ConfigurationError(path, f"plugins.{name}.{detail.reason}", scope) from None
+    return configuration
 
 
 def apply_config_writes(archive: Path, name: str, writes: tuple[ConfigWrite, ...],

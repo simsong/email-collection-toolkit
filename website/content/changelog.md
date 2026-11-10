@@ -6,6 +6,16 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 
 ## 2026-11-08
 
+- Replace Make-based user examples with installable `ect` commands for creation,
+  local/IMAP import, search, processing and verification.
+- Correct outdated Gmail and Windows importer guidance, remove the unimplemented
+  source-registry walkthrough from current instructions, and redirect the retired
+  OAuth registration page to supported Gmail acquisition paths.
+
+- Explain that the toolkit is safe for alpha testing, with unchanged source mail
+  and a stable archive file format; usability and performance still need work
+  before production use.
+- Explain local message verification and checksum saving during import finalization.
 - Refresh synthetic search/import screenshots for alpha 60 after review repairs.
 
 ## 2026-11-07

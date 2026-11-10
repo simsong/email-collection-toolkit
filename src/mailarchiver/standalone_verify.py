@@ -965,9 +965,9 @@ def install_archive_verifier(archive: Path) -> Path:
     return destination
 
 
-def main() -> int:
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+        prog=prog, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "archive", nargs="?", type=Path, default=Path(__file__).resolve().parent,
@@ -976,7 +976,7 @@ def main() -> int:
     )
     parser.add_argument("-q", "--quiet", action="store_true",
                         help="suppress filenames, progress bars, and success output; still report warnings and errors")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     archive = args.archive
     if not archive.is_dir():
         parser.error(f"not a directory: {archive}")

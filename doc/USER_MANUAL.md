@@ -2,12 +2,10 @@
 
 # Email Collection Toolkit User Manual
 
-This reference manual describes the Python/pywebview desktop and command-line
-tools. The earlier Rust GUI experiment is retired; independent Rust tools
-remain supported. See the [desktop retrospective](RUST_GUI_EXPERIMENTS.md) for the
-architecture history. The [website User Manual](https://simsong.github.io/email-collection-toolkit/manual/)
-indexes the operating guides; the website homepage lists available installers
-and their platform requirements.
+This manual covers the desktop application on macOS and Windows. For terminal
+commands, start with the [command-line guide](CLI_REFERENCE.md). The
+[website manual](https://simsong.github.io/email-collection-toolkit/manual/)
+provides shorter illustrated guides.
 
 This manual explains how an archivist creates and searches a mail archive.
 Email Collection Toolkit reads source mail without changing it. It stores deduplicated
@@ -63,13 +61,19 @@ On macOS, changes save automatically. Close Preferences using the red window
 control or **File → Close**; no Done button is needed. Invalid worker counts show
 an explanation and retain the previously saved setting.
 
-**Check for Program Updates** requires the installed application. A `make gui` source
+**Maximum IMAP connections per account** is a separate preference, default **8**,
+with a range of **1–15**. This leaves room under Gmail’s 15-connection account
+limit for other mail clients. It stays editable with a `--workers` override and
+applies when starting or continuing an import. Temporary server connection limits
+back off automatically; all processing workers remain available.
+
+**Check for Program Updates** requires the installed application. A source-checkout
 launch has no in-app updater, so this button is disabled with an explanation.
 **Check for Anti-Virus Updates**, directly below the program-update menu command,
 opens About and checks virus definitions. About provides the same named button
 and shows progress and the result. This updates definitions, not the ClamAV engine.
 
-`mailsearch-gui --workers N` overrides the choice for that launch. The worker
+`ect gui --workers N` overrides the choice for that launch. The worker
 controls are greyed out with `# workers set to N on command line`; your saved
 choice is retained. CLI ingest, process, refresh-index and standalone IMAP also
 accept `--workers N` and otherwise use the saved choice.
@@ -133,14 +137,11 @@ saved metadata and Gmail labels; metadata refresh does not add download counts.
 
 ## Before you begin
 
-Ask the person who installed Email Collection Toolkit to confirm that:
-
-1. `uv` and a ClamAV installation providing `libclamav` are installed;
-2. `make freshclam` has prepared current virus definitions; and
-3. this checkout has been prepared with `uv sync`.
-
-The installed macOS application needs none of these: it bundles Python, the
-ClamAV engine and baseline definitions.
+Install the macOS or Windows application from the
+[project website](https://simsong.github.io/email-collection-toolkit/).
+Desktop installers include Python, the ClamAV engine and baseline definitions.
+No Python, uv or Make setup is needed to use an installed desktop application.
+For terminal use, follow the [CLI installation instructions](CLI_REFERENCE.md#install).
 
 Choose two locations:
 
@@ -158,7 +159,7 @@ Local imports currently take explicit selected paths. The standalone IMAP CLI
 saves typed accounts in archive `config.yaml`. A general source panel with
 FILE / LOCAL FOLDER / IMAP entries and Refresh/Rebuild controls is planned,
 not available. Its requirements live in
-[requirements.md](plans/ACQUISITION.md#per-archive-sources-and-import-modes).
+[acquisition plan](plans/ACQUISITION.md#per-archive-sources-and-import-modes).
 Passwords never belong in archive YAML or databases.
 
 ## Standalone IMAP downloads
@@ -172,20 +173,16 @@ and desktop account setup are future work.
 
 ## Import Gmail
 
-Use Google Takeout for Gmail today. It creates MBOX files without granting Email Collection Toolkit access to the account. Download every Takeout ZIP part, extract them
-beneath one directory, and ingest that directory as the local source. See
-[GMAIL.md](GMAIL.md) for the complete end-user procedure and the separate
-developer discussion of Gmail API, OAuth, IMAP, verification, and security
-assessment requirements.
+Use Google Takeout for an offline snapshot, or read-only IMAP when the account
+permits app-password access. For Takeout, download and extract every ZIP part,
+then import the resulting directory. For IMAP, use
+`ect-import --archive collection.mailarchive --imap`; initial setup stores the
+password in the native operating-system credential store. See
+[Gmail acquisition](GMAIL.md) for All Mail coverage and supported account limits.
 
-Live Gmail authorization is unavailable; its prototype has been removed.
-Use Takeout for Gmail acquisition.
-
-As an interim incremental path, add the Gmail account to Apple Mail, configure
-it to download attachments, allow the wanted mailboxes to synchronize, and
-import its cache as described in [Use Apple Mail as a provider bridge](#use-apple-mail-as-a-provider-bridge).
-This is best-effort recovery and is not a substitute for Takeout when a
-completeness claim matters.
+Direct Gmail API and OAuth acquisition are not available. A synchronized Apple
+Mail cache is another best-effort local source, with the
+[completeness limits](#use-apple-mail-as-a-provider-bridge) described below.
 
 ## Import Microsoft 365
 
@@ -202,7 +199,7 @@ acquisition source.
 
 ## Use Apple Mail as a provider bridge
 
-Until direct adapters are written, Apple Mail can provide local complete
+Apple Mail can provide local complete
 messages for Gmail, Microsoft 365/Exchange Online, Outlook.com, and ordinary
 IMAP accounts that have already been synchronized to this Mac. Quit Mail if
 practical, set **Download Attachments** to **All**, allow synchronization to

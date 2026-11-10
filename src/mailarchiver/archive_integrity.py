@@ -117,7 +117,7 @@ class MailbagArchiveIntegrityControls(ArchiveIntegrityControls):
     ) -> Iterator[ArchiveIntegrityEvent]:
         yield ProgressEvent(
             work_id=archive.archive_id,
-            phase="publishing archive integrity",
+            phase="Verifying archived messages and saving checksums",
             completed=0,
             total=1,
             unit="checkpoint",
@@ -128,7 +128,7 @@ class MailbagArchiveIntegrityControls(ArchiveIntegrityControls):
         yield _file_evidence(TAG_MANIFEST_CONTROL, archive, archive.root / "tagmanifest-sha256.txt")
         yield ProgressEvent(
             work_id=archive.archive_id,
-            phase="publishing archive integrity",
+            phase="Verifying archived messages and saving checksums",
             completed=1,
             total=1,
             unit="checkpoint",

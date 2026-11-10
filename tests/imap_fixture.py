@@ -94,6 +94,11 @@ class DisposableImap:
         self._gate_lock = Lock()
         self._body_limit: int | None = None
         self._bodies = 0
+        self.active_connections = 0
+        self.peak_connections = 0
+        self.connection_target: int | None = None
+        self.connections_ready = Event()
+        self.commands: list[bytes] = []
         self.fetch_paused = Event()
         self.fetch_release = Event()
 
@@ -112,6 +117,7 @@ class DisposableImap:
         self.fetch_release.set()
 
     async def _before_command(self, line: bytes) -> None:
+        self.commands.append(line)
         command = line.upper()
         if b" UID FETCH " not in command or b"BODY.PEEK[]" not in command:
             return
@@ -140,7 +146,14 @@ class DisposableImap:
         protocol = IMAPServer(backend.login, config)
 
         async def connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, info: SocketInfo) -> None:
-            await protocol(AcknowledgedReader(reader, self._before_command), writer, info)
+            self.active_connections += 1
+            self.peak_connections = max(self.peak_connections, self.active_connections)
+            if self.active_connections == self.connection_target:
+                self.connections_ready.set()
+            try:
+                await protocol(AcknowledgedReader(reader, self._before_command), writer, info)
+            finally:
+                self.active_connections -= 1
 
         callback = ProxyProtocolReader(config.proxy_protocol).get_callback(connection)
         server_context = config.ssl_context if self.tls == "implicit" else None
@@ -176,7 +189,8 @@ class DisposableImap:
 
 class ImapFault(BaseModel):
     command: bytes
-    mode: Literal["timeout", "disconnect", "partial", "malformed"]
+    mode: Literal["timeout", "disconnect", "partial", "malformed", "reject"]
+    refusal: bytes = b"NO [ALERT] Too many simultaneous connections."
     skip: int = 0
     response: bytes = b"invalid IMAP response\r\n"
 
@@ -209,6 +223,11 @@ class InterruptibleImap(DisposableImap):
                         if fault.skip:
                             fault.skip -= 1
                         else:
+                            if fault.mode == "reject":
+                                self.fault = None
+                                writer.write(line.split()[0] + b" " + fault.refusal + b"\r\n")
+                                await writer.drain()
+                                return
                             if fault.mode == "partial":
                                 writer.write(b"* 2 FETCH (UID 2 RFC822.SIZE 100 BODY[] {100}\r\nSubject: partial\r\n")
                                 await writer.drain()
@@ -251,40 +270,75 @@ class Utf8Imap(DisposableImap):
     All names, credentials and messages are synthetic; no application methods are mocked.
     """
     def __init__(self, directory: Path, capability: str = "UTF8=ACCEPT", enable: str = "OK", *,
-                 credentials: tuple[str, str] | None = None) -> None:
-        super().__init__(directory, "implicit")
+                 credentials: tuple[str, str] | None = None, login_response: bytes | None = None,
+                 login_failures: int | None = None, greeting: bytes = b"* OK Disposable UTF-8 IMAP\r\n",
+                 setup_command: bytes | None = None, setup_response: bytes | None = None,
+                 setup_authenticated: bool = True, tls: Literal["implicit", "starttls"] = "implicit") -> None:
+        super().__init__(directory, tls)
         self.capability = capability.encode("ascii")
         self.enable = enable
         self.credentials = credentials
+        self.login_response = login_response
+        self.login_failures = login_failures
+        self.greeting = greeting
+        self.setup_command = setup_command
+        self.setup_response = setup_response
+        self.setup_authenticated = setup_authenticated
+        self.server_context: ssl.SSLContext | None = None
         self.commands: list[bytes] = []
         self.names = ("旅行", "literal &AMk- &-", 'Quote " and \\ box')
+
+    def _login_refusal(self) -> bytes | None:
+        if self.login_failures == 0:
+            return None
+        if self.login_failures is not None:
+            self.login_failures -= 1
+        return self.login_response
 
     async def _serve(self) -> None:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(self.certificate, self.key)
-        server = await asyncio.start_server(self._connection, "127.0.0.1", 0, ssl=context)
+        self.server_context = context
+        server = await asyncio.start_server(self._connection, "127.0.0.1", 0,
+                                            ssl=context if self.tls == "implicit" else None)
         async with server:
             self.port.set_result(server.sockets[0].getsockname()[1])
             await asyncio.to_thread(self.stop.wait)
 
     async def _connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         authenticated = enabled = False
-        writer.write(b"* OK Disposable UTF-8 IMAP\r\n")
+        encrypted = self.tls == "implicit"
+        writer.write(self.greeting)
         await writer.drain()
         try:
             while line := await reader.readline():
                 self.commands.append(line)
                 tag, command, *arguments = line.rstrip(b"\r\n").split(b" ", 2)
                 response = b"OK complete"
-                if command == b"CAPABILITY":
+                if (authenticated == self.setup_authenticated and command == self.setup_command
+                        and self.setup_response is not None):
+                    response, self.setup_response = self.setup_response, None
+                elif command == b"CAPABILITY":
                     capabilities = b"IMAP4rev1"
-                    if not authenticated and self.credentials is not None:
+                    if not encrypted:
+                        capabilities += b" STARTTLS LOGINDISABLED"
+                    elif not authenticated and self.credentials is not None:
                         capabilities += b" AUTH=PLAIN LOGINDISABLED"
                     if authenticated:
                         capabilities += b" ENABLE " + self.capability
                     writer.write(b"* CAPABILITY " + capabilities + b"\r\n")
+                elif command == b"STARTTLS" and not encrypted:
+                    assert self.server_context is not None
+                    writer.write(tag + b" OK Begin TLS\r\n")
+                    await writer.drain()
+                    await writer.start_tls(self.server_context)
+                    encrypted = True
+                    continue
                 elif command == b"LOGIN":
-                    if self.credentials is None:
+                    refusal = self._login_refusal()
+                    if refusal is not None:
+                        response = refusal
+                    elif self.credentials is None:
                         authenticated = True
                     else:
                         response = b"NO LOGIN disabled"
@@ -296,6 +350,9 @@ class Utf8Imap(DisposableImap):
                     authenticated = credentials == b"\0" + username.encode() + b"\0" + password.encode()
                     if not authenticated:
                         response = b"NO invalid credentials"
+                    refusal = self._login_refusal()
+                    if refusal is not None:
+                        response, authenticated = refusal, False
                 elif command == b"ENABLE" and authenticated and arguments == [b"UTF8=ACCEPT"]:
                     if self.enable == "OK":
                         enabled = True
@@ -316,6 +373,10 @@ class Utf8Imap(DisposableImap):
                     break
                 else:
                     response = b"BAD unexpected command"
+                if response.startswith(b"BYE "):
+                    writer.write(b"* " + response + b"\r\n")
+                    await writer.drain()
+                    return
                 writer.write(tag + b" " + response + b"\r\n")
                 await writer.drain()
         finally:

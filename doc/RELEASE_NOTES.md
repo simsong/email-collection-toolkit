@@ -6,6 +6,82 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a72 — dependency security updates
+
+- Update the PST downloader's ZIP reader to the patched 9.x line and reject
+  contradictory ZIP headers before publishing extracted PSTs.
+- Raise security floors for Pylint and setuptools; refresh the application,
+  converter and research locks, including both Brotli implementations.
+- `make security-lock` refreshes the affected packages across all environments.
+  Default-branch Dependabot alerts require the fixes to reach `main` before clearing.
+
+## 1.0.0a71 — actionable configuration warnings
+
+- Catch expected configuration problems and show the affected setting and repair
+  action without validator dumps, raw configuration values or tracebacks.
+- Keep Ingests history readable with a visible warning, logged once per condition.
+- Preserve a clean stop for imports with invalid settings; missing/empty supported
+  configuration still uses defaults.
+- Validate effective built-in plugin settings before processing and identify the
+  installation or archive file supplying an invalid value.
+
+## 1.0.0a70 — IMAP review and recovery fixes
+
+- Prevent Escape from dismissing password validation while a vault update is pending.
+- Print changed connection-backoff reasons and delays in public IMAP CLI paths.
+- Integrate native console notifications into discovery backoff, retaining worker
+  cancellation and checkpointed Ctrl-C handling. Native Windows acceptance remains separate.
+- Keep Ingests history readable when source account configuration is invalid.
+
+## 1.0.0a69 — preserve CLI authentication reasons
+
+- Retain full sanitized server authentication reasons and replacement guidance in
+  both public import entry points, including accounts with long usernames.
+- Recognize temporary refusals before redaction/truncation, including passwords
+  that match words or response codes in the server’s explanation.
+- Treat malformed NO/BAD greetings as protocol failures even when they mention
+  connection limits; valid server refusals continue to back off.
+
+## 1.0.0a68 — separate IMAP connection preference
+
+- Default to 8 IMAP connections per account, with an independent 1–15 setting in
+  macOS and Windows Preferences. Processing workers retain their separate setting.
+- Apply saved connection changes when starting or continuing an import, including
+  CLI imports; temporary connection refusals continue to back off automatically.
+
+## 1.0.0a67 — IMAP authentication diagnostics and connection backoff
+
+- Add credential-only validation and interactive test-before-save password replacement.
+- Show sanitized server login reasons and retry temporary capacity/rate refusals
+  with cancellable exponential backoff, retaining import progress.
+- Cap account IMAP sessions at 15 while preserving the full processing worker pool.
+- Offer **Update IMAP Password…** in Ingests without starting an import.
+- Redact credentials from BAD and malformed setup replies, retaining protocol
+  failures as failures. Retry capacity refusals during CAPABILITY/ENABLE setup.
+- Preserve STARTTLS refusal reasons and structured BYE evidence during client
+  construction so these capacity refusals also back off without ending imports.
+
+
+## 1.0.0a63 — unified CLI and organized documentation
+
+- Install `ect`, `ect-create`, `ect-import` and `ect-search`; remove the former
+  console-script names. Both command forms reuse the existing application engines.
+- Create an empty archive with optional owner rules, then import local files or
+  read-only IMAP sources. Antivirus scanning is enabled by default.
+- Make developer targets invoke the ECT commands. Keep user examples independent
+  of Make, with build, signing and diagnostic recipes in a separate developer guide.
+- Reorganize the documentation index and subsystem overviews, correct stale Gmail
+  and source-configuration guidance, consolidate duplicate forwarding documents,
+  and separate historical machine-specific measurements from current instructions.
+
+## 1.0.0a62 — clarify alpha testing and archive verification
+
+- Label local archive checkpoint work **Verifying archived messages and saving
+  checksums** instead of “publishing archive integrity.”
+- Clarify in the README and website that alpha testing is welcome, source mail
+  remains unchanged, and the archive file format is stable. Usability and
+  performance work still prevent production readiness.
+
 ## 1.0.0a61 — enforce event-wait failure boundaries
 
 - Enforce filesystem predicate deadlines even while file notifications remain ready.

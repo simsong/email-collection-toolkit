@@ -31,7 +31,7 @@ def normalize_rules(values: list[str]) -> list[str]:
         if any(character.isspace() or (ord(character) < 32 or ord(character) == 127) for character in rule):
             raise ValueError("Use mailbox names or email patterns, not display names or spaces.")
         if rule.count("@") > 1 or ("@" in rule and any(not part for part in rule.split("@"))):
-            raise ValueError(f"Incomplete email pattern: {rule}. Use a mailbox name or mailbox@domain.")
+            raise ValueError("Incomplete email pattern. Use a mailbox name or mailbox@domain.")
         if any(character in rule for character in ",;<>"):
             raise ValueError("Enter one mailbox/email rule per line, or separate rules with commas.")
         result.add(rule)

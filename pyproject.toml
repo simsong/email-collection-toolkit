@@ -2,7 +2,7 @@
 
 [project]
 name = "mailarchiver"
-version = "1.0.0a61"
+version = "1.0.0a72"
 description = "Personal MBOX archive normalizer"
 requires-python = ">=3.12"
 license = "GPL-2.0-only"
@@ -33,19 +33,13 @@ dependencies = [
 ]
 
 [project.scripts]
-mailarchiver = "mailarchiver.__main__:main"
-mailarchiver-imap = "mailarchiver.imap_cli:main"
-mailarchiver-compare-apple-mail = "mailarchiver.apple_mail_compare:main"
-mailarchiver-h3-review = "mailarchiver.h3_review:main"
-mailsearch = "mailarchiver.mailsearch:main"
-mailsearch-gui = "mailarchiver.gui_app:main"
-summarize = "mailarchiver.aisummarize:main"
-verify-mail-archive = "mailarchiver.standalone_verify:main"
-mailarchiver-validation = "mailarchiver.validation:main"
-extract-pdf-mail = "mailarchiver.pdf_mail:main"
+ect = "mailarchiver.cli:main"
+ect-create = "mailarchiver.cli:main"
+ect-import = "mailarchiver.cli:main"
+ect-search = "mailarchiver.cli:main"
 
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=84.1.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -68,7 +62,7 @@ mailarchiver = [
 dev = [
     "packaging>=24.0",
     "boto3>=1.43.89",
-    "pylint>=3.3",
+    "pylint>=4.0.9",
     "pycryptodomex>=3.23.0",
     "pyright>=1.1.411",
     "pytest>=8.0",
@@ -86,6 +80,9 @@ packaging = [
     "pycryptodomex>=3.23.0",
     "pyinstaller>=6.22,<7",
 ]
+
+[tool.uv]
+constraint-dependencies = ["setuptools>=84.1.0", "brotli>=1.2.1", "brotlicffi>=1.2.1.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

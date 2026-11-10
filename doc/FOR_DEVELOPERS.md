@@ -29,7 +29,8 @@ updates retain the existing definitions; age alone does not prevent scanning.
 Explicit `MAILARCHIVER_CLAMAV_DATABASE` overrides remain pinned without automatic
 updates. `make test-definition-refresh` validates this policy with local fixtures.
 No ClamAV daemon is configured or started; see
-[embedded antivirus](EMBEDDED_CLAMAV.md). Run CLI workflows through `make run ARGS=...`.
+[embedded antivirus](EMBEDDED_CLAMAV.md). Run application commands directly with `uv run --locked ect COMMAND`;
+[Developer commands](DEVELOPER_COMMANDS.md) lists build/test conveniences.
 
 Set the archive directory once for the shell session:
 
@@ -37,8 +38,8 @@ Set the archive directory once for the shell session:
 export MAIL_ARCHIVE_DIR=/path/to/mail-archive
 ```
 
-Local ingest and search use this value. Pass `--archive DIRECTORY` before the
-command to override it for one invocation; IMAP requires an explicit archive.
+Local ingest and search use this value. Pass `--archive DIRECTORY` after the
+command to override it for one invocation; IMAP can also use the explicit `--archive` form shown in the CLI guide.
 
 For development PST/OST imports, build the helpers with
 `make pst-importer mcti-scan pff-converter`. Rust/Cargo and the converter build
@@ -193,6 +194,19 @@ make test-e2e
 make check
 ```
 
+If the desktop is importing mail while tests run, isolate the synthetic tests'
+temporary root so updater-lock tests do not compete with the live application's
+write guard. All test subprocesses must inherit the same temporary root:
+
+```sh
+mkdir -p .tmp/test-tmp
+TMPDIR="$PWD/.tmp/test-tmp" make check PYTEST_ARGS='--browser-channel chrome'
+```
+
+This keeps real cross-process locking within the test run and leaves the desktop
+import untouched. `TMPDIR` is an optional standard-library temporary-directory
+override, not an archive destination.
+
 Install the pinned headless Chromium once with `make install-test-browser`.
 To use an already installed Chrome instead, run
 `make check PYTEST_ARGS='--browser-channel chrome'`; Windows CI uses Edge.
@@ -219,7 +233,7 @@ incomplete append; Continue Processing or reimport invokes archive recovery.
 Saved scanner failures are rescanned on retry. Normal runs with unlimited content
 processing restore archived content before pending ingestion, keeping existing mail
 searchable even if a pending import fails. To rebuild only the disposable search
-index without resuming ingestion, use `make run ARGS="--archive /path/to/archive refresh-index"`
+index without resuming ingestion, use `uv run --locked ect refresh-index --archive /path/to/archive`
 (add `--index-attachments` when wanted). `make test-ingest-recovery` validates these paths.
 
 `make test-native-gui` additionally exercises the hidden Cocoa/WKWebView bridge.
@@ -257,7 +271,7 @@ Windows runs the same Python/pywebview application as macOS, using WebView2.
 `make test-python-reader-native` validate synthetic reading/export and the
 native bridge. Windows New/Import uses the common Python engine with native
 locks and byte-preserving MBOX I/O. See [the Windows Python desktop
-notes](PYTHON_WEBVIEW.md) for validation and remaining gaps.
+notes](WINDOWS.md) for validation and remaining gaps.
 
 `make prepare-windows-clamav` explicitly downloads the pinned official portable
 x64 runtime into `.tmp/clamav-x64`; it installs no service. `make clamav-update`

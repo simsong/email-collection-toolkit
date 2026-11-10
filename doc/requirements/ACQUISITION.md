@@ -26,17 +26,69 @@ library unless another dependency is explicitly approved.
 
 ## Standalone IMAP download CLI
 
-`mailarchiver-imap` is a Python CLI independent of the desktop UI, targeting macOS
-and Windows. `--new ARCHIVE` initializes only a new/empty destination; `--archive
-ARCHIVE` validates and opens an existing archive. Initial setup prompts for server,
+`ect-create ARCHIVE` initializes a new/empty destination without importing mail.
+`ect-import --archive ARCHIVE SOURCE...` imports local files/directories into an
+existing archive. `ect-import --archive ARCHIVE --imap` synchronizes saved accounts
+independently of the desktop on macOS and Windows. The generic `ect create`,
+`ect import` and `ect search` commands share the shortcut implementations.
+`ect imap --new ARCHIVE` retains the advanced combined creation/setup flow.
+The previous console-script names are removed; Make targets invoke ECT commands.
+Source selection errors must be rejected before changing an archive.
+Antivirus is enabled by default; `--no-scan` explicitly records unscanned mail.
+`ect-create --owner ADDRESS` persists owner include rules under the creation lease.
+
+Initial IMAP setup prompts for server,
 port, verified TLS mode, username and hidden password/app password, saves and runs.
 Configuration uses `config.yaml` version 3's typed `imap_sources`, with unique source
-IDs; passwords remain exclusively in the native OS keyring. Existing local-only
+IDs; passwords remain exclusively in the native OS keyring. Expected settings
+problems in archive or installation files must be caught at UI/CLI boundaries and identify the file, affected setting
+and repair action without a traceback, validator internals or raw configuration
+values. This includes the supported built-in plugin settings after installation/archive
+overrides are merged. Invalid import settings stop before processing; saved history remains
+readable with an explanatory warning. Repeated refreshes must not flood logs. Existing local-only
 version-1/2 configurations remain readable. Missing credentials require interactive
 `--configure`; unattended runs fail clearly without a plaintext or environment fallback.
 Development-app credential reads retain the existing interpreter's Keychain trust
 without changing vault access rules. Report native failure status without exposing
 passwords or raw private backend exception text.
+
+`--check-credentials --archive ARCHIVE [--source ID]` shall read the stored password
+and validate one TLS login at a time, without mailbox selection, fetching, scanning,
+archive initialization, a writer lease, database access, or any local writes.
+It must work while the archive writer is busy and must never prompt to replace a
+credential. `--set-password` is a separate interactive operation: validate a hidden
+replacement before saving only that account's native-vault item, without importing.
+Ingests offers the same test-before-save replacement through **Update IMAP Password**
+when no import is active. Failed validation retains the old stored password.
+Login rejection shall identify account/server and retain a bounded, sanitized
+server reason without exposing plaintext, escaped passwords or SASL payloads.
+Temporary server capacity/rate-limit refusals during session initialization shall
+keep imports running and retry after 1, 2, 4, 8 seconds, capping the delay at 60 seconds
+until accepted or cancelled. Show the sanitized reason and backoff as progress,
+close each refused connection before waiting, and wake immediately on Suspend/Quit
+or console Ctrl-C, including main-thread discovery on Windows Python3.12.
+Both public IMAP CLI paths must show changed retry phases, including the sanitized
+reason and next delay, even while download totals remain unchanged.
+Classify the original response before redacting or truncating diagnostics; a
+password matching a response word must not change retry behavior. Do not blame or
+replace the password. Credential-only checks make one attempt and
+exit 75 for temporary refusal. Actual credential rejection remains a concise failure
+without a traceback. While replacement login validation is pending, account and
+password fields are locked, and Cancel/Escape cannot dismiss its dialog; after completion, normal cancellation resumes.
+Provide a separate saved **Maximum IMAP connections per account**
+preference: default 8, whole numbers 1–15. Apply it per account when starting or
+continuing an import, retaining all configured workers for message processing. Other mail clients can
+consume server slots; backoff handles those refusals without ending the import.
+This includes tagged temporary refusals during post-login CAPABILITY/ENABLE.
+STARTTLS refusals and valid BYE responses during constructor CAPABILITY also retain
+their server reasons and back off. Protocol classification must use structured
+BYE evidence even when construction has not returned a client object.
+Malformed replies, including invalid NO/BAD greetings, remain protocol failures
+even if their text mentions capacity. Every public IMAP import entry point must
+retain the sanitized server reason and password-replacement guidance without
+truncating it to a progress-status line.
+Diagnostics must also redact Python bytes-repr forms of credentials, including
+escaped quotes, backslashes and UTF-8 bytes, without exposing an unsanitized cause.
 
 Each invocation synchronizes once and exits. Download workers use the shared
 preference (half CPUs by default, at least one); `--workers` overrides it with

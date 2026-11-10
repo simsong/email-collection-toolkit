@@ -33,6 +33,7 @@ from ..mbox import MboxLocation, read_verified_location
 from ..layout import mbox_path
 from ..plugin_api import MailObject
 from ..plugin_configuration import read_plugin_configuration
+from ..builtin_configuration import IdentitySettings
 from ..plugin_loader import builtin_plugin_directory
 from ..list_catalog import PROVIDER_DOMAINS as PROVIDER_LIST, REPLY_ADDRESSES, registered_lists
 from ..reply_addresses import match_reply_address
@@ -49,7 +50,6 @@ from .runtime import RANK_FAILURE, ProcessingProgress, dispatch, prepare_run, ru
 from .store import DATABASE, USER_CANCELLED, connect, enqueue, report, snapshot
 
 Publisher = Callable[[MailObject, ParsedMessage, MailboxReference, int], int]
-PROVIDER_DOMAINS = "provider_domains"
 
 
 class IngestedMessage(BaseModel):
@@ -82,11 +82,16 @@ class ProductionPipeline:
                 if definition.archive_supported:
                     definition.snapshot(self.database,self.archive)
         self.reply_rules=REPLY_ADDRESSES.read(self.archive)
-        supplied = read_plugin_configuration(self.archive, "identity-evidence", installation_config).get_my_config().get(PROVIDER_DOMAINS, [])
-        if not isinstance(supplied, list) or any(not isinstance(domain, str) or not domain for domain in supplied):
-            raise ValueError("provider_domains must be a list of domain names")
-        self.provider_domains = set(PROVIDER_LIST.read(self.archive).domains) | {str(domain).lower() for domain in supplied}
+        self.provider_domains = set(PROVIDER_LIST.read(self.archive).domains)
         prepare_run(self.database, retry=True)
+
+    def validate_configuration(self) -> None:
+        """Validate before processing, after any explicit replay invalidation."""
+        for plugin in self.plugins:
+            configuration = read_plugin_configuration(self.archive, plugin.manifest.kind, self.installation_config)
+            if plugin.manifest.kind == "identity-evidence":
+                supplied = IdentitySettings.model_validate(configuration.get_my_config()).provider_domains
+                self.provider_domains.update(domain.lower() for domain in supplied)
 
     def close(self) -> None:
         with self.database:

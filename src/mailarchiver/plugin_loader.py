@@ -40,6 +40,7 @@ from .plugin_api import (
     PluginType,
 )
 from .change_signal import ChangeEvent
+from .imap_preferences import DEFAULT_IMAP_CONNECTIONS
 
 
 class PluginDiscoveryError(RuntimeError):
@@ -62,10 +63,11 @@ def builtin_plugin_directory() -> Path:
 
 def load_plugins(extra_dirs: Iterable[Path] = (), *, archive: Path | None = None,
                  installation_config: Path | None = None, scan_policy: Literal["clamav", "not-scanned"] = "not-scanned",
-                 cancellation: ChangeEvent | None = None) -> PluginRegistry:
+                 cancellation: ChangeEvent | None = None, imap_connections: int = DEFAULT_IMAP_CONNECTIONS) -> PluginRegistry:
     """Validate, load, and freeze built-in and explicitly trusted plug-ins."""
     candidates = _candidates(extra_dirs)
-    context = PluginContext(archive=archive, installation_config=installation_config, scan_policy=scan_policy, cancellation=cancellation)
+    context = PluginContext(archive=archive, installation_config=installation_config, scan_policy=scan_policy,
+                            cancellation=cancellation, imap_connections=imap_connections)
     files = tuple(_load(candidate, context) for candidate in candidates if candidate.manifest.plugin_type == "file")
     context = context.model_copy(update={"files": files})
     sources = tuple(

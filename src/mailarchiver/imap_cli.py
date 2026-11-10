@@ -33,10 +33,12 @@ from .__main__ import IngestRequest, run_ingest, safe_status_text
 from .application import ArchiveDocument, configured_workers, create_empty_archive
 from .worker_preferences import worker_argument
 from .archive_config import load_archive_config, save_archive_config
+from .configuration_diagnostics import ConfigurationError
 from .imap_credentials import password_for, save_password
 from .imap_models import ImapAccount, ImapTotals
-from .imap_protocol import ImapPaused
-from .imap_source import imap_locator
+from .imap_protocol import ImapAuthenticationError, ImapPaused, ImapSession
+from .imap_source import IMAP_BUSY_PHASE, imap_locator
+from .ingest_status import latest_ingest_status
 from .imap_state import totals
 from .owner_rules import OwnerRules
 from .sqlite_paths import sqlite_uri
@@ -76,18 +78,26 @@ class SyncReporter:
         self.finished = Event()
         self.observer: PathObserver | None = None
         self.last_running: ImapTotals | None = None
+        self.last_retry_phases: tuple[str, ...] = ()
         self.failure: Exception | None = None
 
     def display(self, status: str) -> None:
         current = totals(self.archive)
-        if status == "running" and current == self.last_running:
+        latest = latest_ingest_status(self.archive)
+        retries = tuple(sorted({phase for phase in (latest.phase, *(worker.phase for worker in latest.workers))
+                                if phase.startswith(IMAP_BUSY_PHASE)})) if latest and latest.state == "running" else ()
+        if status == "running" and current == self.last_running and retries == self.last_retry_phases:
             return
         self.last_running = current
+        changed = tuple(phase for phase in retries if phase not in self.last_retry_phases)
+        self.last_retry_phases = retries
         difference = ImapTotals(archived=current.archived - self.baseline.archived,
             duplicates=current.duplicates - self.baseline.duplicates,
             excluded=current.excluded - self.baseline.excluded, errors=current.errors - self.baseline.errors)
         print(f"{status}: newly archived={difference.archived} duplicate downloads={difference.duplicates} "
               f"excluded={difference.excluded} errors={difference.errors}", file=sys.stderr, flush=True)
+        for phase in changed:
+            print(phase, file=sys.stderr, flush=True)
 
     def _messages(self) -> None:
         if not self.show_messages:
@@ -127,13 +137,15 @@ class SyncReporter:
         self.display(status)
 
 
-def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(description=__doc__)
+def parser(prog: str | None = None) -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(prog=prog, description=__doc__)
     target = result.add_mutually_exclusive_group(required=True)
     target.add_argument("--new", type=Path, metavar="ARCHIVE", help="create an empty new archive; never overwrite")
     target.add_argument("--archive", type=Path, help="synchronize an existing archive")
     result.add_argument("--source", help="synchronize only this saved source ID")
     setup = result.add_mutually_exclusive_group()
+    setup.add_argument("--check-credentials", action="store_true", help="validate stored credentials only; never import or write the archive")
+    setup.add_argument("--set-password", action="store_true", help="validate and save a replacement password only; never import")
     setup.add_argument("--configure", action="store_true", help="prompt for settings and update saved credentials")
     setup.add_argument("--add-source", action="store_true", help="prompt for another account")
     result.add_argument("--workers", type=worker_argument, help="override worker preferences (default: half CPUs; maximum: twice CPUs)")
@@ -142,7 +154,39 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
+def check_credentials(args: argparse.Namespace) -> int:
+    """Read configuration and authenticate sequentially, without opening the archive or a mailbox."""
+    if args.new or args.workers is not None or args.show_messages or args.no_scan:
+        raise ValueError("Credential checks require --archive and cannot use import options")
+    path = args.archive.expanduser().absolute()
+    if not (path / "config.yaml").is_file():
+        raise ValueError("Credential checks require an existing archive config.yaml")
+    accounts = [source for source in load_archive_config(path).imap_sources
+                if source.enabled and (not args.source or source.id == args.source)]
+    if not accounts:
+        raise ValueError("No enabled IMAP sources match the requested source ID")
+    if args.set_password and len(accounts) != 1:
+        raise ValueError("Use --source ID to choose the account whose password to replace")
+    if args.set_password and not sys.stdin.isatty():
+        raise ValueError("--set-password requires an interactive terminal")
+    for account in accounts:
+        password = (getpass.getpass("New password or app password: ") if args.set_password else password_for(account))
+        try:
+            with ImapSession(account, password, authentication_only=True):
+                pass
+            if args.set_password:
+                save_password(account, password)
+        finally:
+            password = ""
+        print(f"IMAP authentication succeeded: {account.username} on {account.server}:{account.port} "
+              f"(source {account.id}; {'replacement saved' if args.set_password else 'stored credential'}). "
+              "No mailboxes opened; no messages downloaded; archive unchanged.")
+    return 0
+
+
 def synchronize(args: argparse.Namespace) -> int:
+    if getattr(args, "check_credentials", False) or getattr(args, "set_password", False):
+        return check_credentials(args)
     workers = configured_workers(args.workers)
     if args.source and (args.new or args.add_source):
         raise ValueError("--source selects an existing account; omit it with --new or --add-source")
@@ -213,13 +257,19 @@ def synchronize(args: argparse.Namespace) -> int:
             lease.release()
 
 
-def main() -> int:
-    args = parser().parse_args()
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    args = parser(prog).parse_args(argv)
     try:
         return synchronize(args)
     except KeyboardInterrupt:
         print("Interrupted", file=sys.stderr)
         return 130
+    except ImapPaused as error:
+        print(str(error), file=sys.stderr)
+        return 75
+    except (ImapAuthenticationError, ConfigurationError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
     except Exception as error:
         print(f"IMAP synchronization failed: {safe_status_text(str(error))}", file=sys.stderr)
         return 1

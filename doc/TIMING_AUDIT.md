@@ -12,6 +12,14 @@ the alpha 61 repair retain the earlier audit's recorded revision boundaries.
 The user's final policy replaces **all first-party non-timeout timers**,
 including scheduling, debounce, sampling and retry delays.
 
+The November 8 IMAP follow-up explicitly authorizes one exception: temporary
+server-capacity refusals use cancellation-aware exponential backoff, starting at
+one second and capped at 60 seconds. This wait throttles rejected connections;
+it never establishes successful authentication or completion. Suspend/Quit wakes
+framework cancellation immediately; discovery also observes the existing native
+console notification through the shared future waiter, avoiding Windows3.12
+Event.wait signal delays. Other timer restrictions remain.
+
 ## Alpha 61 — reported CI and deadline repair
 
 Baseline for this new reported failure repair is published alpha 60 commit

@@ -696,10 +696,11 @@ fn extract(job: &Job, path: &Path, args: &Args, report: &mut Report) -> Result<(
         )?,
         Kind::Zip => {
             let mut archive = zip::ZipArchive::new(File::open(path)?)?;
+            archive.validate_header_consistency()?;
             for index in 0..archive.len() {
                 check_interrupted()?;
                 let mut member = archive.by_index(index)?;
-                let name = member.name().to_owned();
+                let name = member.name()?.into_owned();
                 safe_member(&name)?;
                 ensure!(
                     member.size() <= remaining,

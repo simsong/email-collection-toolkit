@@ -259,13 +259,13 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
         raise AssertionError("; ".join(failures))
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    parser = argparse.ArgumentParser(prog=prog, description=__doc__)
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--self-test", action="store_true", help="test with no UI")
     modes.add_argument("--self-test-gui", action="store_true", help="also show and test native windows")
     parser.add_argument("--report", type=Path, help="write a JSON result")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     report = SelfTestReport(mode="gui" if args.self_test_gui else "headless", frozen=bool(getattr(sys, "frozen", False)))
 
     def save():

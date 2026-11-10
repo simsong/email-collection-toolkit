@@ -39,14 +39,14 @@ is not a public anonymous-download dataset.
 Yes: every enabled dataset runs both locally and on AWS. The dataset definition
 and processing code are shared; AWS does not have a separate ingestion
 implementation. An EC2 worker checks out the configured repository ref and runs
-the same `make validation-run DATASET=<id>` target used locally.
+the same `ect validation run DATASET` command used locally.
 
 | Stage | Local mode | AWS EC2 mode |
 | --- | --- | --- |
 | Read dataset TOML | Repository checkout | Published repository checkout |
 | Download and hash sources | `data/downloads/<id>/` | Worker-local `data/downloads/<id>/` |
 | Safely extract and preprocess | Same Python pipeline | Same Python pipeline |
-| Ingest with on-demand ClamAV | Same `mailarchiver` CLI | Same `mailarchiver` CLI |
+| Ingest with on-demand ClamAV | Same `ect import` engine | Same `ect import` engine |
 | Verify Mailbag | Installed `verify_mail_archive.py` | Installed `verify_mail_archive.py` |
 | Package result | `data/results/<id>.mailbag.zip` | Same worker-local ZIP |
 | Retain result | Local ignored `data/` tree | Existing parameterized S3 bucket |
@@ -68,14 +68,14 @@ bucket, VPC, and public subnet parameters.
 List configurations or run one dataset:
 
 ```sh
-make validation-list
-make validation-run DATASET=spamassassin
+ect validation list
+ect validation run spamassassin
 ```
 
 Run every configured dataset sequentially:
 
 ```sh
-make validation-run-all
+ect validation run-all
 ```
 
 The final ZIP is `data/results/<dataset>.mailbag.zip`; the associated JSON report
@@ -91,13 +91,13 @@ subnet, and published repository ref. Deploy and launch one dataset with:
 ```sh
 make validation-sam-validate
 make validation-sam-deploy
-make validation-aws-start DATASET=spamassassin STACK=mailarchiver-validation
+ect validation aws-start spamassassin --stack mailarchiver-validation
 ```
 
 Launch all nine workers independently and concurrently:
 
 ```sh
-make validation-aws-start-all STACK=mailarchiver-validation
+ect validation aws-start-all --stack mailarchiver-validation
 ```
 
 SAM creates the launcher and worker IAM/network resources, but never creates or

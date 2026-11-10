@@ -44,6 +44,9 @@ generation does not reread the corpus to count MIME attachments. The payload
 manifest reuses the computed complete-MBOX hashes. `bag-info.txt` retains its
 external identifier while refreshing its timestamp and payload oxum, and the
 tag manifest is written last.
+The integrity adapter labels this pass **Verifying archived messages and saving
+checksums** in both its starting and completed progress events. It reads the
+whole archive locally; download-partition percentages do not measure this pass.
 
 ## Technology decision
 

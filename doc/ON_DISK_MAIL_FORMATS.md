@@ -10,12 +10,11 @@ explicit partial-import reporting; compressed OST remains unqualified. The
 [executable importer specification](PST_IMPORTER.md#executable-stream-contract) supersedes the original
 single-backend selection and development sequence below.
 
-This is the single inventory for physical mail formats: what the project can
-read now, what it plans to read, where test material can come from, and which
-open-source components are candidates. It complements the normative archive
-rules in [requirements.md](requirements.md), the plug-in contracts in
-[PLUGINS.md](PLUGINS.md), and the implementation narrative in
-[implementation.md](implementation.md).
+This is a historical format/backend research inventory, including candidate
+components and test-data sources. For current supported formats, use the
+[README](../README.md#current-status), [user manual](USER_MANUAL.md), and
+[PST/OST reader limits](PST_IMPORTER.md). The requirements and implementation
+references own current contracts; the research below is not an installation guide.
 
 ## Original decision summary (historical)
 
@@ -55,13 +54,10 @@ bytes are never described as byte-identical source mail.
 Emailchemy is useful as a personal evaluation and comparison tool, not as a
 source of truth for this project.
 
-The current store lists the Personal Individual edition at **$29.95** for one
-person's email, with a Personal Household edition at $49.95. The Forensic
-Technician edition is listed at $299. The vendor describes the personal
-license as non-commercial, non-organizational, and non-professional, so the
-Individual price is the relevant one only for personal use. See the
-[current store](https://sites.fastspring.com/weirdkid/instant/emailchemy) and
+For current editions, prices and license terms, consult the vendor's
+[store](https://sites.fastspring.com/weirdkid/instant/emailchemy) and
 [edition comparison](https://www.weirdkid.com/knowledge-base/which-edition-of-emailchemy/).
+The old research prices are omitted because they are not maintained product guidance.
 
 There is a usable trial/demo mode, but its output is deliberately throwaway:
 the registration documentation says that demo data masks headers such as

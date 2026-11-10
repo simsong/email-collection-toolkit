@@ -111,7 +111,7 @@ attachment-text extraction are not currently implemented; the checkbox does
 not add those capabilities.
 
 ```console
-make run ARGS='--archive "/path/to/collection" refresh-index --index-attachments'
+ect refresh-index --archive collection.mailarchive --index-attachments
 ```
 
 ## Original folders and saved filter sets

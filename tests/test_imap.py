@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from email.parser import BytesParser
 import errno
@@ -24,36 +25,304 @@ import signal
 import subprocess
 import sys
 import time
+import traceback
 from threading import Barrier, Event
 
 import pytest
 
 from mailarchiver.file_events import wait_for_path_state
-from mailarchiver.__main__ import IngestRequest
+from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import create_empty_archive
 from mailarchiver.archive_config import load_archive_config, save_archive_config
 from mailarchiver.document_options import OWNER_NAMES_DETECTED
-from mailarchiver.imap_cli import SyncReporter, parser, synchronize
+from mailarchiver.imap_cli import SyncReporter, main as imap_main, parser, synchronize
 from mailarchiver.imap_credentials import save_password
 from mailarchiver.imap_credentials import PASSWORD_KEY, password_for, _development_password
 from keyring.errors import KeyringError
 from mailarchiver.imap_models import ImapAccount, ImapDownload, ImapMailbox, ImapMessageMetadata
 from mailarchiver.imap_cli import prompt_account
-from mailarchiver.imap_protocol import ImapPaused, ImapSession, body_literal, connection_interrupted, decode_mailbox, message_metadata, response_tokens, selected_mailboxes
+from mailarchiver.imap_protocol import ImapAuthenticationError, ImapPaused, ImapServerBusy, ImapSession, body_literal, connection_interrupted, decode_mailbox, message_metadata, quoted, response_tokens, selected_mailboxes
 from mailarchiver.imap_state import initialize_state, known_observation, record_download, refresh_observation, totals
 from mailarchiver.gui_processing import resume_request, unfinished_work
 from mailarchiver.gui_app import IngestWindowApi
 from mailarchiver.writer_lock import WriterLease
 from mailarchiver.gui_service import SearchPage, search_page
 from mailarchiver.ingest_status import read_ingest_history
+from mailarchiver.ingest_diagnostics import format_failure
 from mailarchiver.imap_source import ImapSourcePlugin, imap_locator
 from mailarchiver.standalone_verify import verify_archive
 from tests.test_gui_processing import open_headless, wait_for_import
 from mailarchiver.mbox import MboxLocation, read_verified_location
 from mailarchiver.owner_rules import OwnerRules
-from mailarchiver.plugin_api import MailContainer, MailObject, SourceObservation, SourceReference, SourceSpec
+from mailarchiver.plugin_api import MailContainer, MailObject, ProgressEvent, SourceObservation, SourceReference, SourceSpec
 
 from tests.imap_fixture import DisposableImap, FixtureKeyring, ImapFault, InterruptibleImap, Utf8Imap
+
+SSL_CERT_FILE_ENV = "SSL_CERT_FILE"
+
+
+@pytest.mark.parametrize("plain", [False, True])
+@pytest.mark.parametrize("reply,temporary", [
+    (b"NO [AUTHENTICATIONFAILED] Invalid credentials", False),
+    (b"NO [ALERT] Too many simultaneous connections. (Failure)", True),
+    (b"NO [UNAVAILABLE] Try later", True),
+    (b"NO unexpected server policy", False),
+])
+def test_login_rejections_preserve_reason_and_distinguish_limits(tmp_path: Path, plain: bool,
+        reply: bytes, temporary: bool) -> None:
+    """ACQUISITION: real LOGIN/PLAIN replies distinguish server limits from rejected credentials."""
+    server = Utf8Imap(tmp_path, credentials=("demouser", "secret") if plain else None, login_response=reply)
+    try:
+        account = server.start()
+        expected = ImapPaused if temporary else ImapAuthenticationError
+        with pytest.raises(expected) as failure:
+            with ImapSession(account, "secret", server.context, authentication_only=True):
+                pytest.fail("server rejection was ignored")
+        assert reply.removeprefix(b"NO ").decode() in str(failure.value)
+        assert "secret" not in str(failure.value)
+        assert not any(b" LIST " in command or b" EXAMINE " in command for command in server.commands)
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize("plain,password", [
+    (False, 'synthetic-"private\\secret'), (True, 'synthetic-"private\\secret'),
+    (True, "synthetic-λ'\\secret"),
+])
+@pytest.mark.parametrize("status", [b"NO", b"BAD", b"broken"])
+@pytest.mark.parametrize("wire", [False, True], ids=["raw-echo", "wire-echo"])
+def test_server_echoed_credentials_are_redacted(tmp_path: Path, plain: bool, password: str, status: bytes, wire: bool) -> None:
+    """ACQUISITION: ordinary, BAD and malformed replies cannot leak raw/repr credentials or SASL payloads."""
+    import base64
+    payload = base64.b64encode(b"\0demouser\0" + password.encode())
+    echo = quoted(password.encode()) if wire else password.encode()
+    reply = status + b" [AUTHENTICATIONFAILED] " + echo + b" " + payload
+    if status == b"broken":
+        reply += b" too many connections"  # Malformed protocol data must never become retryable.
+    server = Utf8Imap(tmp_path, credentials=("demouser", password) if plain else None, login_response=reply)
+    try:
+        account = server.start()
+        expected = imaplib.IMAP4.abort if status == b"broken" else ImapAuthenticationError
+        with pytest.raises(expected) as failure:
+            with ImapSession(account, password, server.context, authentication_only=True):
+                pytest.fail("server rejection was ignored")
+        diagnostic = "\n".join((str(failure.value), format_failure(failure.value),
+                                "".join(traceback.format_exception(failure.value))))
+        for value in (password, password.replace("\\", "\\\\").replace('"', '\\"')):
+            escaped = "".join(repr(bytes([byte]))[2:-1] for byte in value.encode())
+            for secret in (value, escaped, escaped.replace("'", "\\'"), escaped.replace('"', '\\"'), payload.decode()):
+                assert secret not in diagnostic
+        assert "[AUTHENTICATIONFAILED]" in str(failure.value) and "[redacted]" in str(failure.value)
+        assert failure.value.__cause__ is None and failure.value.__suppress_context__
+    finally:
+        server.close()
+
+
+def test_connection_limit_in_greeting_is_not_a_password_error(tmp_path: Path) -> None:
+    """ACQUISITION: capacity rejection can precede authentication and must remain retryable."""
+    server = Utf8Imap(tmp_path, greeting=b"* BYE [ALERT] Too many simultaneous connections.\r\n")
+    try:
+        account = server.start()
+        with pytest.raises(ImapServerBusy, match="Too many simultaneous connections"):
+            with ImapSession(account, "demopass", server.context):
+                pytest.fail("connection refusal was ignored")
+        assert not server.commands
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize("tls", ["implicit", "starttls"])
+@pytest.mark.parametrize("greeting", [b"* NO [UNAVAILABLE] too many connections demopass\r\n",
+                                    b"* BAD [LIMIT] wrong greeting demopass\r\n"])
+def test_connection_limit_words_in_malformed_greetings_are_not_retryable(tmp_path: Path,
+        tls: str, greeting: bytes) -> None:
+    """ACQUISITION: invalid NO/BAD greetings fail promptly despite capacity wording."""
+    server = Utf8Imap(tmp_path, tls="implicit" if tls == "implicit" else "starttls", greeting=greeting)
+    try:
+        account = server.start()
+        archive = tmp_path / "config-only"
+        save_archive_config(archive, load_archive_config(archive).model_copy(update={"imap_sources": [account]}))
+        plugin = ImapSourcePlugin(credentials=lambda _account: "demopass", context=server.context)
+        with pytest.raises(imaplib.IMAP4.error) as failure:
+            next(plugin.discover(SourceSpec(locator=imap_locator(archive, account, 1))))
+        assert "demopass" not in str(failure.value) and "[redacted]" in str(failure.value)
+        assert not server.commands
+    finally:
+        server.close()
+
+
+def test_connection_backoff_retries_discovery_until_server_accepts(tmp_path: Path) -> None:
+    """ACQUISITION: repeated real TLS refusals back off for 1s then 2s without ending discovery."""
+    server = Utf8Imap(tmp_path, credentials=("demouser", "demopass"),
+                      login_response=b"NO [ALERT] Too many simultaneous connections.", login_failures=2)
+    try:
+        account = server.start()
+        archive = tmp_path / "config-only"
+        save_archive_config(archive, load_archive_config(archive).model_copy(update={"imap_sources": [account]}))
+        plugin = ImapSourcePlugin(credentials=lambda _account: "demopass", context=server.context)
+        with closing(plugin.discover(SourceSpec(locator=imap_locator(archive, account, 1)))) as discovered:
+            first = next(discovered)
+            assert isinstance(first, ProgressEvent) and "retrying in 1s" in first.phase
+            started = time.monotonic()
+            second = next(discovered)
+            assert isinstance(second, ProgressEvent) and "retrying in 2s" in second.phase
+            assert time.monotonic() - started >= 1
+            assert isinstance(next(discovered), MailContainer)
+            assert time.monotonic() - started >= 3
+        assert sum(b" AUTHENTICATE PLAIN" in command for command in server.commands) == 3
+        assert set(archive.iterdir()) == {archive / "config.yaml"}
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize("command,authenticated,tls,reply", [
+    (b"CAPABILITY", False, "implicit", b"NO"), (b"CAPABILITY", True, "implicit", b"NO"),
+    (b"ENABLE", True, "implicit", b"NO"), (b"CAPABILITY", False, "implicit", b"BYE"),
+    (b"CAPABILITY", True, "implicit", b"BYE"), (b"STARTTLS", False, "starttls", b"NO"),
+    (b"STARTTLS", False, "starttls", b"BYE"), (b"CAPABILITY", False, "starttls", b"NO"),
+    (b"CAPABILITY", False, "starttls", b"BYE"),
+])
+def test_connection_backoff_retries_session_setup_refusals(tmp_path: Path, command: bytes, authenticated: bool,
+        tls: str, reply: bytes) -> None:
+    """ACQUISITION: real NO/BYE refusals before/after TLS or login retry without misclassifying protocol errors."""
+    assert tls in {"implicit", "starttls"}
+    server = Utf8Imap(tmp_path, credentials=("demouser", "demopass"), setup_command=command,
+                      setup_response=reply + b" [UNAVAILABLE] Temporarily unavailable", setup_authenticated=authenticated,
+                      tls="starttls" if tls == "starttls" else "implicit")
+    try:
+        account = server.start()
+        archive = tmp_path / "config-only"
+        save_archive_config(archive, load_archive_config(archive).model_copy(update={"imap_sources": [account]}))
+        plugin = ImapSourcePlugin(credentials=lambda _account: "demopass", context=server.context)
+        with closing(plugin.discover(SourceSpec(locator=imap_locator(archive, account, 1)))) as discovered:
+            event = next(discovered)
+            assert isinstance(event, ProgressEvent) and "[UNAVAILABLE]" in event.phase
+            assert isinstance(next(discovered), MailContainer)
+        assert sum(b" AUTHENTICATE PLAIN" in line for line in server.commands) == (2 if authenticated else 1)
+        assert set(archive.iterdir()) == {archive / "config.yaml"}
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize("stage", ["login", "capability", "enable", "starttls", "bye"])
+@pytest.mark.parametrize("password,detail", [
+    ("simultaneous", b"[ALERT] Too many simultaneous connections."),
+    ("[UNAVAILABLE]", b"[UNAVAILABLE] Try later"),
+    ("demopass", b"[ALERT] " + b"diagnostic " * 70 + b"too many connections"),
+])
+def test_connection_limit_classification_precedes_redaction(tmp_path: Path, stage: str,
+        password: str, detail: bytes) -> None:
+    """ACQUISITION: redaction and bounded diagnostics cannot erase retry evidence at any setup boundary."""
+    command = (b"CAPABILITY" if stage in {"capability", "bye"} else b"ENABLE" if stage == "enable"
+               else b"STARTTLS" if stage == "starttls" else None)
+    server = Utf8Imap(tmp_path, credentials=("demouser", password),
+                      login_response=b"NO " + detail if stage == "login" else None,
+                      setup_command=command, setup_authenticated=stage == "enable",
+                      setup_response=(b"BYE " if stage == "bye" else b"NO ") + detail if command else None,
+                      tls="starttls" if stage == "starttls" else "implicit")
+    try:
+        account = server.start()
+        with pytest.raises(ImapServerBusy) as failure:
+            with ImapSession(account, password, server.context):
+                pytest.fail("temporary refusal was ignored")
+        assert len(failure.value.detail) <= 512
+        assert password not in "".join(traceback.format_exception(failure.value))
+        assert not any(b" LIST " in line or b" EXAMINE " in line for line in server.commands)
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize("command,tls", [(b"CAPABILITY", "implicit"), (b"CAPABILITY", "starttls"), (b"STARTTLS", "starttls")])
+@pytest.mark.parametrize("reply", [b"NO", b"BYE"])
+def test_credentials_only_capacity_refusal_does_not_retry(tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], command: bytes, tls: str, reply: bytes) -> None:
+    """ACQUISITION: pre-auth NO/BYE refusals return temporary status without retry, credentials or mailbox access."""
+    server = Utf8Imap(tmp_path, setup_command=command, setup_authenticated=False,
+                      setup_response=reply + b" [UNAVAILABLE] Temporarily unavailable",
+                      tls="starttls" if tls == "starttls" else "implicit")
+    vault = FixtureKeyring()
+    monkeypatch.setattr("mailarchiver.imap_credentials.native_keyring", lambda: vault)
+    try:
+        account = server.start()
+        monkeypatch.setenv("SSL_CERT_FILE", str(server.certificate))
+        archive = tmp_path / "config-only"
+        save_archive_config(archive, load_archive_config(archive).model_copy(update={"imap_sources": [account]}))
+        save_password(account, "demopass")
+        assert imap_main(["--archive", str(archive), "--check-credentials"]) == 75
+        assert "[UNAVAILABLE]" in capsys.readouterr().err
+        expected = [b"CAPABILITY"] if command == b"CAPABILITY" else [b"CAPABILITY", b"STARTTLS"]
+        assert [line.split()[1] for line in server.commands] == expected
+        assert password_for(account) == "demopass"
+        assert set(archive.iterdir()) == {archive / "config.yaml"}
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize("skip", [0, 1], ids=["discovery", "download"])
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+def test_connection_backoff_completes_import_without_manual_resume(imap_archive: Path,
+        imap_inbox: DisposableImap, skip: int) -> None:
+    """ACQUISITION: discovery and download login refusals retry without failing the real ingest."""
+    assert isinstance(imap_inbox, InterruptibleImap) and imap_inbox.account is not None
+    imap_inbox.fault = ImapFault(command=b" AUTHENTICATE PLAIN", mode="reject", skip=skip)
+    args = parser().parse_args(["--archive", str(imap_archive), "--no-scan", "--workers", "1"])
+    assert synchronize(args) == 0
+    status = read_ingest_history(imap_archive).statuses[0]
+    assert status.state == "completed" and status.failure_detail is None
+    assert password_for(imap_inbox.account) == "demopass"
+    assert totals(imap_archive).archived == 3
+    assert_imap_searchable(imap_archive)
+
+
+@pytest.mark.parametrize("valid", [False, True])
+def test_credentials_only_cli_leaves_config_only_directory_unchanged(tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], valid: bool) -> None:
+    """ACQUISITION: authentication-only CLI needs no archive DB, lease, ingest, or mailbox access."""
+    server = Utf8Imap(tmp_path, credentials=("demouser", "demopass"))
+    vault = FixtureKeyring()
+    monkeypatch.setattr("mailarchiver.imap_credentials.native_keyring", lambda: vault)
+    try:
+        account = server.start()
+        monkeypatch.setenv("SSL_CERT_FILE", str(server.certificate))
+        archive = tmp_path / "config-only"
+        save_archive_config(archive, load_archive_config(archive).model_copy(update={"imap_sources": [account]}))
+        save_password(account, "demopass" if valid else "incorrect")
+        before = (archive / "config.yaml").read_bytes()
+        assert imap_main(["--archive", str(archive), "--check-credentials"]) == (0 if valid else 1)
+        output = capsys.readouterr()
+        assert ("authentication succeeded" if valid else "authentication failed") in output.out + output.err
+        assert set(archive.iterdir()) == {archive / "config.yaml"}
+        assert (archive / "config.yaml").read_bytes() == before
+        assert password_for(account) == ("demopass" if valid else "incorrect")
+        commands = [line.split()[1] for line in server.commands]
+        assert commands.count(b"AUTHENTICATE") == 1 and commands.count(b"CAPABILITY") == 1
+        assert set(commands) <= {b"CAPABILITY", b"AUTHENTICATE", b"LOGOUT"}
+    finally:
+        server.close()
+
+
+def test_gui_replacement_validates_before_saving_without_ingest(tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """ACQUISITION: desktop replacement preserves an old vault item until real TLS login succeeds."""
+    server = Utf8Imap(tmp_path, credentials=("demouser", "demopass"))
+    vault = FixtureKeyring()
+    monkeypatch.setattr("mailarchiver.imap_credentials.native_keyring", lambda: vault)
+    try:
+        account = server.start()
+        monkeypatch.setenv("SSL_CERT_FILE", str(server.certificate))
+        archive = tmp_path / "config-only"
+        save_archive_config(archive, load_archive_config(archive).model_copy(update={"imap_sources": [account]}))
+        save_password(account, "old-password")
+        controls = IngestWindowApi(archive)
+        with pytest.raises(ImapAuthenticationError):
+            controls.update_imap_password(account.id, "incorrect")
+        assert password_for(account) == "old-password"
+        assert controls.update_imap_password(account.id, "demopass")
+        assert password_for(account) == "demopass"
+        assert set(archive.iterdir()) == {archive / "config.yaml"}
+        assert not any(b" LIST " in command or b" EXAMINE " in command for command in server.commands)
+    finally:
+        server.close()
 
 
 @pytest.mark.parametrize("valid_password", [False, True])
@@ -144,6 +413,28 @@ if '--archive' in sys.argv:
 imap_credentials.native_keyring = lambda: vault
 raise SystemExit(main())
 """
+
+
+def test_ect_imap_credentials_only_uses_dispatcher_without_archive_writes(tmp_path: Path) -> None:
+    """ACQUISITION: the public ect imap dispatcher performs only a stored-credential login."""
+    server = Utf8Imap(tmp_path, credentials=("demouser", "demopass"))
+    try:
+        account = server.start()
+        archive = tmp_path / "config-only"
+        save_archive_config(archive, load_archive_config(archive).model_copy(update={"imap_sources": [account]}))
+        before = (archive / "config.yaml").read_bytes()
+        driver = CLI_DRIVER.replace("from mailarchiver.imap_cli import main", "from mailarchiver.cli import main")
+        environment = os.environ.copy()
+        environment[SSL_CERT_FILE_ENV] = str(server.certificate)
+        result = subprocess.run([sys.executable, "-c", driver, "imap", "--archive", str(archive), "--check-credentials"],
+                                env=environment, capture_output=True, text=True, check=False, timeout=30)
+        assert result.returncode == 0 and "authentication succeeded" in result.stdout, result.stderr
+        assert set(archive.iterdir()) == {archive / "config.yaml"}
+        assert (archive / "config.yaml").read_bytes() == before
+        commands = [line.split()[1] for line in server.commands]
+        assert commands.count(b"AUTHENTICATE") == 1 and set(commands) <= {b"CAPABILITY", b"AUTHENTICATE", b"LOGOUT"}
+    finally:
+        server.close()
 
 
 @pytest.fixture(autouse=True)
@@ -278,6 +569,90 @@ def assert_imap_searchable(archive: Path) -> None:
     with closing(sqlite3.connect(archive / "processing.sqlite3")) as database:
         assert database.execute("SELECT count(*) FROM jobs WHERE status!='completed'").fetchone() == (0,)
         assert database.execute("SELECT count(*) FROM invocations WHERE kind='text-index' AND status='completed'").fetchone()[0] > 0
+
+
+@pytest.mark.parametrize("connections", [8, 3, 15])
+def test_imap_connection_cap_preserves_processing_workers(imap_archive: Path, imap_inbox: DisposableImap,
+        connections: int) -> None:
+    """ACQUISITION: separate connection budgets constrain real TLS sessions, retaining sixteen workers."""
+    assert imap_inbox.account is not None
+    with imap_inbox.connect() as client:
+        for number in range(28):
+            client.append("INBOX", None, None, f"Subject: limit {number}\r\n\r\nsynthetic {number}\r\n".encode())
+    imap_inbox.peak_connections = 0
+    imap_inbox.connection_target = connections
+    imap_inbox.pause_after_bodies(1)
+    request = IngestRequest(archive=imap_archive, roots=[imap_locator(imap_archive, imap_inbox.account, 16)],
+                            workers=16, imap_connections=connections, scan_policy="not-scanned")
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(run_ingest, request, terminal=False)
+        try:
+            assert imap_inbox.connections_ready.wait(15), f"{connections} acquisition sessions were not admitted"
+            assert not future.done()
+        finally:
+            imap_inbox.release_bodies()
+        future.result(timeout=30)
+    assert imap_inbox.peak_connections == connections
+    assert read_ingest_history(imap_archive).statuses[0].configured_workers == 16
+    assert resume_request(imap_archive, False, True).workers == 16
+    assert resume_request(imap_archive, False, True).imap_connections is None  # Reload personal preferences on continuation.
+    assert totals(imap_archive).archived == 31
+    assert not verify_archive(imap_archive)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal injection; native Windows console acceptance remains separate")
+@pytest.mark.parametrize("command", ["imap", "import", "shortcut"])
+@pytest.mark.parametrize("skip", [0, 1], ids=["discovery", "download"])
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+def test_connection_backoff_cli_reports_reason_and_ctrl_c_checkpoints(imap_archive: Path,
+        imap_inbox: DisposableImap, tmp_path: Path, command: str, skip: int) -> None:
+    """ACQUISITION: public CLIs report zero-download backoff once and promptly checkpoint Ctrl-C."""
+    assert isinstance(imap_inbox, InterruptibleImap) and imap_inbox.account is not None
+    imap_inbox.fault = ImapFault(command=b" AUTHENTICATE PLAIN", mode="reject", skip=skip,
+                               refusal=b"NO [ALERT] " + b"policy explanation " * 8 + b"Too many simultaneous connections.")
+    driver = "from mailarchiver import imap_source\nimap_source.IMAP_RETRY_INITIAL = 60.0\n" + CLI_DRIVER.replace(
+        "from mailarchiver.imap_cli import main", "from mailarchiver.cli import main")
+    if command == "shortcut":
+        driver = driver.replace("raise SystemExit(main())", "sys.argv[0] = 'ect-import'\nraise SystemExit(main())")
+    arguments = ([] if command == "shortcut" else [command]) + ["--archive", str(imap_archive), "--no-scan", "--workers", "1"]
+    if command != "imap":
+        arguments.append("--imap")
+    output = tmp_path / "backoff.log"
+    with output.open("wb") as log:
+        process = subprocess.Popen([sys.executable, "-c", driver, *arguments], stdout=log, stderr=log, start_new_session=True)
+        try:
+            marker = "IMAP server busy; retrying in 60s:"
+            wait_for_path_state([output], lambda: marker in output.read_text(), timeout=10)
+            assert totals(imap_archive).archived == 0
+            os.killpg(process.pid, signal.SIGINT)
+            assert process.wait(timeout=3) == 130, output.read_text()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+    diagnostic = output.read_text()
+    assert diagnostic.count(marker) == 1 and "Too many simultaneous connections" in diagnostic
+    assert "Traceback" not in diagnostic and "demopass" not in diagnostic
+    assert read_ingest_history(imap_archive).statuses[0].state == "interrupted"
+    assert resume_request(imap_archive, True, True).roots
+    assert password_for(imap_inbox.account) == "demopass"
+
+
+def test_ect_import_uses_saved_imap_sources(imap_archive: Path, imap_inbox: DisposableImap) -> None:
+    """ACQUISITION: the unified CLI runs real TLS IMAP and resumes without duplicate messages."""
+    from mailarchiver.cli import main as ect_main  # pylint: disable=import-outside-toplevel
+    arguments = ["import", "--archive", str(imap_archive), "--imap", "--no-scan", "--workers", "1"]
+    with imap_inbox.connect() as client:
+        client.select("INBOX", readonly=True)
+        flags = client.uid("FETCH", "1:*", "(UID FLAGS RFC822.SIZE)")[1]
+    assert ect_main(arguments) == 0
+    assert_imap_searchable(imap_archive)
+    before = totals(imap_archive)
+    assert ect_main(arguments) == 0
+    assert totals(imap_archive) == before
+    with imap_inbox.connect() as client:
+        client.select("INBOX", readonly=True)
+        assert client.uid("FETCH", "1:*", "(UID FLAGS RFC822.SIZE)")[1] == flags
 
 
 @pytest.mark.parametrize("imap_server", ["implicit", "starttls"], indirect=True)
@@ -508,6 +883,60 @@ def test_imaplib_wrapped_send_timeout_retains_timeout_presentation() -> None:
             session.__exit__(type(error), error, error.__traceback__)
 
 
+@pytest.mark.parametrize("public", [False, True], ids=["engine-cli", "ect-import"])
+def test_shared_cli_login_rejection_has_no_traceback(imap_archive: Path, imap_inbox: DisposableImap, public: bool) -> None:
+    """ACQUISITION: the general ingest CLI also reports real login rejection without a traceback."""
+    assert imap_inbox.account is not None
+    module = "mailarchiver.cli" if public else "mailarchiver.__main__"
+    driver = CLI_DRIVER.replace("from mailarchiver.imap_cli import main", f"from {module} import main")
+    driver = driver.replace("'demopass'", "'incorrect'")
+    arguments = (["import", "--archive", str(imap_archive), "--imap", "--no-scan", "--workers", "1"] if public else
+                 ["--archive", str(imap_archive), "ingest", "--no-scan", "--workers", "1",
+                  imap_locator(imap_archive, imap_inbox.account, 1)])
+    result = subprocess.run([sys.executable, "-c", driver, *arguments],
+        capture_output=True, text=True, check=False, timeout=30)
+    assert result.returncode == 1
+    assert "IMAP authentication failed" in result.stderr and "Traceback" not in result.stderr
+    assert "--set-password" in result.stderr
+    status = read_ingest_history(imap_archive).statuses[0]
+    assert status.state == "failed" and status.failure_detail and "Traceback" not in status.failure_detail
+
+
+@pytest.mark.parametrize("shortcut", [False, True], ids=["ect-import-command", "ect-import-shortcut"])
+@pytest.mark.parametrize("paused", [False, True], ids=["rejected", "interrupted"])
+def test_shared_cli_login_reason_survives_long_account_names(tmp_path: Path, shortcut: bool, paused: bool) -> None:
+    """ACQUISITION: public imports retain rejection diagnostics and temporary-pause status/guidance."""
+    username = "long.synthetic.username@example.test"
+    reason = b"[AUTHENTICATIONFAILED] Explicit synthetic policy reason"
+    server = Utf8Imap(tmp_path, credentials=(username, "demopass"),
+                      login_response=None if paused else b"NO " + reason + b" demopass",
+                      setup_command=b"CAPABILITY" if paused else None, setup_authenticated=False,
+                      setup_response=b"BYE Server shutting down" if paused else None)
+    try:
+        account = server.start().model_copy(update={"username": username})
+        archive = tmp_path / "archive"
+        create_empty_archive(archive)
+        config = load_archive_config(archive).model_copy(update={"imap_sources": [account], "owner": OwnerRules(include=[username])})
+        save_archive_config(archive, config)
+        driver = CLI_DRIVER.replace("from mailarchiver.imap_cli import main", "from mailarchiver.cli import main")
+        if shortcut:
+            driver = driver.replace("raise SystemExit(main())", "sys.argv[0] = 'ect-import'\nraise SystemExit(main())")
+        arguments = ([] if shortcut else ["import"]) + ["--archive", str(archive), "--imap", "--no-scan", "--workers", "1"]
+        result = subprocess.run([sys.executable, "-c", driver, *arguments], env=os.environ | {SSL_CERT_FILE_ENV: str(server.certificate)},
+                                capture_output=True, text=True, check=False, timeout=30)
+        assert result.returncode == (75 if paused else 1) and "Traceback" not in result.stderr
+        if paused:
+            assert "use Resume when connected" in result.stderr
+            assert read_ingest_history(archive).statuses[0].state == "paused"
+        else:
+            assert reason.decode() in result.stderr and "--set-password" in result.stderr
+            assert "[redacted]" in result.stderr
+        assert "demopass" not in result.stderr
+        assert not any(b" LIST " in line or b" EXAMINE " in line for line in server.commands)
+    finally:
+        server.close()
+
+
 def test_rejected_credentials_remain_a_failure(imap_archive: Path, imap_inbox: DisposableImap) -> None:
     """An authentication rejection must request corrected credentials rather than network resumption."""
     assert imap_inbox.account is not None
@@ -517,6 +946,15 @@ def test_rejected_credentials_remain_a_failure(imap_archive: Path, imap_inbox: D
         synchronize(args)
     status = read_ingest_history(imap_archive).statuses[0]
     assert status.state == "failed" and status.failure_detail and "authentication failed" in status.failure_detail
+    assert "Traceback" not in status.failure_detail and "Message prefix" not in status.failure_detail
+    # Even first discovery rejection retains the exact import settings for password repair.
+    request = resume_request(imap_archive, True, True)
+    assert request.roots and request.scan_policy == "not-scanned" and request.workers == 1
+    save_password(imap_inbox.account, "demopass")
+    from mailarchiver.__main__ import run_ingest  # pylint: disable=import-outside-toplevel
+    run_ingest(request, terminal=False)
+    assert totals(imap_archive).archived == 3
+    assert_imap_searchable(imap_archive)
 
 
 @pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)

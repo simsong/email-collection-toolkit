@@ -15,19 +15,20 @@ dependencies = [
 pff-converter = "pff_converter.cli:main"
 
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=84.1.0"]
 build-backend = "setuptools.build_meta"
 
 [dependency-groups]
 dev = [
     "pytest>=8",
     "pyinstaller>=6.22,<7",
-    "pylint>=4.0.8",
+    "pylint>=4.0.9",
     "pyright>=1.1.414",
 ]
 
 [tool.uv]
 package = true
+constraint-dependencies = ["setuptools>=84.1.0"]
 
 [tool.pyright]
 include = ["src", "tests", "entry.py"]

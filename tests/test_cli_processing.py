@@ -517,7 +517,8 @@ def test_cli_failed_reprocessing_removes_stale_search_content(tmp_path: Path) ->
     configure(archive, "text-index", {"max_text_bytes": 0})
     result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "process", "--reprocess"],
                             capture_output=True, text=True, check=False, timeout=60)
-    assert result.returncode != 0 and "max_text_bytes must be a positive integer" in result.stderr
+    assert result.returncode != 0 and "plugins.text-index.max_text_bytes" in result.stderr
+    assert "Repair config.yaml" in result.stderr and "Traceback" not in result.stderr
     with sqlite3.connect(archive / "search.sqlite3") as db:
         assert all("stalebodytoken" not in row[0] for row in db.execute("SELECT content FROM message_fts"))
         assert db.execute("SELECT count(*) FROM attachment_fts").fetchone() == (0,)

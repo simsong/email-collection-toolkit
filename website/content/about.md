@@ -13,6 +13,17 @@ and search indexes support the archive; source mail is never modified. Search
 indexes can be rebuilt, but manual identity and tag decisions must be preserved.
 Back up the entire archive, including its databases and configuration.
 
+## Alpha testing
+
+Email Collection Toolkit is in alpha testing and is safe to test with your email.
+Imports leave your source files and mail accounts unchanged. The archive file
+format is stable: original message data is preserved in standard MBOX files
+inside a BagIt / Mailbag package, with SHA-256 checksums to detect corruption.
+
+The application is not yet ready for production use because usability and
+performance are still being improved. Testing and feedback are welcome through
+the [Community Forum](@/discussions.md).
+
 ## Simson Garfinkel
 
 Email Collection Toolkit is authored by Simson L. Garfinkel with assistance from Codex.

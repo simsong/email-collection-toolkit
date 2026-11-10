@@ -32,7 +32,8 @@ def test_worker_preferences_controls_persist_and_respect_cli(tmp_path: Path, pag
     store.write(ApplicationPreferences())
     controller = ApplicationController(store)
     app = PyWebViewApplication(controller, workers_override=override)
-    api = UpdatePreferencesApi(app.updates, controller.configure_updates, app.worker_settings, app.save_preferences)
+    api = UpdatePreferencesApi(app.updates, controller.configure_updates, app.worker_settings, app.save_preferences,
+                               imap_connections=lambda: controller.preferences.imap_connections)
     expose(page, api, ("state", "save", "check", "close_saved"))
     try:
         page.goto("data:text/html," + quote(PAGE))
@@ -45,6 +46,18 @@ def test_worker_preferences_controls_persist_and_respect_cli(tmp_path: Path, pag
         expect(half).to_be_checked()
         expect(count).to_have_attribute("max", str(logical_cpus() * 2))
         expect(page.locator("#all-cpus")).to_have_text(str(logical_cpus()))
+        connections = page.get_by_label("Maximum IMAP connections per account")
+        expect(connections).to_have_value("8")
+        expect(connections).to_be_enabled()  # --workers locks only processing choices.
+        connections.fill("3")
+        page.evaluate("savePreferences()")
+        assert store.read().imap_connections == 3
+        connections.fill("16")
+        connections.dispatch_event("change")
+        expect(page.locator("#status")).to_contain_text("IMAP connection limit")
+        assert store.read().imap_connections == 3
+        connections.fill("3")
+        page.evaluate("savePreferences()")
         if override is None:
             expect(half).to_be_enabled()
             page.locator('input[value="all"]').check()

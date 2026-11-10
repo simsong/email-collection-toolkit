@@ -234,6 +234,33 @@ fn zip_and_sevenz_stream_exact_pst_members() {
 }
 
 #[test]
+/// DELIVERY: reject ZIP header disagreement (GHSA-m665-v7pm-7grj) without publishing PST bytes.
+fn zip_rejects_disguised_local_member_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut archive = zip("safe.pst", &pst());
+    assert_eq!(&archive[..4], b"PK\x03\x04");
+    assert_eq!(u16::from_le_bytes([archive[26], archive[27]]), 8);
+    archive[30..38].copy_from_slice(b"../x.pst");
+    let original = archive.clone();
+    let server = Server::new(BTreeMap::from([("/mail.zip".into(), archive)]));
+    inventory(
+        dir.path(),
+        &serde_json::json!({"fixtures": [fixture(&format!("{}/mail.zip", server.url), &original)]}),
+    );
+    assert!(!run(args(dir.path())).unwrap());
+    let result = report(dir.path());
+    assert_eq!(result.failures.len(), 1);
+    assert!(result.observations.is_empty());
+    assert_eq!(
+        fs::read_dir(dir.path().join("cache/objects"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert!(!dir.path().join("x.pst").exists());
+}
+
+#[test]
 /// A 7z member must agree with both the inventory size and digest before publication.
 fn sevenz_enforces_inventory_member_integrity() {
     let data = pst();

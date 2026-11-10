@@ -24,9 +24,11 @@ import webview
 from .updates import (PREVIEW_STREAM_LABEL, RELEASE_STREAM_LABEL, UPDATE_STREAM_HELP,
                       UpdateChannel, UpdateService)
 from .worker_preferences import WorkerPreferences, WorkerSettings
+from .imap_preferences import validate_imap_connections
 
 WORKERS_KEY = "workers"
-PreferencesSave = Callable[[UpdateChannel, bool, WorkerPreferences | None], None]
+IMAP_CONNECTIONS_KEY = "imap_connections"
+PreferencesSave = Callable[[UpdateChannel, bool, WorkerPreferences | None, int | None], None]
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Preferences</title>
 <style>body{font:16px system-ui;margin:28px}label{display:block;margin:18px 0}select,button{font:inherit;padding:7px}#status,#update-status{white-space:pre-wrap}</style></head>
@@ -36,7 +38,11 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Preferences</t
 <label><input type="radio" name="workers-mode" value="all"> All CPUs (<span id="all-cpus"></span>)</label>
 <label><input type="radio" name="workers-mode" value="custom"> Custom
 <input id="worker-count" type="number" min="1" step="1" aria-label="Custom worker count"></label></fieldset>
-<p id="workers-note"></p><p id="workers-help"></p></section><h2>Updates</h2><p id="version"></p>
+<p id="workers-note"></p><p id="workers-help"></p></section>
+<section id="imap-section" hidden><h2>IMAP connections</h2>
+<label>Maximum IMAP connections per account <input id="imap-connections" type="number" min="1" max="15" step="1"></label>
+<p>Default: 8. Independent of processing workers. Applies when starting or continuing an import.</p></section>
+<h2>Updates</h2><p id="version"></p>
 <label>Update stream <select id="channel"><option value="release">__RELEASE_STREAM_LABEL__</option><option value="preview">__PREVIEW_STREAM_LABEL__</option></select></label>
 <p>__UPDATE_STREAM_HELP__</p>
 <label><input type="checkbox" id="automatic"> Check when the application opens</label>
@@ -45,7 +51,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Preferences</t
 <button id="check" disabled>Check for Program Updates</button>
 <p id="update-status" role="status"></p><p id="status" role="status"></p><script>
 const status = document.getElementById('status');
-let workerSettings=null, ready=false, closing=false, saveQueue=Promise.resolve(), saveRevision=0, statusRead=null;
+let workerSettings=null, imapAvailable=false, ready=false, closing=false, saveQueue=Promise.resolve(), saveRevision=0, statusRead=null;
 function refresh(){if(!statusRead)statusRead=readState().finally(()=>{statusRead=null});return statusRead;}
 async function refreshFresh(){if(statusRead)await statusRead.catch(()=>{});return refresh();}
 async function readState(){const s=await pywebview.api.state();
@@ -58,6 +64,8 @@ const input=document.getElementById('worker-count');input.max=w.maximum;input.va
 document.getElementById('workers-controls').disabled=w.command_line!==null;
 document.getElementById('workers-note').textContent=w.override_note;
 document.getElementById('workers-help').textContent=`1–${w.maximum} workers (at most twice ${w.cpus} CPUs). Applies when starting or continuing work.`;}
+if(s.imap_connections!==undefined){imapAvailable=true;document.getElementById('imap-section').hidden=false;
+document.getElementById('imap-connections').value=s.imap_connections;}
 document.getElementById('channel').value=s.channel;document.getElementById('automatic').checked=s.automatic_checks;
 ready=true;document.body.dataset.ready='true';}
 document.getElementById('version').textContent=`Version ${s.version} (build ${s.build || 'source'})`;
@@ -71,8 +79,11 @@ if(!ready)throw new Error('Preferences are still loading.');
 const editable=workerSettings && workerSettings.command_line===null;
 const input=document.getElementById('worker-count');
 if(editable && (!input.value || !input.reportValidity()))throw new Error(`Enter a whole number from 1 to ${workerSettings.maximum}.`);
+const imap=document.getElementById('imap-connections');
+if(imapAvailable && (!imap.value || !imap.reportValidity()))throw new Error('Enter an IMAP connection limit from 1 to 15.');
 const values=[document.getElementById('channel').value,document.getElementById('automatic').checked,
-editable ? document.querySelector('input[name="workers-mode"]:checked').value : null,editable ? Number(input.value) : null];
+editable ? document.querySelector('input[name="workers-mode"]:checked').value : null,editable ? Number(input.value) : null,
+imapAvailable ? Number(imap.value) : null];
 saveQueue=saveQueue.catch(()=>{}).then(()=>pywebview.api.save(...values));
 const accepted=await saveQueue;
 if(revision===saveRevision){document.getElementById('automatic').checked=accepted;status.textContent='Settings saved.';}
@@ -99,7 +110,7 @@ catch(error){if(revision===saveRevision)showError(error)}};
 class UpdatePreferencesApi:
     def __init__(self, service: UpdateService, save: Callable[[UpdateChannel, bool], None],
                  workers: Callable[[], WorkerSettings] | None = None, save_preferences: PreferencesSave | None = None,
-                 quitting: Callable[[], bool] = lambda: False) -> None:
+                 quitting: Callable[[], bool] = lambda: False, imap_connections: Callable[[], int] | None = None) -> None:
         self.window: Any = None
         self._close_ready = False
         self._quitting = quitting
@@ -107,14 +118,18 @@ class UpdatePreferencesApi:
         self._save = save
         self._workers = workers
         self._save_preferences = save_preferences
+        self._imap_connections = imap_connections
 
     def state(self) -> dict[str, Any]:
         state = self._service.status.model_dump(mode="json")
         if self._workers is not None:
             state[WORKERS_KEY] = self._workers().model_dump(mode="json")
+        if self._imap_connections is not None:
+            state[IMAP_CONNECTIONS_KEY] = self._imap_connections()
         return state
 
-    def save(self, channel: str, automatic: bool, worker_mode: str | None = None, worker_count: int | None = None) -> bool:
+    def save(self, channel: str, automatic: bool, worker_mode: str | None = None, worker_count: int | None = None,
+             imap_connections: int | None = None) -> bool:
         if channel not in {"release", "preview"} or not isinstance(automatic, bool):
             raise ValueError("Invalid update preferences")
         selected: UpdateChannel = "preview" if channel == "preview" else "release"
@@ -128,11 +143,15 @@ class UpdatePreferencesApi:
             if worker_mode is None or worker_count is None:
                 raise ValueError("Choose a worker mode and custom count")
             workers = WorkerPreferences.from_input(worker_mode, worker_count, settings.cpus)
+        if imap_connections is not None:
+            if self._imap_connections is None or self._save_preferences is None:
+                raise ValueError("IMAP preferences are unavailable")
+            validate_imap_connections(imap_connections)
         previous = self._service.status.channel, self._service.status.automatic_checks
         self._service.configure(selected, automatic)
         try:
             if self._save_preferences is not None:
-                self._save_preferences(selected, self._service.status.automatic_checks, workers)
+                self._save_preferences(selected, self._service.status.automatic_checks, workers, imap_connections)
             else:
                 self._save(selected, self._service.status.automatic_checks)
         except (OSError, ValueError):
@@ -164,10 +183,11 @@ class UpdatePreferencesApi:
 
 def show_windows_update_preferences(service: UpdateService, save: Callable[[UpdateChannel, bool], None],
                                    workers: Callable[[], WorkerSettings] | None = None, save_preferences: PreferencesSave | None = None,
-                                   quitting: Callable[[], bool] = lambda: False) -> Any:
+                                   quitting: Callable[[], bool] = lambda: False,
+                                   imap_connections: Callable[[], int] | None = None) -> Any:
     from .gui_app import WindowBridge
 
-    api = UpdatePreferencesApi(service, save, workers, save_preferences, quitting)
+    api = UpdatePreferencesApi(service, save, workers, save_preferences, quitting, imap_connections)
     window = webview.create_window("Preferences", html=PAGE,
         js_api=WindowBridge(api, ("state", "save", "check", "close_saved")), width=620, height=780)
     if window is None:

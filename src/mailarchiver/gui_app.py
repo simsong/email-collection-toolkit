@@ -51,7 +51,9 @@ from .desktop_platform import copy_windows_text, drag_windows_file, open_export,
 from .identity import APPLICATION_NAME
 from .build_info import BUILD_INFO, BuildInfo
 from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argument
-from .imap_protocol import ImapPaused
+from .imap_protocol import ImapAuthenticationError, ImapPaused, ImapSession
+from .imap_credentials import save_password
+from .imap_models import ImapAccount
 from .search_completion import SearchSuggestions
 from .processor_graph import ProcessorGraphStatus, processor_graph
 from .updates import UpdateChannel, UpdateService, UpdateStatus, default_channel
@@ -73,7 +75,9 @@ from .configuration import GuiConfiguration, application_configuration
 from .gui_default_lists import DefaultListsApi
 from .document_options import DocumentOptions, OwnerRulesState
 from .owner_rules import OwnerRules
+from .configuration_diagnostics import ConfigurationError
 from .archive_config import (
+    load_archive_config,
     import_directory as configured_import_directory,
     remember_import_directory,
 )
@@ -223,10 +227,12 @@ class GuiIngestStatus(IngestStatus):
 class GuiIngestHistory(BaseModel):
     statuses: list[GuiIngestStatus]
     errors: list[IngestStatusReadError]
+    warnings: list[str] = Field(default_factory=list)
     starting: bool = False
     active: bool = False
     suspending: bool = False
     can_resume: bool = False
+    imap_accounts: list[ImapAccount] = Field(default_factory=list)
 
 
 class DragExport(BaseModel):
@@ -639,6 +645,8 @@ class IngestWindowApi:
         self.window: Any = None
         self._application = application
         self._document = document
+        self._configuration_warning: str | None = None
+        self._warning_lock = Lock()
 
     def set_window(self, window: Any) -> None:
         self.window = window
@@ -655,9 +663,38 @@ class IngestWindowApi:
         resumable = bool(job is None and self._application is not None
                          and not (statuses and statuses[0].state == "running")
                          and unfinished_work(self.archive).incomplete)
+        warning = None
+        try:
+            accounts = [account for account in load_archive_config(self.archive).imap_sources if account.enabled]
+        except ConfigurationError as error:
+            accounts = []  # Saved history remains readable when account configuration is unavailable.
+            warning = f"Account settings are unavailable. {error} Saved import history remains available."
+        with self._warning_lock:
+            changed = warning != self._configuration_warning
+            self._configuration_warning = warning
+        if warning and changed:
+            logging.getLogger(__name__).warning("%s", warning)
         return GuiIngestHistory(statuses=statuses, errors=history.errors, starting=starting,
+                                warnings=[warning] if warning else [],
                                 active=job is not None, suspending=bool(job and job.stop.is_set()),
+                                imap_accounts=accounts,
                                 can_resume=job is None and resumable and self._application is not None).model_dump(mode="json")
+
+    def update_imap_password(self, source_id: str, password: str) -> bool:
+        """Validate a user-entered replacement before updating only its native-vault item."""
+        if self.archive is None or (self._document is not None and self._document.ingest_job is not None):
+            raise ValueError("Suspend the import before updating its password")
+        accounts = [account for account in load_archive_config(self.archive).imap_sources
+                    if account.enabled and account.id == source_id]
+        if len(accounts) != 1:
+            raise ValueError("The selected IMAP account is unavailable")
+        try:
+            with ImapSession(accounts[0], password, authentication_only=True):
+                pass
+            save_password(accounts[0], password)
+        finally:
+            password = ""
+        return True
 
     def suspend_import(self) -> bool:
         if self._application is None or self._document is None:
@@ -842,6 +879,11 @@ SEARCH_BRIDGE_METHODS = (
     "save_message", "save_attachment", "prepare_drag", "start_drag",
 )
 
+INGEST_BRIDGE_METHODS = (
+    "history", "can_import_directory", "import_directory", "antivirus", "install_antivirus",
+    "suspend_import", "resume_import", "update_imap_password",
+)
+
 
 class GuiApi:
     """Narrow API exposed to one webview window."""
@@ -1000,7 +1042,7 @@ class GuiApi:
             window = webview.create_window(
                 "Email Collection Toolkit — Ingests",
                 str(GUI_DIRECTORY / f"ingests.html{selected}"),
-                js_api=WindowBridge(api, ("history", "can_import_directory", "import_directory", "antivirus", "install_antivirus")),
+                js_api=WindowBridge(api, INGEST_BRIDGE_METHODS),
                 width=1050,
                 height=700,
                 min_size=(720, 440),
@@ -1868,7 +1910,8 @@ class PyWebViewApplication:
                     return
                 window = show_windows_update_preferences(self.updates,
                     lambda channel, automatic: self.controller.configure_updates(channel, automatic, strict=True),
-                    self.worker_settings, self.save_preferences, lambda: self._quitting)
+                    self.worker_settings, self.save_preferences, lambda: self._quitting,
+                    lambda: self.controller.preferences.imap_connections)
                 self._windows_preferences_window = window
 
                 def closed(*_args: object) -> None:
@@ -1880,7 +1923,7 @@ class PyWebViewApplication:
             else:
                 if self._preferences_window is None:
                     self._preferences_window = MacOSPreferences(self.updates, self.save_preferences)
-                self._preferences_window.show(self.worker_settings())
+                self._preferences_window.show(self.worker_settings(), self.controller.preferences.imap_connections)
         except (OSError, ValueError) as error:
             self.add_notice("warning", f"Could not save preferences: {error}")
             return
@@ -1890,10 +1933,11 @@ class PyWebViewApplication:
     def worker_settings(self) -> WorkerSettings:
         return WorkerSettings(preferences=self.controller.preferences.workers, command_line=self._workers_override)
 
-    def save_preferences(self, channel: UpdateChannel, automatic: bool, workers: WorkerPreferences | None) -> None:
+    def save_preferences(self, channel: UpdateChannel, automatic: bool, workers: WorkerPreferences | None,
+                         imap_connections: int | None = None) -> None:
         if workers is not None and self._workers_override is not None:
             raise ValueError(self.worker_settings().override_note)
-        self.controller.configure_preferences(channel, automatic, workers, strict=True)
+        self.controller.configure_preferences(channel, automatic, workers, imap_connections, strict=True)
 
     def asset_url(
         self, asset: str, parameters: list[tuple[str, str]] | None = None
@@ -2417,7 +2461,8 @@ class PyWebViewApplication:
             archive=document.path, owner_names_file=owner_names, owner_rules=owner_rules,
             roots=[str(root) for root in roots], scan_policy=scan_policy,
         )
-        request = request.model_copy(update={"workers": self.worker_settings().effective_count})
+        request = request.model_copy(update={"workers": self.worker_settings().effective_count,
+                                            "imap_connections": self.controller.preferences.imap_connections})
         ingesting = bool(request.roots or (request.continue_ingest and unfinished_work(document.path).ingest))
         operation_id = uuid4().hex
         lease: WriterLease | None = None
@@ -2570,9 +2615,12 @@ class PyWebViewApplication:
             except (OSError, ValueError) as config_error:
                 notice("warning", f"Import completed but the source directory could not be saved: {config_error}")
         except BaseException as caught:  # pylint: disable=broad-exception-caught
-            logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
+            if isinstance(caught, ConfigurationError):
+                logging.getLogger(__name__).warning("%s", caught)
+            else:
+                logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
             error = caught
-            if isinstance(caught, (IngestInterrupted, ImapPaused)):
+            if isinstance(caught, (IngestInterrupted, ImapPaused, ImapAuthenticationError)):
                 try:
                     if outcome.accepted_request is None:
                         raise ValueError("Import stopped before its settings were accepted.")
@@ -2601,6 +2649,10 @@ class PyWebViewApplication:
             notice("information", f"Import suspended for {document.display_path}; use Continue Import in Ingests to resume.")
         elif error is None:
             notice("information", f"Import completed for {document.display_path}")
+        elif isinstance(error, ImapAuthenticationError):
+            notice("error", str(error))
+        elif isinstance(error, ConfigurationError):
+            notice("warning", str(error))
         else:
             notice(
                 "error",
@@ -2841,8 +2893,7 @@ class PyWebViewApplication:
                         "ingests.html",
                         [("status", status_id)] if status_id is not None else None,
                     ),
-                    js_api=WindowBridge(api, ("history", "can_import_directory", "import_directory", "antivirus", "install_antivirus",
-                                              "suspend_import", "resume_import")),
+                    js_api=WindowBridge(api, INGEST_BRIDGE_METHODS),
                     width=1050,
                     height=700,
                     min_size=(720, 440),
@@ -3483,8 +3534,8 @@ def macos_option_pressed() -> bool:
     return bool(appkit.NSEvent.modifierFlags() & appkit.NSEventModifierFlagOption)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Read-only graphical search of a mailarchiver archive.")
+def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=prog, description="Open the Email Collection Toolkit desktop application.")
     launch = parser.add_mutually_exclusive_group()
     launch.add_argument("--archive", type=Path, help="directory containing archive.sqlite3 and search.sqlite3")
     launch.add_argument("--new", action="store_true", help="show the three-step setup without reopening the last archive")
@@ -3495,11 +3546,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    if "--self-test" in sys.argv[1:] or "--self-test-gui" in sys.argv[1:]:
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    arguments = sys.argv[1:] if argv is None else argv
+    if "--self-test" in arguments or "--self-test-gui" in arguments:
         from .self_test import main as test_main  # pylint: disable=import-outside-toplevel
-        return test_main()
-    args = build_parser().parse_args()
+        return test_main(arguments, prog=prog)
+    args = build_parser(prog).parse_args(argv)
     if sys.platform == "win32":
         try:
             windows_webview()

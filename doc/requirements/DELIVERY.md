@@ -5,6 +5,14 @@
 Current subsystem contract and acceptance boundaries. This is not a claim of
 platform/release acceptance. Deferred features live in [plans](../plans/README.md).
 
+## Dependency security
+
+Security updates must cover each tracked Python/Rust dependency environment,
+including optional research and converter locks. Patched minimum versions must
+prevent resolution back to known affected versions. PST acquisition must reject
+conflicting local/central ZIP filenames without publishing an extracted object.
+Source mail and existing archived messages remain unchanged.
+
 ## Release policy
 
 The agreed release policy in [DEVOPS.md](../DEVOPS.md) requires macOS-focused

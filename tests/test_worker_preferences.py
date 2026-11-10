@@ -18,7 +18,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from mailarchiver.application import ApplicationController, ApplicationPreferences, ApplicationPreferencesStore, configured_workers
+from mailarchiver.application import ApplicationController, ApplicationPreferences, ApplicationPreferencesStore, configured_imap_connections, configured_workers
+from mailarchiver.imap_source import ImapSourcePlugin
+from mailarchiver.plugin_loader import load_plugins
 from mailarchiver.gui_app import build_parser
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.worker_preferences import WorkerPreferences, WorkerSettings, logical_cpus, validate_workers
@@ -63,6 +65,31 @@ def test_preferences_persist_without_changing_other_settings(tmp_path: Path) -> 
     with pytest.raises(ValueError):
         controller.configure_preferences("preview", False, WorkerPreferences(mode="custom", custom_count=2 * logical_cpus() + 1), strict=True)
     assert store.path.read_bytes() == before
+
+
+def test_imap_connections_migrate_and_persist_independently(tmp_path: Path) -> None:
+    """DESKTOP/ACQUISITION: old settings use eight; connection changes preserve workers and update choices."""
+    store = ApplicationPreferencesStore(tmp_path / "preferences.json")
+    store.path.write_text('{"version":3,"workers":{"mode":"custom","custom_count":1}}')
+    assert configured_imap_connections(store) == 8
+    assert ImapSourcePlugin().capabilities.max_concurrency == 8
+    controller = ApplicationController(store)
+    controller.configure_preferences("preview", False, imap_connections=3, strict=True)
+    assert ApplicationController(store).preferences.imap_connections == 3
+    assert configured_workers(store=store) == 1
+    registry = load_plugins(imap_connections=configured_imap_connections(store))
+    assert next(source for source in registry.sources if source.manifest.kind == "imap").implementation.capabilities.max_concurrency == 3
+    controller.configure_updates("release", True, strict=True)
+    assert store.read().imap_connections == 3
+    assert store.read().version == 4
+    before = store.path.read_bytes()
+    for invalid in (0, 16, True):
+        with pytest.raises(ValueError):
+            controller.configure_preferences("preview", False, imap_connections=invalid, strict=True)
+        assert store.path.read_bytes() == before
+    for invalid_json in ('{"imap_connections":2.5}', '{"imap_connections":"3"}'):
+        with pytest.raises(ValueError):
+            ApplicationPreferences.model_validate_json(invalid_json)
 
 
 @pytest.mark.parametrize("override,expected", [(None, 1), (2, 2)])

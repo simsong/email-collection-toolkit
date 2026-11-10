@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from email.header import Header
 import os
+import logging
 from collections.abc import Callable
 from pathlib import Path
 import sys
@@ -733,6 +734,7 @@ def test_history_labels_preserve_saved_imap_locators(tmp_path: Path, configurati
     snapshots = {path: path.read_bytes() for path in (archive / "status").glob("ingest-*.json")}
     before = read_ingest_history(archive)
     history = GuiIngestHistory.model_validate(IngestWindowApi(archive).history())
+    assert len(history.imap_accounts) == (1 if configuration == "present" else 0)
     for status in history.statuses:
         original = next(item for item in before.statuses if item.status_id == status.status_id)
         assert status.source_roots == original.source_roots
@@ -742,6 +744,26 @@ def test_history_labels_preserve_saved_imap_locators(tmp_path: Path, configurati
         else:
             assert status.source_labels == original.source_roots
     assert all(path.read_bytes() == saved for path, saved in snapshots.items())
+
+
+def test_invalid_configuration_warns_without_error_trace(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """DESKTOP: readable saved history explains bad settings once per change, at warning severity."""
+    archive = build_interrupted_archive(tmp_path)
+    config = archive / "config.yaml"
+    valid = config.read_bytes()
+    config.write_text("imap_sources: PRIVATE_CONFIGURATION_VALUE\n")
+    api = IngestWindowApi(archive)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="mailarchiver.gui_app"):
+        first = GuiIngestHistory.model_validate(api.history())
+        second = GuiIngestHistory.model_validate(api.history())
+    assert first.statuses and first.warnings == second.warnings
+    assert len(caplog.records) == 1 and caplog.records[0].levelno == logging.WARNING
+    assert "imap_sources: expected a list" in caplog.text and "Repair config.yaml" in caplog.text
+    assert "Saved import history remains available" in first.warnings[0]
+    assert "Traceback" not in caplog.text and "PRIVATE_CONFIGURATION_VALUE" not in caplog.text
+    config.write_bytes(valid)
+    assert not GuiIngestHistory.model_validate(api.history()).warnings
 
 
 def test_saved_import_summary_abort_and_new_attempt(tmp_path: Path) -> None:

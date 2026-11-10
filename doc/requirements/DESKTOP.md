@@ -76,6 +76,8 @@ Ingest history Sources shows IMAP username, hostname and port instead of interna
 account IDs and locator query options. Local paths remain readable. Missing or
 invalid account configuration shows an unavailable-account label; viewing history
 never connects to IMAP or changes saved source locators.
+Invalid or unreadable settings also show an actionable warning without a validator
+dump or traceback. Log the warning once per changed condition, rather than on every refresh.
 
 Opening an archive with unfinished work asks before reconnecting or processing.
 Show source identity (IMAP username, server and port), first start and latest
@@ -227,6 +229,11 @@ choice unchanged and disables all worker preference controls, with the note
 `# workers set to {number} on command line`. Generic ingest, process, refresh-index
 and standalone IMAP use the preference when their flag is omitted.
 
+Preferences also expose **Maximum IMAP connections per account**, default 8,
+accepting whole numbers 1–15. Persist it independently of processing workers.
+A `--workers` override must leave this control editable. Connection changes apply
+when starting or continuing an import; active imports keep their existing budget.
+
 The Preferences JavaScript API must expose only settings state, saving, update
 checking and completed-close methods. Native window state and close-event handlers
 must not enter pywebview discovery; opening and reopening must remain responsive.
@@ -295,12 +302,12 @@ job wins that race, present the normal stop confirmation and apply the shared
 five-second deadline. Setup Cancel must not wait for its JavaScript reply before
 requesting Quit.
 
-When launched through `mailsearch-gui`, macOS must not reinterpret the Python
+When launched through `ect gui`, macOS must not reinterpret the Python
 launcher or command-line option values as documents. Explicit `--archive`
 handling and genuine Finder document-open events remain supported. Configure
 this behavior for the running process without writing system or user defaults.
 
-`mailsearch-gui --new` forces this setup for one launch, bypassing both remembered
+`ect gui --new` forces this setup for one launch, bypassing both remembered
 and environment-selected archives without clearing preferences or altering old
 archives. `--new` and `--archive` are mutually exclusive. On macOS, holding
 Option (Alt) while launching the app invokes the same setup; keep it held until
@@ -356,6 +363,8 @@ The Ingests window provides **Import Directory…**, bound to its own archive ev
 when another archive is active. It opens the source picker directly, then
 uses the same owner-names setup, confirmation, and writer lease as File Import.
 The button is disabled during an import or while its dialogs are pending.
+Archive checkpoint progress reads **Verifying archived messages and saving
+checksums**, describing local preservation work without implying online publication.
 The same window offers **Suspend Import** for its own active archive and
 **Continue Import** for interrupted or failed work. Suspension is cooperative:
 show that current work is finishing until its checkpoints are saved and the
@@ -439,7 +448,7 @@ import and exits the program, including the ⌘ Q shortcut on macOS.
 Other archives and child windows remain independently closeable. The Window menu
 lists the About, search, and Ingests windows and brings a selected window forward.
 
-`mailsearch` is a read-only command-line consumer of both databases.  It
+`ect-search` is a read-only command-line consumer of both databases.  It
 accepts ordinary full-text terms plus `any:ADDRESS`, `from:ADDRESS`,
 role-specific `to:ADDRESS`, `cc:ADDRESS`, and `bcc:ADDRESS`, `subject:TEXT`,
 `date:YYYY-MM-DD`, `before:YYYY-MM-DD`, and
@@ -461,7 +470,7 @@ plain text with Beautiful Soup. `--headers` includes every header; `--html`
 prints decoded HTML parts; `--mime` prints the original RFC 5322/MIME source,
 including all MIME parts and attachment encodings.
 
-`mailsearch-gui` is a macOS-first, read-only pywebview consumer of the same
+`ect gui` is the macOS/Windows pywebview desktop consumer of the same
 search and verified-message retrieval functions.  A single search field uses
 the CLI selectors and ordinary ANDed terms; shell-style quotes group spaces,
 so `subject:"annual report"` is one selector while `subject:annual report`
