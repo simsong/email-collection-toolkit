@@ -1,16 +1,50 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Exercise saved failure diagnostics through the actual Ingests browser interface.
+# Synthetic imports and snapshots provide source context and version attribution.
+# Historical versions must survive viewing under a different application version.
+# Legacy snapshots remain readable without inventing missing producer metadata.
+# Assertions inspect visible text and ensure history reads never rewrite evidence.
+# No test accesses personal mail, credentials or a real canonical archive.
 
 """Requirement: local failure evidence is readable in the real Ingests interface."""
 
 from pathlib import Path
+import json
 
 import pytest
 from playwright.sync_api import Page, expect
 
 from mailarchiver.__main__ import IngestRequest, ProgressReporter, run_ingest
 from mailarchiver.gui_app import GUI_DIRECTORY, IngestWindowApi
-from mailarchiver.ingest_status import IngestStatusFile
+from mailarchiver.ingest_status import IngestStatusFile, read_ingest_history
+from mailarchiver.identity import APPLICATION_VERSION
 from scripts.website_screenshots import bridge
+
+APPLICATION_VERSION_FIELD = "application_version"
+
+
+@pytest.mark.parametrize("recorded_version", ["0.0.0+synthetic-history", None])
+def test_failed_run_shows_recorded_version_or_unavailable(tmp_path: Path, page: Page, recorded_version: str | None) -> None:
+    """DESKTOP: failures show their producer's version; legacy files never inherit the viewer's."""
+    archive = tmp_path / "synthetic.mailarchive"
+    saved = IngestStatusFile(archive, "ingest-version-fixture")
+    progress = ProgressReporter(1, status_file=saved, archive=archive, run_pk=1, terminal=False)
+    progress.finish("failed", "Synthetic failure retained for version attribution")
+    payload = json.loads(saved.path.read_text())
+    if recorded_version is None:
+        del payload[APPLICATION_VERSION_FIELD]
+    else:
+        payload[APPLICATION_VERSION_FIELD] = recorded_version
+    saved.path.write_text(json.dumps(payload))
+    original = saved.path.read_bytes()
+    bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
+    label = f"Version {recorded_version}" if recorded_version else "Version unavailable"
+    expect(page.locator(".history-version")).to_have_text(label)
+    expect(page.locator(".detail-heading")).to_contain_text(label)
+    expect(page.locator("div.failure")).to_contain_text("Synthetic failure retained")
+    assert saved.path.read_bytes() == original
+    page.screenshot(path=str(tmp_path / "failed-run-version.png"), full_page=True)
 
 
 def test_invalid_configuration_shows_warning_and_saved_history(tmp_path: Path, page: Page) -> None:
@@ -68,10 +102,12 @@ def test_long_failure_detail_wraps_without_hiding_source_or_traceback(tmp_path: 
         run_ingest(IngestRequest(
             archive=archive, roots=[str(source)], owner_names_file=owners, scan_policy="not-scanned",
         ), terminal=False)
+    assert read_ingest_history(archive).statuses[0].application_version == APPLICATION_VERSION
     page.set_viewport_size({"width": 1000, "height": 900})
     bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
     failure = page.locator("div.failure")
+    expect(page.locator(".history-version")).to_have_text(f"Version {APPLICATION_VERSION}")
     expect(failure).to_contain_text("Traceback (most recent call last)")
     expect(failure).to_contain_text("Message SHA-256:")
     expect(failure).to_contain_text(str(source))

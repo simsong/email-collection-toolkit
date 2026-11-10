@@ -88,6 +88,7 @@ class IngestStatus(BaseModel):
     archive: str
     run_pk: int
     process_id: int
+    application_version: str | None = None
     source_roots: list[str]
     started_at: datetime
     updated_at: datetime

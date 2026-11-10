@@ -509,6 +509,12 @@ test-config-diagnostics: ruff
 	uv run --locked pytest -q tests/test_archive_config.py tests/test_cli.py::test_configuration_failure_prints_repair_message tests/test_cli.py::test_installation_configuration_failure_stays_concise_in_console_and_history tests/test_gui_processing.py::test_history_labels_preserve_saved_imap_locators tests/test_gui_processing.py::test_invalid_configuration_warns_without_error_trace tests/test_gui_service.py tests/test_plugin_configuration.py tests/test_ingest_diagnostics.py $(PYTEST_ARGS)
 	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_diagnostics.py $(PYTEST_ARGS)
 
+# Preserve producer launch versions across metadata updates and old failure-history reads.
+.PHONY: test-ingest-version
+test-ingest-version: ruff
+	uv run --locked pytest -q tests/test_build_info.py::test_about_keeps_launch_version_after_installed_metadata_changes tests/test_progress.py tests/test_ingest_diagnostics.py $(PYTEST_ARGS)
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_diagnostics.py $(PYTEST_ARGS)
+
 run:
 	uv run ect $(ARGS)
 

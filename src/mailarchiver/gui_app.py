@@ -33,7 +33,6 @@ from contextlib import contextmanager, nullcontext
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from importlib import import_module
-from importlib.metadata import version
 from pathlib import Path
 from queue import Empty, SimpleQueue
 from threading import Event, Lock, RLock, Thread
@@ -48,7 +47,7 @@ from webview.menu import Menu, MenuAction, MenuSeparator
 
 from .file_drag import FILE_DRAGS, install_file_drag
 from .desktop_platform import copy_windows_text, drag_windows_file, open_export, open_external_url, refresh_windows_menu, set_macos_document_path, set_macos_titlebar_version, startup_error, windows_webview
-from .identity import APPLICATION_NAME
+from .identity import APPLICATION_NAME, APPLICATION_VERSION
 from .build_info import BUILD_INFO, BuildInfo
 from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argument
 from .imap_protocol import ImapAuthenticationError, ImapPaused, ImapSession
@@ -123,7 +122,6 @@ GUI_DIRECTORY = (Path(getattr(sys, "_MEIPASS")) if getattr(sys, "frozen", False)
 E2E_DRIVER = Path(__file__).parents[2] / "e2e_tests" / "gui_driver.js"
 DEFAULT_PAGE_SIZE = 100
 APPLICATION_ICON = GUI_DIRECTORY / "icons" / "rainbow-post-192.png"
-APPLICATION_VERSION = version("mailarchiver")
 EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 INTERNET_CHECK_URL = "https://www.example.com/"
 QUIT_TIMEOUT_SECONDS = 5.0

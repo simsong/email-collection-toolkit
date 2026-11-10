@@ -39,6 +39,8 @@ than a second change log. Platform acceptance is stated alongside its evidence.
   and evidence; no resident service or manual-review gate is introduced.
 - Jobs, windows and import progress follow actual work and change notifications.
   Failure deadlines remain explicit; readiness must be observed.
+  Ingest snapshots record the shared immutable launch version. Ingests displays that
+  saved value in history and run details, with an unavailable fallback for older files.
 - User commands are `ect`, `ect-create`, `ect-import` and `ect-search`. They invoke
   application code directly. Make is the developer build/test convenience layer.
 - Versions come from `pyproject.toml`; launch/build provenance discloses local

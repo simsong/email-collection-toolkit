@@ -41,7 +41,7 @@ body { display: flex; flex-direction: column; }
 .history-main { min-width: 0; }
 .history-title { display: flex; justify-content: space-between; gap: 6px; font-weight: 650; }
 .history-state { text-transform: capitalize; }
-.history-time, .history-summary { display: block; margin-top: 3px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.history-time, .history-version, .history-summary { display: block; margin-top: 3px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .ingest-detail { min-width: 0; overflow: auto; padding: 22px 26px 40px; }
 .detail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .detail-heading h1 { margin: 0 0 5px; font-size: 22px; }

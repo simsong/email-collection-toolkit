@@ -59,6 +59,10 @@ History status circles are at least 22 pixels, with a check for running/complete
 an X for failed/disk-full/stale, and a pause symbol for interrupted runs, alongside
 text labels. Accepted GUI imports show startup immediately while archive
 preparation precedes the first saved run snapshot; old failures retain their state.
+Each saved run must retain the application version captured at producer launch,
+including a later failure. Show it in the history entry and selected run details.
+An editable reinstall or a newer history viewer must not relabel a saved run.
+Older snapshots without a version display **Version unavailable**, without rewriting them.
 Explain that finished processing jobs are work for messages or MIME parts,
 potentially several per email, rather than newly imported message counts.
 Label saved work **Processing saved mail**. During processing stages, including
