@@ -1486,30 +1486,41 @@ def test_scratch_cycle_never_reuses_old_success_if_status_writes_fail(imap_archi
     assert not verify_archive(scratch)
 
 
-def test_mixed_local_and_imap_progress_has_no_eta_while_remote_size_is_unknown(
+def test_mixed_sources_and_saved_processing_report_separate_progress(
         imap_archive: Path, imap_inbox: DisposableImap, tmp_path: Path) -> None:
-    """DESKTOP: completed local bytes cannot imply that an active IMAP import is finalizing."""
+    """DESKTOP: saved attachments do not count as source mail, and unknown IMAP size prevents ETA."""
+    saved = tmp_path / "saved.eml"
+    saved.write_bytes(b"Date: Tue, 3 Jan 2023 12:00:00 +0000\r\nFrom: other@example.org\r\n"
+                      b"Message-ID: <saved-parent@example.test>\r\nSubject: parent\r\n"
+                      b"MIME-Version: 1.0\r\nContent-Type: multipart/digest; boundary=d\r\n\r\n"
+                      b"--d\r\n\r\nDate: Tue, 3 Jan 2023 12:00:00 +0000\r\nFrom: other@example.org\r\n"
+                      b"Message-ID: <saved-child@example.test>\r\nSubject: child\r\n\r\nchild\r\n--d--\r\n")
+    run_ingest(IngestRequest(archive=imap_archive, roots=[str(saved)], workers=1,
+        scan_policy="not-scanned", continue_content=False), terminal=False)
     local = tmp_path / "local.eml"
     local.write_bytes(b"Date: Tue, 5 Nov 2024 12:00:00 +0000\r\nFrom: other@example.org\r\n"
                       b"Message-ID: <mixed@example.test>\r\nSubject: local\r\n\r\nlocal bytes\r\n")
     account = load_archive_config(imap_archive).imap_sources[0]
     imap_inbox.pause_after_bodies(0)
     request = IngestRequest(archive=imap_archive, roots=[str(local), imap_locator(imap_archive, account, 1)],
-        workers=2, imap_connections=1, scan_policy="not-scanned", continue_content=False)
-    def local_finished() -> bool:
-        history = read_ingest_history(imap_archive).statuses
-        return bool(history and history[0].bytes_processed == local.stat().st_size
-                    and 0 < history[0].files_processed < history[0].files_total)
+        workers=2, imap_connections=1, scan_policy="not-scanned")
+    def local_and_saved_finished() -> bool:
+        status = read_ingest_history(imap_archive).statuses[0]
+        return (status.counts.archived == 2 and status.bytes_processed == local.stat().st_size
+                and 0 < status.files_processed < status.files_total)
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(run_ingest, request, terminal=False)
         try:
             assert imap_inbox.fetch_paused.wait(10)
-            wait_for_path_state([imap_archive / "status"], local_finished, timeout=10)
+            wait_for_path_state([imap_archive / "status"], local_and_saved_finished, timeout=10)
             status = read_ingest_history(imap_archive).statuses[0]
             assert status.state == "running" and status.files_processed < status.files_total
             assert status.bytes_processed == status.bytes_total == local.stat().st_size
             assert status.eta == "unavailable"
+            assert status.download_coverage is not None and status.download_coverage.messages == 0
+            assert status.processed_messages == 1
+            assert status.earliest_date == status.latest_date == datetime(2024, 11, 5, 12, tzinfo=UTC)
         finally:
             imap_inbox.release_bodies()
         future.result(timeout=20)

@@ -47,7 +47,8 @@ does not establish that every platform or release gate has passed.
   Native API replies use one-way delivery; lost Ingests replies display an unknown
   outcome without retrying a command or marking the import failed.
   Unfinished unknown-size acquisition reports ETA unavailable, including mixed
-  local and remote runs. IMAP run details show
+  local and remote runs. Source counts and dates exclude promoted attachments.
+  IMAP run details show
   message counts, IMAP INTERNALDATE UTC bounds and per-year coverage.
   Run history preserves the producing application's launch version, including failures;
   older snapshots without that evidence display the version as unavailable.

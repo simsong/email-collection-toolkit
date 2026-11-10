@@ -6,6 +6,11 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a85 — separate source counts from saved attachment processing
+
+- Count promoted attached emails as archival work. Source message totals and
+  dates describe the messages acquired from the selected sources in this run.
+
 ## 1.0.0a84 — preserve damaged working objects and correct mixed-source status
 
 - Retain corrupt working files for diagnosis, including after a failed import.

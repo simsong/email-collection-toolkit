@@ -48,7 +48,8 @@ than a second change log. Platform acceptance is stated alongside its evidence.
   The pinned SDK's API replies are posted to the native view without a second
   synchronous acknowledgement; Ingests bounds its own reply waits.
   The estimator tracks unfinished unknown-size containers separately from known
-  source bytes. IMAP run details show
+  source bytes. Promoted attachments increment archival counts without affecting
+  source totals or dates. IMAP run details show
   message counts, IMAP INTERNALDATE UTC bounds and per-year coverage.
   Ingest snapshots record the shared immutable launch version. Ingests displays that
   saved value in history and run details, with an unavailable fallback for older files.

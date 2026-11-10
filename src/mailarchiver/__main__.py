@@ -2059,8 +2059,6 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
 
     def publish_processed(source: MailObject, parsed: ParsedMessage, target: MailboxReference, source_file_pk: int) -> int:
         source_file_pks[(source.source.plugin_kind, source.source.source_id, source.work_id)] = source_file_pk
-        if "#mime=" in source.cursor:
-            progress.record(parsed, source)
         return archive_scanned(PendingScan(source=source, parsed=parsed), target)
 
     def publish_source(source: MailObject, metadata: SourceMetadata) -> ParsedMessage:
