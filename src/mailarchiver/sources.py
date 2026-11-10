@@ -132,6 +132,7 @@ class SourcePlan(BaseModel):
 class SourceInventory(BaseModel):
     file_count: int = 0
     byte_count: int = 0
+    unknown_size_count: int = 0
     skipped_file_count: int = 0
 
 

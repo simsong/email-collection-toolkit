@@ -677,8 +677,14 @@ def test_concurrent_source_heartbeats_coalesce_real_backlog_queries(tmp_path: Pa
         assert len(queries) == 2
         with database:
             database.execute("UPDATE jobs SET status='completed'")
-        progress._sample_saved_count(102.3, force=True)
+        progress.state.source_files_total = 1
+        progress.state.files_processed = 1
+        progress._sample_saved_count(101.2)  # Last source finishes inside the throttle interval.
         assert len(queries) == 3 and progress.state.saved_messages_remaining == 0
+        progress._sample_saved_count(102.3)
+        assert len(queries) == 3
+        progress._sample_saved_count(102.3, force=True)
+        assert len(queries) == 4 and progress.state.saved_messages_remaining == 0
 
 
 def test_progress_status_file_preserves_final_run_statistics(tmp_path: Path) -> None:

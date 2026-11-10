@@ -41,11 +41,13 @@ does not establish that every platform or release gate has passed.
 - Jobs, windows and import progress follow actual work and change notifications.
   Source acquisition and saved-message processing run concurrently after mandatory
   ingest recovery, sharing one owner for database and canonical publication.
-  Verified working inputs stay in place while processors read them.
+  Verified working inputs stay in place while processors read them. Cleanup
+  preserves working objects whose bytes fail SHA-256 verification.
   Failure deadlines remain explicit; readiness must be observed.
   Native API replies use one-way delivery; lost Ingests replies display an unknown
   outcome without retrying a command or marking the import failed.
-  Unknown-size acquisition reports ETA unavailable. IMAP run details show
+  Unfinished unknown-size acquisition reports ETA unavailable, including mixed
+  local and remote runs. IMAP run details show
   message counts, IMAP INTERNALDATE UTC bounds and per-year coverage.
   Run history preserves the producing application's launch version, including failures;
   older snapshots without that evidence display the version as unavailable.

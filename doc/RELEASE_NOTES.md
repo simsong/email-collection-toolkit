@@ -6,6 +6,12 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a84 — preserve damaged working objects and correct mixed-source status
+
+- Retain corrupt working files for diagnosis, including after a failed import.
+- Refresh the saved-message count at the last source checkpoint and show ETA
+  unavailable while a source of unknown size remains unfinished.
+
 ## 1.0.0a83 — reuse active inputs and coalesce saved-work status queries
 
 - Verify and reuse a duplicate's existing input file while another worker reads it.

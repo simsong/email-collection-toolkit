@@ -72,7 +72,7 @@ and catalog/processing commits, under the publication lock and writer lease.
 Dispatcher completion also releases unused objects after job commits. Ingest
 rank transitions defer this release until the outer source observation commits.
 Operation shutdown sweeps orphaned SHA-256 files and owned interrupted staging
-files. Unknown files and symlinks are preserved.
+files. Unknown files, digest-mismatched files and symlinks are preserved.
 
 An additive `object_references` index records job inputs and successful checkpoint
 outputs in their existing transactions. Existing V2 archives backfill the index

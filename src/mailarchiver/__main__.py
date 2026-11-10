@@ -317,6 +317,7 @@ class ProgressState(BaseModel):
     current_year: int | None = None
     current_year_messages: int = 0
     source_files_total: int = 0
+    unknown_size_sources_remaining: int = 0
     source_bytes_completed: int = 0
     source_bytes_total: int = 0
     skipped_files_total: int = 0
@@ -510,6 +511,8 @@ def overall_progress(state: ProgressState, now: float) -> OverallProgress:
             percent = min(percent, 99.9)
     if not state.inventory_complete:
         eta = "calculating"
+    elif state.unknown_size_sources_remaining:
+        eta = "unavailable"
     elif total == 0:
         eta = "0s" if state.files_processed >= state.source_files_total else "unavailable"
     elif done == 0 or state.byte_progress_started_monotonic is None:
@@ -579,7 +582,7 @@ class ProgressReporter:
         self.interrupt_announced = False
         self.activity_kind: Literal["source", "processing"] = "source"
         self.saved_message_counter: Callable[[], int] | None = None
-        self.saved_count_sample: tuple[float, tuple[int, int]] | None = None
+        self.saved_count_sample: tuple[float, tuple[int, int, int]] | None = None
 
     def _queue_update(self, update: ProgressUpdate) -> None:
         if self.state.concurrent_processing and PROCESSING_WORKER.get():
@@ -673,6 +676,7 @@ class ProgressReporter:
         self._assert_driver_thread()
         self.state.source_files_total = inventory.file_count
         self.state.source_bytes_total = inventory.byte_count
+        self.state.unknown_size_sources_remaining = inventory.unknown_size_count
         self.state.skipped_files_total = inventory.skipped_file_count
         self.state.inventory_complete = True
         self._emit_notices({"skipped input"})
@@ -706,7 +710,7 @@ class ProgressReporter:
             )
         )
 
-    def record_file_complete(self, path: Path | str, byte_count: int) -> None:
+    def record_file_complete(self, path: Path | str, byte_count: int | None) -> None:
         self._send("idle", path, byte_count, byte_count, file_complete=True)
 
     def record_file_inactive(self, path: Path | str) -> None:
@@ -759,12 +763,13 @@ class ProgressReporter:
     def _sample_saved_count(self, now: float, *, force: bool = False) -> None:
         if self.saved_message_counter is None:
             return
-        revision = (self.state.processed, self.state.processing_jobs_completed)
+        revision = (self.state.processed, self.state.processing_jobs_completed, self.state.files_processed)
         if not force and self.state.concurrent_processing and self.saved_count_sample is not None:
             sampled_at, previous_revision = self.saved_count_sample
             # Sample on real status changes, not a timer. Rapid admissions and
             # invocation heartbeats share a bounded read of the saved backlog.
-            if revision == previous_revision or now - sampled_at < 1:
+            sources_finished = previous_revision[2] < revision[2] == self.state.source_files_total
+            if revision == previous_revision or (now - sampled_at < 1 and not sources_finished):
                 return
         self.state.saved_messages_remaining = self.saved_message_counter()
         self.saved_count_sample = (now, revision)
@@ -773,8 +778,8 @@ class ProgressReporter:
         self,
         phase: str,
         path: Path | str,
-        bytes_done: int,
-        bytes_total: int,
+        bytes_done: int | None,
+        bytes_total: int | None,
         *,
         message_date: datetime | None = None,
         file_complete: bool = False,
@@ -860,6 +865,8 @@ class ProgressReporter:
             if update.file_complete:
                 self.state.files_processed += 1
                 self.state.source_bytes_completed += update.bytes_total or 0
+                if update.bytes_total is None:
+                    self.state.unknown_size_sources_remaining -= 1
                 worker.last_path = update.path or worker.path
                 worker.files_processed += 1
                 worker.phase = "idle"
@@ -1017,7 +1024,7 @@ class ProgressReporter:
         phase_elapsed = max(now - self.phase_started_monotonic, 0.0)
         overall = overall_progress(state, now)
         state.workers = self.visible_workers()
-        if state.processing_active and not state.overlap_active:
+        if state.processing_active and not state.overlap_active and overall.eta != "unavailable":
             overall = overall.model_copy(update={"eta": "calculating"})
         dates = "none" if state.earliest_date is None or state.latest_date is None else f"{state.earliest_date.date()}..{state.latest_date.date()}"
         year = "none" if state.current_year is None else str(state.current_year)
@@ -1974,7 +1981,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             )
             catalog.commit()
         coordinator.call(publish_checkpoint)
-        progress.record_file_complete(path, progress_length)
+        progress.record_file_complete(path, catalog_byte_length)
 
     def archive_scanned(candidate: PendingScan, target: MailboxReference) -> int:
         raw, parsed = candidate.source.raw, candidate.parsed
@@ -2302,6 +2309,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                         continue
                     inventory.file_count += 1
                     inventory.byte_count += item.estimated_bytes or 0
+                    inventory.unknown_size_count += int(item.estimated_bytes is None)
                     if table == "containers":
                         progress.record_inventory(inventory.file_count, inventory.byte_count)
                 elif isinstance(item, SkippedInput):

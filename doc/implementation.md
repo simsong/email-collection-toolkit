@@ -41,11 +41,14 @@ than a second change log. Platform acceptance is stated alongside its evidence.
 - Jobs, windows and import progress follow actual work and change notifications.
   Source workers and cooperative saved-processing dispatch share an event-driven
   owner loop; invocations run in a separate bounded pool and commits stay serialized.
-  Immutable working objects are reused, and combined status coalesces saved-queue reads.
+  Immutable working objects are reused and cleanup checks their digest before
+  unlinking. Combined status coalesces saved-queue reads and refreshes the count
+  when the last source finishes.
   Failure deadlines remain explicit; readiness must be observed.
   The pinned SDK's API replies are posted to the native view without a second
   synchronous acknowledgement; Ingests bounds its own reply waits.
-  Unknown-size acquisition reports ETA unavailable. IMAP run details show
+  The estimator tracks unfinished unknown-size containers separately from known
+  source bytes. IMAP run details show
   message counts, IMAP INTERNALDATE UTC bounds and per-year coverage.
   Ingest snapshots record the shared immutable launch version. Ingests displays that
   saved value in history and run details, with an unavailable fallback for older files.

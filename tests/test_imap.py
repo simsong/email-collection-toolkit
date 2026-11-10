@@ -1486,6 +1486,37 @@ def test_scratch_cycle_never_reuses_old_success_if_status_writes_fail(imap_archi
     assert not verify_archive(scratch)
 
 
+def test_mixed_local_and_imap_progress_has_no_eta_while_remote_size_is_unknown(
+        imap_archive: Path, imap_inbox: DisposableImap, tmp_path: Path) -> None:
+    """DESKTOP: completed local bytes cannot imply that an active IMAP import is finalizing."""
+    local = tmp_path / "local.eml"
+    local.write_bytes(b"Date: Tue, 5 Nov 2024 12:00:00 +0000\r\nFrom: other@example.org\r\n"
+                      b"Message-ID: <mixed@example.test>\r\nSubject: local\r\n\r\nlocal bytes\r\n")
+    account = load_archive_config(imap_archive).imap_sources[0]
+    imap_inbox.pause_after_bodies(0)
+    request = IngestRequest(archive=imap_archive, roots=[str(local), imap_locator(imap_archive, account, 1)],
+        workers=2, imap_connections=1, scan_policy="not-scanned", continue_content=False)
+    def local_finished() -> bool:
+        history = read_ingest_history(imap_archive).statuses
+        return bool(history and history[0].bytes_processed == local.stat().st_size
+                    and 0 < history[0].files_processed < history[0].files_total)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(run_ingest, request, terminal=False)
+        try:
+            assert imap_inbox.fetch_paused.wait(10)
+            wait_for_path_state([imap_archive / "status"], local_finished, timeout=10)
+            status = read_ingest_history(imap_archive).statuses[0]
+            assert status.state == "running" and status.files_processed < status.files_total
+            assert status.bytes_processed == status.bytes_total == local.stat().st_size
+            assert status.eta == "unavailable"
+        finally:
+            imap_inbox.release_bodies()
+        future.result(timeout=20)
+    status = read_ingest_history(imap_archive).statuses[0]
+    assert status.state == "completed" and status.eta == "0s"
+
+
 @pytest.mark.parametrize("cancel", [False, True])
 @pytest.mark.parametrize("duplicate", [False, True])
 def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive: Path,
@@ -1534,7 +1565,9 @@ def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive:
     expected = 3 if duplicate else 4
     def fully_archived() -> bool:
         with sqlite3.connect(imap_archive / "archive.sqlite3") as database:
-            return database.execute("SELECT count(*) FROM messages").fetchone() == (expected,)
+            status = read_ingest_history(imap_archive).statuses[0]
+            return (database.execute("SELECT count(*) FROM messages").fetchone() == (expected,)
+                    and status.files_processed == status.files_total > 0)
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(run_ingest, request, terminal=False, stop_event=stop)
@@ -1549,6 +1582,7 @@ def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive:
             assert status.processing_active and status.download_coverage is not None
             assert status.download_coverage.messages == 3
             assert any(worker.phase.startswith("processing ") for worker in status.saved_workers)
+            assert status.saved_messages_remaining == expected
             assert not (imap_archive / "release-saved").exists()
             assert held_object.stat().st_ino == held_inode
             if metadata_job is not None:
