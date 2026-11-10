@@ -1493,8 +1493,9 @@ def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive:
     """ACQUISITION/PROCESSING: publish fresh TLS bodies while a saved content invocation is held open."""
     from mailarchiver.__main__ import IngestInterrupted
     from mailarchiver.change_signal import ChangeEvent
+    from mailarchiver.processing.api import ProcessingObject
     from mailarchiver.processing_progress import saved_messages_remaining
-    from mailarchiver.processing.store import connect
+    from mailarchiver.processing.store import connect, enqueue
     from tests.test_processing import plugin
     saved = tmp_path / "2024/saved.eml"
     saved.parent.mkdir()
@@ -1512,6 +1513,15 @@ def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive:
         'return ProcessingResult()', timeout=15)
     manifest = custom / "processors/saved-gate/plugin.toml"
     manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="content"'))
+    metadata_job: int | None = None
+    if duplicate:
+        # Model the eligible metadata sibling of an already-filed promoted message.
+        # It must remain pending while that digest's saved content job is active.
+        with connect(imap_archive) as database, database:
+            payload, = database.execute("SELECT root_item_json FROM message_state").fetchone()
+            parent, registry = database.execute("SELECT job_id,registry_hash FROM jobs WHERE status='completed' LIMIT 1").fetchone()
+            enqueue(database, ProcessingObject.model_validate_json(payload).model_copy(update={"pipeline": "message"}), registry, parent)
+            metadata_job = database.execute("SELECT max(job_id) FROM jobs").fetchone()[0]
     (imap_archive / "hold-saved").touch()
     imap_inbox.pause_after_bodies(1)
     account = load_archive_config(imap_archive).imap_sources[0]
@@ -1532,10 +1542,13 @@ def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive:
             imap_inbox.release_bodies()
             wait_for_path_state([imap_archive / "status"], fully_archived, timeout=10)
             status = read_ingest_history(imap_archive).statuses[0]
-            assert status.concurrent_processing and status.download_coverage is not None
+            assert status.processing_active and status.download_coverage is not None
             assert status.download_coverage.messages == 3
             assert any(worker.phase.startswith("processing ") for worker in status.saved_workers)
             assert not (imap_archive / "release-saved").exists()
+            if metadata_job is not None:
+                with sqlite3.connect(f"{(imap_archive / 'processing.sqlite3').as_uri()}?mode=ro", uri=True) as database:
+                    assert database.execute("SELECT status FROM jobs WHERE job_id=?", (metadata_job,)).fetchone() == ("pending",)
             if cancel:
                 stop.set()
                 with pytest.raises(IngestInterrupted):
@@ -1560,3 +1573,56 @@ def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive:
     assert {read_message_bytes(imap_archive, number) for number in range(1, expected + 1)} == {raw} | {
         message.replace(b"\r\n", b"\n") for message in imap_messages}
     assert saved.read_bytes() == raw and not verify_archive(imap_archive)
+
+
+def test_concurrent_saved_fail_import_stops_imap_while_peer_finishes(imap_archive: Path,
+        imap_inbox: DisposableImap, tmp_path: Path) -> None:
+    """ACQUISITION: accepted fail-import closes admission before a held peer result returns."""
+    from mailarchiver.processing.runtime import ProcessorStop
+    from tests.test_processing import plugin
+    source = tmp_path / "saved"
+    source.mkdir()
+    for marker in ("stop-this-saved", "hold-saved-peer"):
+        (source / f"{marker}.eml").write_bytes((f"From: other@example.org\r\nMessage-ID: <{marker}@example.test>\r\n"
+            f"Subject: fixture\r\nDate: Tue, 5 Nov 2024 12:00:00 +0000\r\n\r\n{marker}\r\n").encode())
+    run_ingest(IngestRequest(archive=imap_archive, roots=[str(source)], workers=2,
+        scan_policy="not-scanned", continue_content=False), terminal=False)
+    custom = tmp_path / "custom"
+    plugin(custom, "stop-gate", 'root = item.archive.path\n'
+        'if b"stop-this-saved" in item.content_ref.path.read_bytes():\n'
+        '    item.wait_for_files((root,), lambda: (root / "accept-stop").exists())\n'
+        '    return ProcessingResult(outcome="fail-import")\n'
+        'if b"hold-saved-peer" in item.content_ref.path.read_bytes():\n'
+        '    (root / "peer-entered").touch()\n'
+        '    item.wait_for_files((root,), lambda: (root / "release-peer").exists())\n'
+        'return ProcessingResult()', timeout=20)
+    manifest = custom / "processors/stop-gate/plugin.toml"
+    manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="content"'))
+    imap_inbox.pause_after_bodies(1)
+    account = load_archive_config(imap_archive).imap_sources[0]
+    request = IngestRequest(archive=imap_archive, roots=[imap_locator(imap_archive, account, 2)],
+        workers=2, imap_connections=1, scan_policy="not-scanned", plugin_dir=[custom])
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(run_ingest, request, terminal=False)
+        try:
+            wait_for_path_state([imap_archive], lambda: (imap_archive / "peer-entered").exists(), timeout=10)
+            assert imap_inbox.fetch_paused.wait(10)
+            (imap_archive / "accept-stop").touch()
+            wait_for_path_state([imap_archive / "status"],
+                lambda: read_ingest_history(imap_archive).statuses[0].processing_jobs_completed > 0, timeout=10)
+            imap_inbox.release_bodies()
+            assert imap_inbox.connections_closed.wait(10)
+            assert not future.done(), "An already-started peer was not allowed to finish"
+            assert sum(b"BODY.PEEK[]" in command for command in imap_inbox.commands) == 2
+            (imap_archive / "release-peer").touch()
+            with pytest.raises(ProcessorStop, match="processor requested fail-import"):
+                future.result(timeout=15)
+        finally:
+            imap_inbox.release_bodies()
+            (imap_archive / "accept-stop").touch()
+            (imap_archive / "release-peer").touch()
+    assert totals(imap_archive).archived == 1
+    with sqlite3.connect(imap_archive / "processing.sqlite3") as database:
+        assert database.execute("SELECT status FROM invocations WHERE kind='stop-gate' ORDER BY invocation_id").fetchall() == [
+            ("completed",), ("completed",)]
+    assert not verify_archive(imap_archive)

@@ -103,6 +103,7 @@ from .message import ParsedMessage
 from .processing.api import PluginStatistics, ProcessingObject
 from .processing.contracts import MailboxReference, ProcessingPolicy, SourceMetadata
 from .processing.production import ProductionPipeline
+from .processing.runtime import ProcessorStop
 from .processing.store import connect as processing_connection
 from .processing_progress import saved_messages_remaining
 from .plugin_api import (
@@ -334,6 +335,11 @@ class ProgressState(BaseModel):
     processing_processor: str | None = None
     saved_messages_remaining: int | None = None
 
+    @property
+    def overlap_active(self) -> bool:
+        return (self.concurrent_processing and self.processing_active
+                and any(worker.phase != "idle" for worker in self.workers))
+
 
 class OverallProgress(BaseModel):
     bytes_done: int
@@ -517,7 +523,7 @@ def overall_progress(state: ProgressState, now: float) -> OverallProgress:
 
 
 def overall_line(state: ProgressState, now: float) -> str:
-    if state.processing_active and not state.concurrent_processing:
+    if state.processing_active and not state.overlap_active:
         return (f"Processing: {state.processing_jobs_completed:,} jobs finished  "
                 f"Job {state.processing_job_id}: {state.processing_processor}  Total/ETA pending discovery")
     if not state.inventory_complete:
@@ -732,7 +738,8 @@ class ProgressReporter:
     def begin_concurrent_processing(self) -> None:
         self._assert_driver_thread()
         self.state.concurrent_processing = True
-        self.state.saved_workers = [WorkerProgress(worker=worker.worker) for worker in self.state.workers]
+        self.state.saved_workers = [WorkerProgress(worker=worker.worker, processing_jobs_completed=0)
+                                    for worker in self.state.workers]
 
     def finish_concurrent_processing(self) -> None:
         self._assert_driver_thread()
@@ -941,9 +948,10 @@ class ProgressReporter:
     def _worker_phase(self) -> str:
         if self.interrupt_announced:
             return "shutting down"
-        if self.state.concurrent_processing:
-            return "Downloading and processing saved mail"
         if self.state.processing_active:
+            if self.state.concurrent_processing:
+                return ("Importing and processing saved mail" if self.state.overlap_active
+                        else "Processing saved mail")
             return self.base_phase
         phases = {worker.phase for worker in self.visible_workers()}
         if phases != {"idle"}:
@@ -993,7 +1001,7 @@ class ProgressReporter:
         phase_elapsed = max(now - self.phase_started_monotonic, 0.0)
         overall = overall_progress(state, now)
         state.workers = self.visible_workers()
-        if state.processing_active and not state.concurrent_processing:
+        if state.processing_active and not state.overlap_active:
             overall = overall.model_copy(update={"eta": "calculating"})
         dates = "none" if state.earliest_date is None or state.latest_date is None else f"{state.earliest_date.date()}..{state.latest_date.date()}"
         year = "none" if state.current_year is None else str(state.current_year)
@@ -1009,6 +1017,8 @@ class ProgressReporter:
                 f"Rate: {state.processed / elapsed:.2f} messages/s  Elapsed: {elapsed:.0f}s"),
                 f"Workers:   {active:,} active; peak {state.peak_active_files:,}; {len(state.workers):,} configured",
                 *(self._worker_line(worker, self.terminal_columns) for worker in state.workers),
+                *(["Saved-mail processing workers:", *(self._worker_line(worker, self.terminal_columns)
+                    for worker in state.saved_workers)] if state.saved_workers else []),
                 f"Dates:     {dates}  Current year: {year} ({state.current_year_messages:,} messages)",
                 (f"Archived:  {state.counts.archived:,}  Seen/skipped: {state.counts.duplicates:,}  "
                 f"Autosaved: {state.counts.autosaves:,}  Metadata: {state.counts.metadata_excluded:,}  "
@@ -1024,6 +1034,8 @@ class ProgressReporter:
                 f"{worker.worker}:{worker.phase}:{Path(worker.path).name if worker.path else '-'}"
                 for worker in state.workers
             )
+            saved_workers = " ".join(f"{worker.worker}:{worker.phase}" for worker in state.saved_workers)
+            saved_field = f" saved_workers={saved_workers}" if saved_workers else ""
             print(
                 f"{display_label}: overall_bytes={overall.bytes_done} overall_total_bytes={overall.bytes_total} "
                 f"overall_percent={overall.percent:.1f}% files_processed={state.files_processed} "
@@ -1032,7 +1044,7 @@ class ProgressReporter:
                 f"active_workers={active} peak_workers={state.peak_active_files} "
                 f"processing_jobs_completed={state.processing_jobs_completed} "
                 f"rate={state.processed / elapsed:.2f}/s "
-                f"workers={workers} dates={dates} current_year={year} year_messages={state.current_year_messages} "
+                f"workers={workers}{saved_field} dates={dates} current_year={year} year_messages={state.current_year_messages} "
                 f"archived={state.counts.archived} seen_skipped={state.counts.duplicates} "
                 f"autosaved={state.counts.autosaves} metadata_excluded={state.counts.metadata_excluded} "
                 f"infected={state.counts.infected} skipped_files={state.counts.skipped_files} "
@@ -1098,7 +1110,7 @@ class ProgressReporter:
             configured_workers=len(state.workers),
             workers=[WorkerProgress.model_validate(worker) for worker in state.workers],
             saved_workers=state.saved_workers,
-            concurrent_processing=state.concurrent_processing,
+            concurrent_processing=state.overlap_active,
             counts=state.counts,
             years=state.years,
             download_coverage=state.download_coverage,
@@ -1141,7 +1153,7 @@ def run_file_workers[WorkerItem](
     on_interrupt: Callable[[], None] | None = None,
     coordinator: FutureCoordinator | None = None,
     signals: tuple[ChangeSignal, ...] = (),
-    background: Callable[[], Generator[tuple[Future[object], ...], None, None]] | None = None,
+    background: Callable[[Callable[[BaseException], None]], Generator[tuple[Future[object], ...], None, None]] | None = None,
 ) -> None:
     """Run framework workers with optional source-declared per-key concurrency limits."""
     console = console_signal()
@@ -1158,26 +1170,53 @@ def run_file_workers[WorkerItem](
     background_steps: Generator[tuple[Future[object], ...], None, None] | None = None
     background_waiting: tuple[Future[object], ...] = ()
 
+    primary_error: BaseException | None = None
+
+    def fail(error: BaseException) -> None:
+        nonlocal primary_error
+        if background is None:
+            raise error
+        if primary_error is None:
+            primary_error = error
+            stop.set()
+            if coordinator is not None:
+                coordinator.abort(error)
+            for future in pending:
+                future.cancel()
+            if isinstance(error, KeyboardInterrupt) and on_interrupt is not None:
+                on_interrupt()
+
+    def background_failed(error: BaseException) -> None:
+        # A peer source can set stop before its future exposes the actual failure.
+        # Its cleanup cancellation must not become the reported source error.
+        if not (isinstance(error, IngestInterrupted) and stop.is_set()):
+            fail(error)
+
     def advance_background() -> None:
         nonlocal background_steps, background_waiting
-        if background is None or stop.is_set():
+        if background is None:
             return
         if background_steps is None:
-            background_steps = background()
+            if stop.is_set():
+                return
+            background_steps = background(background_failed)
         if not background_waiting or any(future.done() for future in background_waiting):
             try:
                 background_waiting = next(background_steps)
             except StopIteration:
                 background_steps = None
                 background_waiting = ()
-            except IngestInterrupted:
-                if not stop.is_set():
-                    raise
-                # A source can request peer cancellation before its original
-                # exception reaches its future. Do not replace it with cleanup.
-                background_steps.close()
+            except BaseException as error:
                 background_steps = None
                 background_waiting = ()
+                background_failed(error)
+
+    def drive(operation: Callable[[], None]) -> None:
+        if primary_error is None:
+            try:
+                operation()
+            except BaseException as error:
+                fail(error)
 
     def invoke(item: WorkerItem) -> None:
         token = WORKER_NUMBER.set(ProgressReporter._worker_number())
@@ -1191,17 +1230,14 @@ def run_file_workers[WorkerItem](
             if stop.is_set():
                 exhausted = True
                 waiting_items.clear()
-                if background_steps is not None:
-                    background_steps.close()
-                    background_steps = None
-                    background_waiting = ()
             while not exhausted and len(waiting_items) < lookahead:
                 try:
                     item = next(iterator)
                 except StopIteration:
                     exhausted = True
-                except KeyboardInterrupt:
-                    raise
+                except KeyboardInterrupt as error:
+                    fail(error)
+                    exhausted = True
                 except BaseException as error:
                     logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                     discovery_error = (error, error.__traceback__)
@@ -1235,23 +1271,34 @@ def run_file_workers[WorkerItem](
                     break
                 continue
             changed = tuple(signal.ready for signal in signals)
-            status_driver()
-            completed, _unfinished = wait(
-                (*pending, *changed, *background_waiting, *((coordinator.ready,) if coordinator is not None else ())),
-                return_when=FIRST_COMPLETED,
-            )
+            drive(status_driver)
+            publication = (coordinator.ready,) if coordinator is not None and primary_error is None else ()
+            try:
+                completed, _unfinished = wait(
+                    (*pending, *changed, *background_waiting, *publication),
+                    return_when=FIRST_COMPLETED,
+                )
+            except KeyboardInterrupt as error:
+                fail(error)
+                continue
             if coordinator is not None:
-                coordinator.drain()
-            status_driver()
+                drive(coordinator.drain)
+            drive(status_driver)
             for future in completed:
                 if future not in pending:
                     continue
                 key = pending.pop(future)
                 try:
-                    future.result()
+                    if primary_error is None:
+                        try:
+                            future.result()
+                        except BaseException as error:
+                            fail(error)
                 finally:
                     if key is not None:
                         active[key] -= 1
+        if primary_error is not None:
+            raise primary_error
         if discovery_error is not None:
             error, traceback = discovery_error
             raise error.with_traceback(traceback)
@@ -1261,7 +1308,7 @@ def run_file_workers[WorkerItem](
             coordinator.abort(error)
         for future in pending:
             future.cancel()
-        if isinstance(error, KeyboardInterrupt) and on_interrupt is not None:
+        if primary_error is None and isinstance(error, KeyboardInterrupt) and on_interrupt is not None:
             on_interrupt()
         raise
     finally:
@@ -1270,7 +1317,8 @@ def run_file_workers[WorkerItem](
                 background_steps.close()
         finally:
             pool.shutdown(wait=True, cancel_futures=True)
-            status_driver()
+            if primary_error is None:
+                status_driver()
 
 
 def start_ingest_scanner(status_driver: Callable[[], None], workers: int, *,
@@ -1564,7 +1612,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     source_file_pks: dict[tuple[str, str, str], int] = {}
     source_volume_pks: dict[str, int] = {}
     coordinator = FutureCoordinator()
-    progress_signals = (progress.changed, *((stop_event.changed,) if isinstance(stop_event, ChangeEvent) else ()))
+    progress_signals = (progress.changed, stop.changed, *((stop_event.changed,) if isinstance(stop_event, ChangeEvent) else ()))
+    finish_active_processing = False
+    concurrent_content = False
 
     def check_interrupted() -> None:
         if stop_event is not None and stop_event.is_set():
@@ -1577,7 +1627,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
 
     def check_processor_cancelled() -> None:
         check_interrupted()
-        if stop.is_set():
+        if stop.is_set() and not finish_active_processing:
             raise IngestInterrupted("Processing stopped; unfinished work is retained.")
 
     scanner: ClamScanner | None = None
@@ -1993,7 +2043,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     def publish_source(source: MailObject, metadata: SourceMetadata) -> ParsedMessage:
         assert pipeline is not None
         try:
-            decision = pipeline.ingest(source, metadata)
+            decision = pipeline.ingest(source, metadata, defer_existing_jobs=concurrent_content)
         except RuntimeError as error:
             cause = error.__cause__ or error
             observe(source, "error", f"{type(cause).__name__}: {cause}", hashlib.sha256(source.raw).hexdigest())
@@ -2343,16 +2393,22 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 assert pipeline is not None
                 try:
                     coordinator.call(partial(pipeline.resume_ingest, progress=progress.record_processing,
-                                             unpublished_only=concurrent_content))
+                                             mandatory_only=concurrent_content))
                 finally:
                     progress.finish_processing()
             run_file_workers([0], 1, resume_ingest, stop, refresh_import, on_interrupt=progress.announce_interrupt, coordinator=coordinator, signals=progress_signals)
         progress.set_phase("checking sources")
         if concurrent_content:
             progress.begin_concurrent_processing()
-        def background_content() -> Generator[tuple[Future[object], ...], None, None]:
+        def background_content(failed: Callable[[BaseException], None]) -> Generator[tuple[Future[object], ...], None, None]:
             assert pipeline is not None
-            yield from pipeline.resume_steps(progress=progress.record_processing, workers=request.workers)
+            def stop_admission(error: BaseException) -> None:
+                nonlocal finish_active_processing
+                if not stop.is_set() and isinstance(error, ProcessorStop):
+                    finish_active_processing = True
+                failed(error)
+            yield from pipeline.resume_steps(progress=progress.record_processing, workers=request.workers,
+                stop_claiming=stop.is_set, on_failure=stop_admission)
         try:
             with BoundedWorkers(request.workers) as message_workers:
                 run_file_workers(
@@ -2450,7 +2506,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             )
             catalog.commit()
         if pipeline is not None:
-            if progress.saved_message_counter is not None and progress.activity_kind == "processing":
+            if (progress.saved_message_counter is not None
+                    and (progress.activity_kind == "processing" or progress.state.saved_workers)):
                 progress.state.saved_messages_remaining = progress.saved_message_counter()
             progress.saved_message_counter = None
             print(processor_statistics_table(pipeline.statistics().statistics), file=sys.stderr)

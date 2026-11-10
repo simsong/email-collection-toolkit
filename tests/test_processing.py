@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import FIRST_COMPLETED, wait
+from contextlib import closing
 import sqlite3
 import subprocess
 import sys
@@ -14,11 +16,34 @@ import pytest
 from mailarchiver.file_events import wait_for_path_state
 from mailarchiver.processing.api import RAW_MESSAGE, ProcessingObject
 from mailarchiver.processing.registry import fingerprint, load_processors
-from mailarchiver.processing.runtime import run
+from mailarchiver.processing.runtime import dispatch_steps, run
 from mailarchiver.processing.store import connect, report, submit
 
 FIXTURES = Path(__file__).parent / "processing_plugins"
 MESSAGE = Path(__file__).parent / "data/credible_date_with_quoted_body.eml"
+
+
+def test_cooperative_stop_retains_returned_invocation_before_resume(tmp_path: Path) -> None:
+    """PROCESSING: checkpoint a returned result without starting another subscriber on stop."""
+    archive = tmp_path / "archive"
+    plugin(tmp_path, "first-effect", 'with (item.archive.path / "calls").open("a") as log:\n'
+        '    log.write("once\\n")\nreturn ProcessingResult()')
+    plugin(tmp_path, "later-effect", '(item.archive.path / "later").touch()\nreturn ProcessingResult()', rank=2)
+    plugins = load_processors((tmp_path,))
+    stop = threading.Event()
+    with connect(archive, create=True) as database:
+        submit(database, archive, MESSAGE, fingerprint(plugins))
+        with closing(dispatch_steps(database, plugins, cooperative=True, stop_claiming=stop.is_set)) as steps:
+            ready, _pending = wait(next(steps), timeout=5, return_when=FIRST_COMPLETED)
+            assert ready
+            stop.set()
+            with pytest.raises(StopIteration):
+                next(steps)
+        assert (archive / "calls").read_text() == "once\n"
+        assert not (archive / "later").exists()
+        assert database.execute("SELECT status FROM invocations WHERE kind='first-effect'").fetchall() == [("completed",)]
+        run(database, plugins, retry=True)
+        assert (archive / "calls").read_text() == "once\n" and (archive / "later").exists()
 
 
 def plugin(root: Path, kind: str, code: str, *, rank: int = 1, emits: str = "",

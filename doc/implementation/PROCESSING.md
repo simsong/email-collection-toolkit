@@ -24,8 +24,11 @@ Source and saved-processing lanes have separate status arrays; global job/source
 remain independent and mixed activity does not substitute a processing ETA for acquisition.
 Job advancement restores its logical worker context for attachment publication;
 source-triggered cancellation cannot replace the source's original exception.
-Only unpublished mandatory ingest decisions run in the serial recovery pass;
-archived metadata jobs remain in the configured parallel saved-work pool.
+The serial recovery pass completes unfinished ingest roots, including already-filed
+roots. Independent archived metadata stays in the parallel saved-work pool.
+The owner retains the first failure, stops new source admission/processor claims and
+drains returned invocation results before teardown. Explicit processor stops let
+already-started peers finish; cooperative user cancellation wakes those peers.
 
 `runtime.run` prepares interrupted checkpoints once. The dispatcher advances one
 generator per active message and submits its next invocation to a bounded
@@ -99,14 +102,16 @@ checkpoint rather than rescanning after canonical publication; old failures
 without an accepted decision still retry normally.
 Other processor failures retain their existing dependency barriers.
 After scanner startup, progress switches to `preparing processing`, then
-`Processing saved mail` and `Finishing saved imports`. With ingestion
-and unlimited content work enabled, the host drains eligible message/content
-jobs before replaying unpublished ingest roots or traversing sources, then runs
-content processing again for newly admitted mail. Deferred or explicitly bounded
-content runs retain their previous dispatch order and job budget.
+`Finishing saved imports`. The host completes mandatory ingest roots, including
+already-filed roots with unfinished handoffs. Only a genuinely unpublished root
+needs the preliminary archived-content recovery pass. With unlimited processing
+and source work, remaining saved jobs and source reads proceed together. A duplicate
+of an already-filed message leaves its metadata jobs with the shared dispatcher.
+Deferred or bounded modes retain their existing dispatch order and budget.
 Saved-import replay isolates ordinary failures for already archived messages in
 these modes too; unpublished roots keep stop-on-error behavior. Failed jobs stay
-recorded, and explicit `fail-import` still propagates before new source admission.
+recorded. An accepted explicit `fail-import` stops new source admission immediately,
+and the owner checkpoints already-returned processor results before reporting it.
 The preliminary pass retains failed jobs without raising their aggregate error;
 the ordinary final content pass still reports failures after mail admission.
 Its dispatcher continues independent jobs after failure while leaving descendants

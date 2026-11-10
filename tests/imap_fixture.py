@@ -95,6 +95,8 @@ class DisposableImap:
         self._body_limit: int | None = None
         self._bodies = 0
         self.active_connections = 0
+        self.connections_closed = Event()
+        self.connections_closed.set()
         self.peak_connections = 0
         self.connection_target: int | None = None
         self.connections_ready = Event()
@@ -147,6 +149,7 @@ class DisposableImap:
 
         async def connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, info: SocketInfo) -> None:
             self.active_connections += 1
+            self.connections_closed.clear()
             self.peak_connections = max(self.peak_connections, self.active_connections)
             if self.active_connections == self.connection_target:
                 self.connections_ready.set()
@@ -154,6 +157,8 @@ class DisposableImap:
                 await protocol(AcknowledgedReader(reader, self._before_command), writer, info)
             finally:
                 self.active_connections -= 1
+                if self.active_connections == 0:
+                    self.connections_closed.set()
 
         callback = ProxyProtocolReader(config.proxy_protocol).get_callback(connection)
         server_context = config.ssl_context if self.tls == "implicit" else None

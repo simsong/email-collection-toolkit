@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a82 — preserve recovery and stop boundaries during overlap
+
+- Complete previously filed ingest roots, keep duplicate metadata jobs in the
+  shared scheduler, and stop new downloads immediately on an explicit processor stop.
+- Retain returned processor results through cancellation and show overlap only
+  while both groups have active work.
+
 ## 1.0.0a81 — overlap downloads and saved-message processing
 
 - Download new mail while processing saved messages through separate worker groups.

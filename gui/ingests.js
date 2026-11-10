@@ -276,13 +276,14 @@ function renderDetail(status) {
 
   detail.append(heading, track, caption, statistics(status));
   if (status.concurrent_processing) {
-    detail.append(textBlock("New mail downloads while saved messages and attachments are processed.", "processing-explanation"));
+    detail.append(textBlock("Source work and saved message processing are running together.", "processing-explanation"));
   }
   if (processingMode(status)) {
     const explanation = document.createElement("p");
     explanation.className = "processing-explanation";
     explanation.textContent = "Processing messages and MIME parts already saved in this archive. Each email stays in the count until all its tasks finish. The count can stay level while earlier processing stages finish.";
-    if (phaseLabel(status) === "Processing saved mail" && status.state === "running" && status.source_roots.length) {
+    if (phaseLabel(status) === "Processing saved mail" && status.state === "running" && status.source_roots.length
+        && !status.saved_workers?.length) {
       explanation.textContent += " Source downloading/importing resumes after this saved work finishes.";
     }
     detail.append(explanation);

@@ -101,16 +101,30 @@ def test_concurrent_download_and_processing_have_separate_rows(tmp_path: Path, p
     snapshot = read_ingest_history(tmp_path).statuses[0]
     assert snapshot.workers[0].operation == "downloading"
     assert snapshot.saved_workers[0].operation == "processing"
+    assert snapshot.saved_workers[0].processing_jobs_completed == 0
     assert snapshot.eta == "unavailable"
     bridge(page, IngestWindowApi(tmp_path), ("history", "antivirus", "can_import_directory"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
-    expect(page.locator(".processing-explanation")).to_have_text("New mail downloads while saved messages and attachments are processed.")
+    expect(page.locator(".processing-explanation")).to_have_text("Source work and saved message processing are running together.")
     tables = page.locator(".worker-table")
     expect(tables).to_have_count(2)
     expect(tables.nth(0)).to_contain_text("Downloading")
     expect(tables.nth(1)).to_contain_text("Processing saved mail")
     expect(page.locator(".progress-caption")).to_contain_text("ETA unavailable")
+    tables.nth(1).scroll_into_view_if_needed()
     page.screenshot(path=str(tmp_path / "concurrent-imap-processing.png"), full_page=True)
+    progress._queue_update(ProgressUpdate(worker=1, saved_pool=True, phase="idle", processing_active=False))
+    progress.refresh()
+    page.evaluate("window.refreshHistory()")
+    expect(page.locator(".processing-explanation")).to_have_count(0)
+    expect(page.locator(".progress-caption")).to_contain_text("ETA unavailable")
+    progress._queue_update(ProgressUpdate(worker=1, phase="idle", file_complete=True))
+    progress._queue_update(ProgressUpdate(worker=1, saved_pool=True, phase="processing mime", path="content job 8",
+        processing_active=True, processing_job_id=8, processing_processor="mime", activity_unit="jobs"))
+    progress.refresh()
+    page.evaluate("window.refreshHistory()")
+    expect(page.locator(".progress-caption")).to_contain_text("Processing saved mail")
+    expect(page.locator(".processing-explanation")).not_to_contain_text("resumes after")
 
 
 @pytest.mark.parametrize("recorded_version", ["0.0.0+synthetic-history", None])

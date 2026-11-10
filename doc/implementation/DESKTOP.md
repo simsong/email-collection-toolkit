@@ -1208,7 +1208,9 @@ redundant synchronous acknowledgement, plus a browser-level lost control reply.
 
 Additive `saved_workers` and `concurrent_processing` snapshot fields keep saved-content
 lane updates apart from source/scanner updates. Ingests renders both groups and source
-statistics during overlap; historical files retain their previous presentation.
+statistics during overlap. The overlap flag requires active work in both groups;
+saved-only and source-only phases have their own labels. Both terminal formats
+also show saved lanes. Historical files retain their previous presentation.
 
 Unknown-byte source inventory reports ETA unavailable while partitions remain;
 finishing known byte input may still report finalizing before its checkpoint.

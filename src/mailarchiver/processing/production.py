@@ -178,7 +178,7 @@ class ProductionPipeline:
                               (item.message_id, f"{metadata.source_file_pk}:{metadata.cursor}", parent, json.dumps(part_path)))
         return item
 
-    def ingest(self, source: MailObject, metadata: SourceMetadata) -> IngestedMessage:
+    def ingest(self, source: MailObject, metadata: SourceMetadata, *, defer_existing_jobs: bool = False) -> IngestedMessage:
         with tempfile.NamedTemporaryFile(dir=self.archive, prefix=".processing-input-", delete_on_close=False) as temporary:
             temporary.write(source.raw)
             temporary.flush()
@@ -195,23 +195,28 @@ class ProductionPipeline:
                 "(SELECT 1 FROM message_state WHERE message_id=? AND parsed_json IS NOT NULL)",
                 (USER_CANCELLED, item.message_id, item.message_id))
             state = self.database.execute("SELECT parsed_json FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()
-            if state is None or state[0] is None:
+            needs_filing = state is None or state[0] is None
+            if needs_filing:
                 enqueue(self.database, item, self.registry_hash)
-        self._finish_ingest_message(item.message_id)
+        # A duplicate's saved ranks belong to the shared dispatcher. Starting a
+        # nested dispatch could claim a sibling job while that digest is active.
+        if not (defer_existing_jobs and existing is not None and not needs_filing):
+            self._finish_ingest_message(item.message_id)
         row = self.database.execute("SELECT parsed_json,catalog_message_pk,excluded FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()
         if row is None or row[0] is None:
             raise RuntimeError("ingest processor tree ended without a filing decision")
         return IngestedMessage(parsed=ParsedMessage.model_validate_json(row[0]), message_pk=row[1], duplicate=existing is not None, excluded=bool(row[2]))
 
-    def resume_ingest(self, *, progress: ProcessingProgress | None = None, unpublished_only: bool = False) -> None:
+    def resume_ingest(self, *, progress: ProcessingProgress | None = None, mandatory_only: bool = False) -> None:
         """Replay durable ingest work with cooperative stops between messages."""
         while row := self.database.execute("SELECT json_extract(item_json,'$.message_id') FROM jobs "
                 "WHERE status IN ('pending','running') AND json_extract(item_json,'$.pipeline') "
-                "IN ('ingest','message') AND (?=0 OR NOT EXISTS (SELECT 1 FROM message_state state "
+                "IN ('ingest','message') AND (?=0 OR json_extract(jobs.item_json,'$.pipeline')='ingest' "
+                "OR NOT EXISTS (SELECT 1 FROM message_state state "
                 "WHERE state.message_id=json_extract(jobs.item_json,'$.message_id') AND state.parsed_json IS NOT NULL)) "
                 "AND (parent_job_id IS NULL OR EXISTS "
                 "(SELECT 1 FROM jobs parent WHERE parent.job_id=jobs.parent_job_id "
-                "AND parent.status='completed')) ORDER BY job_id LIMIT 1", (int(unpublished_only),)).fetchone():
+                "AND parent.status='completed')) ORDER BY job_id LIMIT 1", (int(mandatory_only),)).fetchone():
             if self.cancelled is not None:
                 self.cancelled()
             # Archived metadata failures cannot starve fresh sources, even when
@@ -248,16 +253,16 @@ class ProductionPipeline:
             self._raise_failures(pipelines, failures, message_id=message_id)
         return result
 
-    def resume_steps(self, *, progress: ProcessingProgress, workers: int) -> Generator[tuple[Future[object], ...], None, None]:
+    def resume_steps(self, *, progress: ProcessingProgress, workers: int, stop_claiming: Callable[[], bool],
+                     on_failure: Callable[[BaseException], None]) -> Generator[tuple[Future[object], ...], None, None]:
         """Yield between independent invocations; the archive owner also services acquisition."""
         # Construction recovered interrupted jobs once. Reopening an idle dispatcher
         # must not reset active/failed jobs while new sources are being published.
-        completed = yield from dispatch_steps(self.database, self.plugins, pipelines=("message", "content"),
+        yield from dispatch_steps(self.database, self.plugins, pipelines=("message", "content"),
             installation_config=self.installation_config, services=self, cancelled=self.cancelled,
             continue_after_failure=True, progress=progress, workers=workers,
-            heartbeat=self.heartbeat, signals=self.signals, cooperative=True)
-        if not completed:
-            self._raise_failures(("message", "content"), [], message_id=None)
+            heartbeat=self.heartbeat, signals=self.signals, cooperative=True,
+            stop_claiming=stop_claiming, on_failure=on_failure)
 
     def _raise_failures(self, pipelines: tuple[Pipeline, ...], failures: list[Exception], *, message_id: str | None = None) -> None:
         placeholders = ",".join("?" for _ in pipelines)

@@ -52,6 +52,10 @@ RANK_FAILURE = "rank failed; inspect invocations"
 ProcessingProgress = Callable[[ProcessingObject, str, bool, int], None]
 
 
+class ProcessorStop(RuntimeError):
+    """A processor explicitly stopped further admission while active work settles."""
+
+
 class InvocationRequest(BaseModel):
     plugin: PluginSpec
     item: ProcessingObject
@@ -336,7 +340,9 @@ def dispatch_steps(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...]
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
         failures: list[Exception] | None = None, message_id: str | None = None,
         continue_after_failure: bool = False, progress: ProcessingProgress | None = None, workers: int = 1,
-        heartbeat: Callable[[], None] | None = None, signals: tuple[ChangeSignal, ...] = (), cooperative: bool = False) -> Generator[tuple[Future[object], ...], None, bool]:
+        heartbeat: Callable[[], None] | None = None, signals: tuple[ChangeSignal, ...] = (), cooperative: bool = False,
+        stop_claiming: Callable[[], bool] = lambda: False,
+        on_failure: Callable[[BaseException], None] | None = None) -> Generator[tuple[Future[object], ...], None, None]:
     """Workers return results; this coordinator alone advances jobs and commits SQL."""
     if workers < 1:
         raise ValueError("processing workers must be positive")
@@ -382,6 +388,8 @@ def dispatch_steps(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...]
                         failure = failure or caught
                         stopped = True
                         active.remove(job)
+                        if on_failure is not None:
+                            on_failure(caught)
                         return
                     finally:
                         WORKER_NUMBER.reset(token)
@@ -389,6 +397,7 @@ def dispatch_steps(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...]
                         if job.workspace is not None:
                             shutil.rmtree(job.workspace)
                             job.workspace = None
+                    stopped |= stop_claiming()
                     if stopped:
                         job.steps.close()
                         active.remove(job)
@@ -404,7 +413,8 @@ def dispatch_steps(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...]
                             job.future.set_exception(caught)
 
                 while True:
-                    while not stopped and len(active) < workers and (max_jobs is None or processed < max_jobs):
+                    stopped |= stop_claiming()
+                    while not stopped and not stop_claiming() and len(active) < workers and (max_jobs is None or processed < max_jobs):
                         placeholders = ",".join("?" for _ in pipelines)
                         message_filter = "" if message_id is None else "AND json_extract(item_json,'$.message_id')=? "
                         busy_filter = ("AND json_extract(item_json,'$.message_id') NOT IN ("
@@ -446,7 +456,6 @@ def dispatch_steps(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...]
                 job.steps.close()
         if failure is not None:
             raise failure
-        return not stopped
 
 
 def _job(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], job_id: int, payload: str, *,
@@ -524,7 +533,7 @@ def _job(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], job_id: 
         if stop_import:
             ending = "failed"
             if continue_after_failure and explicit_stop:
-                raise RuntimeError("processor requested fail-import")
+                raise ProcessorStop("processor requested fail-import")
             return continue_after_failure
         if not aborted:
             if services is not None:
