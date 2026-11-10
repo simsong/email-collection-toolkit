@@ -81,7 +81,7 @@ def test_discovery_does_not_guess_from_parent_or_environment(checkout: Path, tmp
 
 
 def test_about_keeps_launch_version_after_installed_metadata_changes(tmp_path: Path) -> None:
-    """An editable reinstall must not relabel a running process as the new code."""
+    """DESKTOP: editable reinstalls must not relabel About or a run's eventual failure."""
     initial = version("mailarchiver")
     parsed = Version(initial)
     replacement = f"{parsed.major}.{parsed.minor}.{parsed.micro + 1}"
@@ -93,11 +93,22 @@ from pathlib import Path
 from importlib.metadata import version
 sys.path.insert(0, sys.argv[1])
 from mailarchiver.gui_app import application_metadata
+from mailarchiver.__main__ import ProgressReporter
+from mailarchiver.ingest_status import IngestStatusFile, read_ingest_history
 assert application_metadata().version == sys.argv[2]
+archive = Path(sys.argv[1], 'archive')
+progress = ProgressReporter(1, status_file=IngestStatusFile(archive, 'ingest-launch-version'),
+    archive=archive, run_pk=1, terminal=False)
+progress.start()
+assert read_ingest_history(archive).statuses[0].application_version == sys.argv[2]
 Path(sys.argv[1], 'mailarchiver.dist-info/METADATA').write_text(
     f'Name: mailarchiver\\nVersion: {sys.argv[3]}\\n', encoding='utf-8')
 assert version('mailarchiver') == sys.argv[3]
 assert application_metadata().version == sys.argv[2]
+progress.finish('failed', 'synthetic failure after metadata replacement')
+status = read_ingest_history(archive).statuses[0]
+assert status.state == 'failed'
+assert status.application_version == sys.argv[2]
 """
     subprocess.run([sys.executable, "-c", code, str(tmp_path), initial, replacement],
                    check=True, capture_output=True, text=True, timeout=20)

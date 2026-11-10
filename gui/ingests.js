@@ -196,14 +196,21 @@ function historyRow(status) {
   const time = document.createElement("span");
   time.className = "history-time";
   time.textContent = new Date(status.started_at).toLocaleString();
+  const version = document.createElement("span");
+  version.className = "history-version";
+  version.textContent = runVersion(status);
   const summary = document.createElement("span");
   summary.className = "history-summary";
   summary.textContent = `${processingMode(status) ? `${integer(status.processing_jobs_completed)} processing tasks finished`
     : `${integer(status.processed_messages)} source messages`} · ${formatDuration(status.elapsed_seconds)}`;
-  main.append(title, time, summary);
+  main.append(title, time, version, summary);
   row.append(dot, main);
   row.addEventListener("click", () => { selectedStatusId = status.status_id; render(); });
   return row;
+}
+
+function runVersion(status) {
+  return status.application_version ? `Version ${status.application_version}` : "Version unavailable";
 }
 
 function renderDetail(status) {
@@ -222,7 +229,7 @@ function renderDetail(status) {
   const title = document.createElement("h1");
   title.textContent = `Ingest ${status.run_pk}`;
   const subtitle = document.createElement("p");
-  subtitle.textContent = `${new Date(status.started_at).toLocaleString()} · process ${status.process_id}`;
+  subtitle.textContent = `${new Date(status.started_at).toLocaleString()} · ${runVersion(status)} · process ${status.process_id}`;
   if (status.scan_policy === "not-scanned") {
     subtitle.textContent += " · WARNING: imported without antivirus scanning";
     subtitle.className = "failure";

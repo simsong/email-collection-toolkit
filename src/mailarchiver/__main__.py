@@ -51,6 +51,7 @@ from .scan_evidence import ScanEvidence, ScanFailure
 from .future_coordinator import BoundedWorkers, FutureCoordinator, WORKER_NUMBER
 from .application import configured_imap_connections, configured_workers, validate_ingest_paths
 from .configuration_diagnostics import ConfigurationError
+from .identity import APPLICATION_VERSION
 from .imap_source import IMAP_BUSY_PHASE
 from .imap_preferences import ImapConnectionLimit
 from .worker_preferences import half_cpus, worker_argument
@@ -1044,6 +1045,7 @@ class ProgressReporter:
             archive=str(self.status_archive.resolve()),
             run_pk=self.status_run_pk,
             process_id=os.getpid(),
+            application_version=APPLICATION_VERSION,
             source_roots=self.status_source_roots,
             started_at=state.started_at,
             updated_at=updated_at,

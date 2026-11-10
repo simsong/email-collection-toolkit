@@ -484,7 +484,12 @@ on font-dependent fixture height or iframe load timing to create overflow.
 Native archive/status change notifications trigger the main window to read
 the latest shared `IngestStatus` into its bottom status line. The separate
 `ingests.html` application reads all typed status files on those same events and presents run history beside aggregate and
-per-worker detail. Both the status-line action and the native
+per-worker detail. **Version** labels use the snapshot's optional `application_version`, recorded
+from `identity.APPLICATION_VERSION` by the producer. The launch version is read
+once from installed metadata and shared with About/title bars, so editable
+reinstalls cannot relabel a later failure. Missing legacy versions display
+**Version unavailable**; history reading preserves the original JSON.
+Both the status-line action and the native
 **Window → Ingests** menu route through a per-document singleton window owner: an existing
 window is restored and ordered to the front, while a closed one is recreated
 with its own normal close box. A running snapshot remains live while its producer PID is alive. After that

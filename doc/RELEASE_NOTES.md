@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a73 — record the version behind each import result
+
+- Save the producer's launch application version with every ingest snapshot and
+  display it in the history entry and run details, including failures.
+- Keep saved versions stable after an application update. Older history without
+  recorded version evidence displays **Version unavailable** and remains unchanged.
+
 ## 1.0.0a72 — dependency security updates
 
 - Update the PST downloader's ZIP reader to the patched 9.x line and reject
