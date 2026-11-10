@@ -887,3 +887,6 @@ literals never reach publication. Initial capacity-refusal backoff retains its
 existing policy. CLI progress exposes reconnect deadlines while counts are still.
 `make test-imap-recovery` exercises transient and persistent faults, epoch change,
 source integrity and owned scratch-process lifecycle.
+
+A scratch evaluation succeeds only after downloading at least one source message;
+a completed metadata-only refresh is explicitly not a successful download test.

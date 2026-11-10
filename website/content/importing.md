@@ -50,10 +50,16 @@ settings, including after reopening the archive. Suspension also frees the
 archive for manual name edits. A message already being downloaded may finish
 before suspension completes.
 
-If an IMAP connection times out, including after laptop sleep, the
-download shows **Timeout** with a yellow circle and horizontal dash, and keeps
-its saved progress. No timeout traceback is displayed. Reconnect to the network,
+IMAP imports automatically retry interrupted connections using fresh sessions
+and short waits. Saved progress is retained. If recovery keeps failing, the
+import pauses with a yellow circle and horizontal dash. Reconnect to the network,
 then click **Resume** in Ingests. Messages already saved are not downloaded again.
+
+The download details show the number of messages downloaded in this run, their
+earliest and latest server-reported dates in UTC, and counts by year. Emails
+extracted from attachments are counted separately from downloads. If the amount
+remaining is unknown, the display says **ETA unavailable** rather than claiming
+that downloading is finalizing.
 
 ![The import history window showing a completed synthetic collection import](../images/importing-interface.png)
 

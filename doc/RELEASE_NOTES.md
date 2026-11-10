@@ -6,6 +6,11 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a78 — require acquisition progress in scratch evaluation
+
+- Report metadata-only completion as an unsuccessful download evaluation.
+- Verify recovery after a successful body without fetching that body twice.
+
 ## 1.0.0a77 — safe transport recovery
 
 - Reconnect interrupted IMAP sessions with bounded, cancellable backoff and

@@ -286,3 +286,6 @@ ten minutes, plus two minutes for cleanup and a separate two-minute verification
 reuses one configured account through its existing vault reference and one extra
 connection, retains the scratch archive for subsequent runs, and prints status
 and canonical-integrity results. A forced stop is a failed evaluation.
+
+A scratch evaluation succeeds only after downloading at least one source message;
+a completed metadata-only refresh is explicitly not a successful download test.

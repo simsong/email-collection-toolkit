@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from threading import Timer
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter, computed_field
 
 from mailarchiver.__main__ import IngestInterrupted, IngestRequest, run_ingest
 from mailarchiver.application import create_empty_archive
@@ -45,6 +45,13 @@ class AcceptanceResult(BaseModel):
     status: IngestStatus | None
     evaluation_error: str | None = None
     progress_observed: bool
+
+    @computed_field
+    @property
+    def successful(self) -> bool:
+        return (not self.forced_stop and self.child_exitcode == 0 and not self.integrity_errors
+                and self.status is not None and self.status.state in {"completed", "interrupted"}
+                and self.progress_observed)
 
 
 def prepare(settings: AcceptanceSettings) -> None:
@@ -155,9 +162,7 @@ def main() -> int:
     except KeyboardInterrupt:
         return 130
     print(result.model_dump_json(indent=2))
-    return int(result.forced_stop or result.child_exitcode != 0 or bool(result.integrity_errors)
-               or result.status is None or result.status.state not in {"completed", "interrupted"}
-               or result.status.state != "completed" and not result.progress_observed)
+    return int(not result.successful)
 
 
 if __name__ == "__main__":

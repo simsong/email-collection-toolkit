@@ -60,6 +60,7 @@ from mailarchiver.plugin_api import MailContainer, MailObject, ProgressEvent, So
 from tests.imap_fixture import DisposableImap, FixtureKeyring, ImapFault, InterruptibleImap, Utf8Imap
 
 SSL_CERT_FILE_ENV = "SSL_CERT_FILE"
+ACCEPTANCE_SUCCESS_KEY = "successful"
 
 
 @pytest.mark.parametrize("plain", [False, True])
@@ -1366,15 +1367,23 @@ def test_scratch_acceptance_refuses_canonical_and_unmarked_archives(imap_archive
 
 def test_scratch_cycle_imports_and_resumes_real_tls(imap_archive: Path, tmp_path: Path) -> None:
     """ACQUISITION: scratch uses the production importer, preserves source settings and resumes exact UIDs."""
-    from scripts.imap_acceptance import AcceptanceSettings, import_cycle, prepare
+    from scripts.imap_acceptance import AcceptanceResult, AcceptanceSettings, import_cycle, prepare
     scratch = tmp_path / "scratch.mailarchive"
     settings = AcceptanceSettings(source_archive=imap_archive, scratch_archive=scratch, seconds=10, no_scan=True)
     prepare(settings)
     import_cycle(settings)
     assert totals(scratch).archived == 3 and not verify_archive(scratch)
+    status = read_ingest_history(scratch).statuses[0]
+    assert AcceptanceResult(child_exitcode=0, forced_stop=False, integrity_errors=[],
+                            status=status, progress_observed=True).successful
     prepare(settings)
     import_cycle(settings)
     assert totals(scratch).archived == 3 and totals(scratch).duplicates == 0
+    status = read_ingest_history(scratch).statuses[0]
+    assert status.download_coverage is not None and status.download_coverage.messages == 0
+    result = AcceptanceResult(child_exitcode=0, forced_stop=False, integrity_errors=[],
+                              status=status, progress_observed=False)
+    assert not result.successful and not json.loads(result.model_dump_json())[ACCEPTANCE_SUCCESS_KEY]
     assert totals(imap_archive).archived == 0
 
 
@@ -1386,13 +1395,19 @@ def test_transient_reads_recover_without_replaying_delivered_bodies(imap_archive
     """ACQUISITION: discard broken TLS streams, reconnect and retain exact committed/delivered UID progress."""
     assert isinstance(imap_inbox, InterruptibleImap)
     monkeypatch.setattr("mailarchiver.imap_protocol.IMAP_TIMEOUT", 1)
-    imap_inbox.fault = ImapFault(command=command, mode=mode, once=True)
+    imap_inbox.fault = ImapFault(command=command, mode=mode, once=True, skip=1 if command == b"BODY.PEEK[]" else 0)
     args = parser().parse_args(["--archive", str(imap_archive), "--no-scan", "--workers", "1"])
     assert synchronize(args) == 0
     assert totals(imap_archive).archived == 3 and totals(imap_archive).duplicates == 0
     status = read_ingest_history(imap_archive).statuses[0]
     assert status.state == "completed"
     assert status.download_coverage is not None and status.download_coverage.messages == 3
+    requests = [line for line in imap_inbox.commands if b"BODY.PEEK[]" in line]
+    assert len(requests) == (4 if command == b"BODY.PEEK[]" else 3)
+    requested_uids = [line.split()[3] for line in requests]
+    assert requested_uids.count(requested_uids[0]) == 1
+    if command == b"BODY.PEEK[]":
+        assert requested_uids.count(requested_uids[1]) == 2
     assert not verify_archive(imap_archive)
     assert_imap_searchable(imap_archive)
 
