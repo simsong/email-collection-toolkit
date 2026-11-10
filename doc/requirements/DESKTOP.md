@@ -887,6 +887,11 @@ existing recovery/checkpoint contract, rather than claiming completed cleanup.
 Native JavaScript replies must settle on completion, execution error, window Close
 or a failure deadline. A closed webview must not leave its caller blocked forever;
 synchronous native evaluations must not wait on their own UI thread.
+Python-to-page API replies must not wait synchronously for a redundant native
+acknowledgement. Ingests status and Suspend/Resume requests have a 15-second
+reply deadline. A missing reply reports an unconfirmed outcome, releases refresh
+ownership and permits a fresh status read; it must not replay a command, classify
+the import as failed, or enable password editing while login validation is pending.
 Collection-only completion, including a drag export for an unselected row, must
 notify state observers even when it changes no visible DOM.
 Large search batches must append without depending on JavaScript's function

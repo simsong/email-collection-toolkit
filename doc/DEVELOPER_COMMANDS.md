@@ -24,6 +24,11 @@ and outputs. They do not modify source stores or replace canonical messages.
 See [Apple Mail comparison](APPLE_MAIL_CACHE.md), [audit tooling](DATA_QUALITY_AUDIT.md)
 and the [research notebook](research/name-matcher/README.md) for interpretation.
 
+`make test-native-replies PYTEST_ARGS='--browser-channel chrome'` runs a disposable
+Cocoa reply probe and Ingests browser regressions, including lost status and
+Suspend/Resume replies. It uses synthetic state only and requires an unlocked
+macOS desktop; Windows WebView2 acceptance remains separate.
+
 ## Rust tools
 
 `make rust-programs` builds the supported workspace release binaries in

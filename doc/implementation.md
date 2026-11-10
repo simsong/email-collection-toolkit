@@ -40,6 +40,8 @@ than a second change log. Platform acceptance is stated alongside its evidence.
   and evidence; no resident service or manual-review gate is introduced.
 - Jobs, windows and import progress follow actual work and change notifications.
   Failure deadlines remain explicit; readiness must be observed.
+  The pinned SDK's API replies are posted to the native view without a second
+  synchronous acknowledgement; Ingests bounds its own reply waits.
   Unknown-size acquisition reports ETA unavailable. IMAP run details show
   message counts, IMAP INTERNALDATE UTC bounds and per-year coverage.
   Ingest snapshots record the shared immutable launch version. Ingests displays that

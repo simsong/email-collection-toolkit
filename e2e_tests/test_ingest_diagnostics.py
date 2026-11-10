@@ -28,6 +28,62 @@ WIDTH = "width"
 HEIGHT = "height"
 
 
+@pytest.mark.parametrize("method", ["suspend_import", "resume_import"])
+def test_lost_control_reply_is_visible_and_never_replays_the_command(tmp_path: Path, page: Page, method: str) -> None:
+    """DESKTOP: a missing transport reply releases the controls without issuing another command."""
+    archive = tmp_path / "synthetic.mailarchive"
+    saved = IngestStatusFile(archive, "ingest-reply-fixture")
+    progress = ProgressReporter(1, status_file=saved, archive=archive, run_pk=1, terminal=False)
+    progress.finish("interrupted")
+    bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    page.clock.install()
+    page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
+    expect(page.locator(".detail-heading")).to_contain_text("Ingest")
+    # Inject only a missing reply: the desktop API itself is outside this browser's transport.
+    page.evaluate("""method => {
+      window.controlCalls = 0;
+      window.pywebview.api[method] = () => {
+        window.controlCalls++;
+        return new Promise(resolve => { window.lateControlReply = resolve; });
+      };
+      void controlImport(method);
+    }""", method)
+    page.wait_for_function("window.controlCalls === 1")
+    page.clock.fast_forward(15001)
+    expect(page.locator("#error")).to_contain_text("No confirmation from the application")
+    expect(page.locator("#error")).to_contain_text("before repeating the command")
+    page.wait_for_function("!importing && historyRefresh.pending === null")
+    page.screenshot(path=str(tmp_path / "unconfirmed-control.png"), full_page=True)
+    page.evaluate("window.lateControlReply(true)")
+    assert page.evaluate("window.controlCalls") == 1
+    expect(page.locator(".state-badge")).to_have_text("interrupted")
+
+
+def test_lost_history_reply_releases_refresh_for_a_fresh_read(tmp_path: Path, page: Page) -> None:
+    """DESKTOP: an abandoned status reply cannot retain RefreshTask ownership forever."""
+    saved = IngestStatusFile(tmp_path, "ingest-status-reply")
+    progress = ProgressReporter(1, status_file=saved, archive=tmp_path, run_pk=1, terminal=False)
+    progress.finish("completed")
+    bridge(page, IngestWindowApi(tmp_path), ("history", "antivirus", "can_import_directory"))
+    page.clock.install()
+    page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
+    expect(page.locator(".state-badge")).to_have_text("completed")
+    page.evaluate("""() => {
+      window.savedHistory = window.pywebview.api.history;
+      window.pywebview.api.history = () => { window.statusReadStarted = true; return new Promise(() => {}); };
+      void refreshHistory();
+    }""")
+    page.wait_for_function("window.statusReadStarted")
+    page.clock.fast_forward(15001)
+    expect(page.locator("#error")).to_contain_text("No confirmation from the application")
+    page.wait_for_function("historyRefresh.pending === null")
+    page.evaluate("""async () => {
+      window.pywebview.api.history = window.savedHistory;
+      await refreshHistory();
+    }""")
+    expect(page.locator(".state-badge")).to_have_text("completed")
+
+
 @pytest.mark.parametrize("recorded_version", ["0.0.0+synthetic-history", None])
 def test_failed_run_shows_recorded_version_or_unavailable(tmp_path: Path, page: Page, recorded_version: str | None) -> None:
     """DESKTOP: failures show their producer's version; legacy files never inherit the viewer's."""

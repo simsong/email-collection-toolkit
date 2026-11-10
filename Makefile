@@ -639,6 +639,15 @@ test-quit: ruff
 test-native-quit: ruff
 	MAILARCHIVER_NATIVE_GUI_E2E=1 uv run --locked pytest -q tests/test_quit.py::test_native_quit_during_status_polling
 
+# Disposable native window checks SDK replies; browser faults check visible loss handling.
+.PHONY: test-native-replies
+test-native-replies: ruff
+	uv run --locked pylint src/mailarchiver/native_javascript.py src/mailarchiver/desktop_platform.py tests/test_native_javascript.py e2e_tests/native_reply_probe.py e2e_tests/test_ingest_diagnostics.py
+	uv run --locked ty check src/mailarchiver/native_javascript.py src/mailarchiver/desktop_platform.py tests/test_native_javascript.py e2e_tests/native_reply_probe.py e2e_tests/test_ingest_diagnostics.py --error-on-warning
+	uv run --locked pyright src/mailarchiver/native_javascript.py src/mailarchiver/desktop_platform.py tests/test_native_javascript.py e2e_tests/native_reply_probe.py e2e_tests/test_ingest_diagnostics.py --warnings
+	MAILARCHIVER_NATIVE_GUI_E2E=1 uv run --locked pytest -q tests/test_native_javascript.py $(PYTEST_ARGS)
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_diagnostics.py $(PYTEST_ARGS)
+
 test-apple-mail-compare:
 	uv run pytest -q tests/test_apple_mail_compare.py
 

@@ -6,6 +6,12 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a80 — deliver GUI replies without redundant native waits
+
+- Deliver API replies asynchronously to Cocoa/WebView2 instead of waiting for a
+  second native acknowledgement. Ingests reports a lost status/control reply
+  without repeating Suspend/Resume or marking the import failed.
+
 ## 1.0.0a79 — bind scratch evidence to its import
 
 - Require fresh status evidence returned by the current import worker. A missing

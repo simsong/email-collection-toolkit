@@ -72,11 +72,25 @@ window.selectIngest = statusId => {
 
 function refreshHistory() { return historyRefresh.run(); }
 
+function ingestReply(method) {
+  const operation = window.pywebview.api[method];
+  if (!operation) return Promise.resolve(undefined);
+  const action = {antivirus: "checking antivirus status", history: "reading import status",
+    can_import_directory: "checking import availability", suspend_import: "suspending the import",
+    resume_import: "resuming the import"}[method] || "updating this window";
+  return new Promise((resolve, reject) => {
+    const deadline = window.setTimeout(() => reject(new Error(
+      `No confirmation from the application while ${action}. The import may still be running or changing state. `
+      + "Return to this window to refresh status before repeating the command.")), 15000);
+    Promise.resolve().then(() => operation()).then(resolve, reject).finally(() => window.clearTimeout(deadline));
+  });
+}
+
 async function readHistory() {
   try {
-    const antivirus = await window.pywebview.api.antivirus?.();
-    const history = await window.pywebview.api.history();
-    const canImport = await window.pywebview.api.can_import_directory?.();
+    const antivirus = await ingestReply("antivirus");
+    const history = await ingestReply("history");
+    const canImport = await ingestReply("can_import_directory");
     byId("antivirus-warning").hidden = !antivirus || antivirus.configured;
     byId("antivirus-detail").textContent = antivirus?.detail || "";
     const previousLatestId = statuses[0]?.status_id;
@@ -156,7 +170,7 @@ async function controlImport(method) {
   byId("import-control-status").textContent = method === "suspend_import" ? "Suspending import…" : "Continuing import…";
   byId("import-control-status").hidden = false;
   try {
-    if (!await window.pywebview.api[method]()) throw new Error("The import state changed. Please try again.");
+    if (!await ingestReply(method)) throw new Error("The import state changed. Please try again.");
   } catch (error) { showError(String(error?.message || error)); }
   finally { importing = false; await historyRefresh.fresh(); }
 }

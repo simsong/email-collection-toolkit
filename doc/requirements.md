@@ -40,6 +40,8 @@ does not establish that every platform or release gate has passed.
   and evidence; no resident service or manual-review gate is introduced.
 - Jobs, windows and import progress follow actual work and change notifications.
   Failure deadlines remain explicit; readiness must be observed.
+  Native API replies use one-way delivery; lost Ingests replies display an unknown
+  outcome without retrying a command or marking the import failed.
   Unknown-size acquisition reports ETA unavailable. IMAP run details show
   message counts, IMAP INTERNALDATE UTC bounds and per-year coverage.
   Run history preserves the producing application's launch version, including failures;

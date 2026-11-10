@@ -1192,6 +1192,18 @@ retains the SDK's separately delivered Promise results and distinguishes WebKit'
 unsupported immediate result from execution errors. Actual Windows execution
 remains a separate VM acceptance requirement.
 
+The application's pinned `Window.evaluate_js` boundary recognizes only the SDK's
+API-reply callback prefix and posts that script through `post_window_script`.
+It preserves ordinary evaluations and Promise callbacks, including their native
+errors and 15-second failure deadline. One-way replies do not create a waiting
+Python future; the page's Promise resolution establishes actual delivery. Closed
+windows discard queued replies, including a Close that races native dispatch.
+Ingests bounds status/control reply waits at 15 seconds and reports an unconfirmed
+outcome before reading fresh status. Commands are never automatically repeated;
+password validation retains its existing lifetime and cancellation safeguards.
+`make test-native-replies` checks real Cocoa API exchanges while rejecting the
+redundant synchronous acknowledgement, plus a browser-level lost control reply.
+
 ## IMAP run coverage
 
 Unknown-byte source inventory reports ETA unavailable while partitions remain;
