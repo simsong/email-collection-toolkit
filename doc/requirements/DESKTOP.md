@@ -60,9 +60,10 @@ an X for failed/disk-full/stale, and a pause symbol for interrupted runs, alongs
 text labels. Accepted GUI imports show startup immediately while archive
 preparation precedes the first saved run snapshot; old failures retain their state.
 Each saved run must retain the application version captured at producer launch,
-including a later failure. Show it in the history entry and selected run details.
+including a later failure. Show it in parentheses after the timestamp in the
+history entry and selected run details.
 An editable reinstall or a newer history viewer must not relabel a saved run.
-Older snapshots without a version display **Version unavailable**, without rewriting them.
+Older snapshots without a version display **(version unavailable)** without rewriting them.
 Explain that finished processing jobs are work for messages or MIME parts,
 potentially several per email, rather than newly imported message counts.
 Label saved work **Processing saved mail**. During processing stages, including
@@ -910,7 +911,8 @@ source activity while sampling the exact remaining count at shutdown.
 Unknown-byte source inventory reports ETA unavailable while partitions remain;
 finishing known byte input may still report finalizing before its checkpoint.
 Ingests shows run-specific message count, earliest/latest IMAP INTERNALDATE values
-in UTC and year counts before the workers table. The range uses source IMAP INTERNALDATE, not header dates or download times.
+in UTC and year counts before the workers table. The Year and Messages columns
+size to their contents. The range uses source IMAP INTERNALDATE, not header dates or download times.
 Separate acquisition counters exclude attached-message extraction and saved processing.
 Count complete IMAP bodies when received, including bodies awaiting scanning or
 publication. Historical missing counts or dates show unavailable; no dated messages shows an explicit

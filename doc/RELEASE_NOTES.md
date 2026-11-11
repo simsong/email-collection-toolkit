@@ -6,6 +6,11 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a87 — compact Ingests history and year coverage
+
+- Show the producing version in parentheses after the run timestamp.
+- Size the Year and Messages columns to their contents.
+
 ## 1.0.0a86 — count completed IMAP transfers before scanning
 
 - Include received IMAP bodies in the run's download coverage even when scanning

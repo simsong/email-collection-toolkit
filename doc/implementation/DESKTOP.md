@@ -490,11 +490,11 @@ on font-dependent fixture height or iframe load timing to create overflow.
 Native archive/status change notifications trigger the main window to read
 the latest shared `IngestStatus` into its bottom status line. The separate
 `ingests.html` application reads all typed status files on those same events and presents run history beside aggregate and
-per-worker detail. **Version** labels use the snapshot's optional `application_version`, recorded
+per-worker detail. Timestamp suffixes use the snapshot's optional `application_version`, recorded
 from `identity.APPLICATION_VERSION` by the producer. The launch version is read
 once from installed metadata and shared with About/title bars, so editable
 reinstalls cannot relabel a later failure. Missing legacy versions display
-**Version unavailable**; history reading preserves the original JSON.
+**(version unavailable)**; history reading preserves the original JSON.
 Both the status-line action and the native
 **Window → Ingests** menu route through a per-document singleton window owner: an existing
 window is restored and ordered to the front, while a closed one is recreated
@@ -1220,7 +1220,8 @@ is introduced.
 Unknown-byte source inventory reports ETA unavailable while partitions remain;
 finishing known byte input may still report finalizing before its checkpoint.
 Ingests shows run-specific message count, earliest/latest IMAP INTERNALDATE values
-in UTC and year counts before the workers table. The range uses source IMAP INTERNALDATE, not header dates or download times.
+in UTC and year counts before the workers table. The coverage table uses intrinsic
+widths for both columns. The range uses source IMAP INTERNALDATE, not header dates or download times.
 Separate acquisition counters exclude attached-message extraction and saved processing.
 Acquisition records complete bodies before sending them to the scan pool.
 Historical IMAP runs without recorded download coverage show unavailable in both

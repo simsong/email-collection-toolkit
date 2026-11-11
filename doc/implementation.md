@@ -52,8 +52,9 @@ than a second change log. Platform acceptance is stated alongside its evidence.
   source totals or dates. IMAP run details show
   complete source downloads, IMAP INTERNALDATE UTC bounds and per-year coverage.
   The acquisition worker records complete bodies before scanning and publication.
-  Ingest snapshots record the shared immutable launch version. Ingests displays that
-  saved value in history and run details, with an unavailable fallback for older files.
+  Ingest snapshots record the shared immutable launch version. History and run
+  details append it to the timestamp in parentheses, with an unavailable fallback
+  for older files. The coverage table uses its intrinsic column widths.
   The worker table uses fixed column widths, with task/source taking the remaining
   space. See [desktop](implementation/DESKTOP.md).
 - The GUI omits the empty-table placeholder while its status line reports search

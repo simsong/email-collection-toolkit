@@ -51,8 +51,9 @@ does not establish that every platform or release gate has passed.
   IMAP run details show
   complete source downloads, IMAP INTERNALDATE UTC bounds and per-year coverage.
   Older IMAP history without download counts shows them as unavailable.
-  Run history preserves the producing application's launch version, including failures;
-  older snapshots without that evidence display the version as unavailable.
+  Run history shows the producing application's launch version in parentheses
+  after the timestamp, including failures. Older snapshots show it as unavailable.
+  The per-year coverage table is sized to its contents.
   Worker activity updates keep four table columns fixed; task/source expands
   into the remaining width. See [desktop](requirements/DESKTOP.md).
 - Pending GUI searches show progress without claiming no matches before

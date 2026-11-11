@@ -209,24 +209,22 @@ function historyRow(status) {
   title.append(state, percent);
   const time = document.createElement("span");
   time.className = "history-time";
-  time.textContent = new Date(status.started_at).toLocaleString();
-  const version = document.createElement("span");
-  version.className = "history-version";
-  version.textContent = runVersion(status);
+  time.textContent = runTimestamp(status);
   const summary = document.createElement("span");
   summary.className = "history-summary";
   const imapOnly = status.source_roots.length && status.source_roots.every(root => root.startsWith("imap://"));
   const messages = imapOnly ? status.download_coverage?.messages : status.processed_messages;
   summary.textContent = `${processingMode(status) ? `${integer(status.processing_jobs_completed)} processing tasks finished`
     : messages == null ? "Source message count unavailable" : `${integer(messages)} source messages`} · ${formatDuration(status.elapsed_seconds)}`;
-  main.append(title, time, version, summary);
+  main.append(title, time, summary);
   row.append(dot, main);
   row.addEventListener("click", () => { selectedStatusId = status.status_id; render(); });
   return row;
 }
 
-function runVersion(status) {
-  return status.application_version ? `Version ${status.application_version}` : "Version unavailable";
+function runTimestamp(status) {
+  const timestamp = new Date(status.started_at).toLocaleString();
+  return `${timestamp} (${status.application_version || "version unavailable"})`;
 }
 
 function renderDetail(status) {
@@ -245,7 +243,7 @@ function renderDetail(status) {
   const title = document.createElement("h1");
   title.textContent = `Ingest ${status.run_pk}`;
   const subtitle = document.createElement("p");
-  subtitle.textContent = `${new Date(status.started_at).toLocaleString()} · ${runVersion(status)} · process ${status.process_id}`;
+  subtitle.textContent = `${runTimestamp(status)} · process ${status.process_id}`;
   if (status.scan_policy === "not-scanned") {
     subtitle.textContent += " · WARNING: imported without antivirus scanning";
     subtitle.className = "failure";
