@@ -99,6 +99,10 @@ membership through `X-GM-MSGID` and `X-GM-LABELS`; other folders are not fetched
 All Mail coverage is explicit: Spam/Trash-only messages are not included.
 
 Acquisition uses EXAMINE and BODY.PEEK, never mutating source messages or flags.
+Accept a full BODY.PEEK response for the requested UID when its declared literal
+length equals the received byte count. Missing RFC822.SIZE does not prevent
+acquisition. A conflicting RFC822.SIZE logs a warning with the UID and counts.
+A missing or mismatched literal length fails acquisition without logging the body.
 After validating the complete BODY.PEEK literal, replace CRLF pairs with LF
 before ingest; retain lone CR, existing LF, and missing final newlines. Do not
 parse/reserialize MIME. This applies throughout the message, including unencoded

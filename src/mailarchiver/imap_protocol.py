@@ -31,6 +31,8 @@ from .imap_models import ImapAccount, ImapMailbox, ImapMessageMetadata
 
 IMAP_TIMEOUT = 30
 UID_BATCH_SIZE = 256
+LITERAL_LENGTH = re.compile(rb"\{([0-9]+)\}$")
+BODY_LITERAL_LENGTH = re.compile(rb"[ (]BODY\[\] \{([0-9]+)\}$", re.IGNORECASE)
 
 
 class ImapAuthenticationError(ValueError):
@@ -113,11 +115,6 @@ class ImapToken(BaseModel):
     children: list[ImapToken] = Field(default_factory=list)
 
 
-class ImapBody(BaseModel):
-    metadata: bytes
-    raw: bytes
-
-
 class _ServerBye(imaplib.IMAP4.abort):
     """Retain structured BYE evidence when construction fails before the session owns its client."""
 
@@ -187,7 +184,7 @@ def response_tokens(data: Sequence[bytes | tuple[bytes, bytes] | None]) -> list[
     for part in data:
         if isinstance(part, tuple):
             prefix, literal = part
-            pieces.append(re.sub(rb"\{[0-9]+\}$", b"", prefix) + quoted(literal))
+            pieces.append(LITERAL_LENGTH.sub(b"", prefix) + quoted(literal))
         elif isinstance(part, bytes):
             pieces.append(part)
     raw = b" ".join(pieces)
@@ -279,40 +276,43 @@ def message_metadata(data: Sequence[bytes | tuple[bytes, bytes] | None], mailbox
 
 def body_literal(data: Sequence[bytes | tuple[bytes, bytes] | None], uid: int) -> bytes:
     """Verify a complete FETCH envelope without parsing or quoting its body bytes."""
-    literals: list[ImapBody] = []
-    stripped: list[bytes | tuple[bytes, bytes] | None] = []
-    for part in data:
-        if isinstance(part, tuple):
-            prefix, raw = part
-            literals.append(ImapBody(metadata=prefix, raw=raw))
-            stripped.append((prefix, b""))
-        else:
-            stripped.append(part)
+    literals = [(index, part) for index, part in enumerate(data) if isinstance(part, tuple)]
     if len(literals) != 1:
         raise RuntimeError("IMAP body disappeared or had an unexpected identity; retry synchronization")
-    matches = 0
-    tokens = response_tokens(stripped)
-    for sequence, fields in zip(tokens[::2], tokens[1::2], strict=True):
-        if sequence.value is None or not sequence.value.isdigit():
-            raise ValueError("Invalid IMAP FETCH sequence")
-        fetched_uid: int | None = None
-        size: int | None = None
-        has_body = False
-        for key, value in zip(fields.children[::2], fields.children[1::2], strict=True):
-            name = (key.value or b"").upper()
-            if name == b"UID":
-                fetched_uid = int(value.value or b"0")
-            elif name == b"RFC822.SIZE":
-                size = int(value.value or b"-1")
-            elif name == b"BODY[]":
-                has_body = value.value == b""
-        if fetched_uid == uid and has_body:
-            if size != len(literals[0].raw):
-                raise RuntimeError("IMAP returned an incomplete message body")
-            matches += 1
-    if matches != 1:
+    index, (prefix, raw) = literals[0]
+    length = BODY_LITERAL_LENGTH.search(prefix)
+    declared = int(length[1]) if length else None
+    received = len(raw)
+    # imaplib appends the FETCH trailer immediately after the literal tuple.
+    # Read the UID from this FETCH only, independent of unsolicited responses.
+    tokens = response_tokens([(prefix, b""), *data[index + 1:index + 2]])
+    if len(tokens) != 2 or not (tokens[0].value or b"").isdigit():
+        raise ValueError("Invalid IMAP FETCH sequence")
+    fields = tokens[1].children
+    fetched_uid: int | None = None
+    reported: int | None = None
+    has_body = False
+    for key, value in zip(fields[::2], fields[1::2], strict=True):
+        name = (key.value or b"").upper()
+        if name == b"UID":
+            fetched_uid = int(value.value or b"0")
+        elif name == b"RFC822.SIZE" and value.value is not None and value.value.isdigit():
+            reported = int(value.value)
+        elif name == b"BODY[]":
+            has_body = value.value == b""
+    if fetched_uid != uid or not has_body:
         raise RuntimeError("IMAP body had an unexpected identity or FETCH envelope")
-    return literals[0].raw
+    if declared != received:
+        raise RuntimeError(
+            f"IMAP returned an incomplete message body (UID={uid}, RFC822.SIZE={reported}, "
+            f"declared literal length={declared}, received byte count={received})"
+        )
+    if reported is not None and reported != received:
+        logging.getLogger(__name__).warning(
+            "IMAP RFC822.SIZE mismatch for UID=%d: server reported %d bytes, BODY[] delivered %d bytes",
+            uid, reported, received,
+        )
+    return raw
 
 
 class ImapSession:

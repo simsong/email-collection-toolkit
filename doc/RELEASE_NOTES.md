@@ -6,6 +6,17 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a89 — accept complete IMAP literals with inaccurate size metadata
+
+- Continue importing when RFC822.SIZE disagrees with a complete BODY[] literal.
+  Log the discrepancy and verify the literal's UID and declared byte count.
+
+## 1.0.0a88 — diagnose IMAP body-size failures
+
+- Report the failing UID, RFC822.SIZE, declared literal length and received byte
+  count in ingest failures when RFC822.SIZE is missing or disagrees with the
+  received byte count.
+
 ## 1.0.0a87 — compact Ingests history and year coverage
 
 - Show the producing version in parentheses after the run timestamp.

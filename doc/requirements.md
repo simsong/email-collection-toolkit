@@ -25,7 +25,9 @@ does not establish that every platform or release gate has passed.
   full processing worker pool. Interrupted sessions retry with fresh TLS and
   epoch checks, retaining delivered UID state; exhausted recovery pauses safely. Protocol failures and private diagnostics
   retain their distinct handling, including malformed greetings and full CLI login
-  diagnostics. Expected configuration problems use actionable warnings without
+  diagnostics. IMAP verifies the declared body literal length and treats
+  RFC822.SIZE disagreements as warnings.
+  Expected configuration problems use actionable warnings without
   validator dumps or tracebacks. Retry classification precedes redaction; CLI backoff remains visible,
   console cancellation wakes discovery, and pending password validation blocks Escape. See [acquisition](requirements/ACQUISITION.md).
 

@@ -846,6 +846,31 @@ def test_invalid_imap_response_remains_a_failure(imap_archive: Path, imap_inbox:
     assert totals(imap_archive).archived == 3 and totals(imap_archive).duplicates == 0
 
 
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+def test_imap_import_continues_after_advisory_size_mismatch(imap_archive: Path, imap_inbox: DisposableImap,
+                                                           imap_messages: tuple[bytes, ...]) -> None:
+    """ACQUISITION: commit a complete literal with a conflicting size and keep importing."""
+    assert isinstance(imap_inbox, InterruptibleImap)
+    with imap_inbox.connect() as client:
+        client.select("INBOX", readonly=True)
+        _, results = client.uid("SEARCH", "ALL")
+        assert isinstance(results[0], bytes)
+        uids = results[0].split()
+    raw = imap_messages[1]
+    response = f"* 2 FETCH (UID {int(uids[1])} RFC822.SIZE {len(raw) + 329} BODY[] {{{len(raw)}}}\r\n".encode()
+    imap_inbox.fault = ImapFault(command=b"BODY.PEEK[]", mode="fetch-reply", skip=1, once=True,
+                               response=response + raw + b")\r\n")
+    args = parser().parse_args(["--archive", str(imap_archive), "--no-scan", "--workers", "1"])
+    assert synchronize(args) == 0
+    status = read_ingest_history(imap_archive).statuses[0]
+    assert status.state == "completed" and status.failure_detail is None
+    assert status.download_coverage is not None and status.download_coverage.messages == 3
+    with closing(sqlite3.connect(imap_archive / "archive.sqlite3")) as database:
+        assert database.execute("SELECT uid FROM imap_seen ORDER BY uid").fetchall() == [(int(uid),) for uid in uids]
+        assert {row[0] for row in database.execute("SELECT sha256 FROM messages")} == {
+            hashlib.sha256(message.replace(b"\r\n", b"\n")).hexdigest() for message in imap_messages}
+
+
 @pytest.mark.parametrize("wrapped", [False, True], ids=["direct", "imaplib-wrapped"])
 def test_host_down_is_a_resumable_transport_interruption(wrapped: bool) -> None:
     """ACQUISITION: host-down socket failures pause instead of recording a failed ingest."""
@@ -1073,8 +1098,22 @@ def test_body_literal_allows_legal_fetch_order_and_unsolicited_flags() -> None:
     assert body_literal(data, 7) == raw
     with pytest.raises(RuntimeError, match="identity"):
         body_literal(data, 8)
-    with pytest.raises(RuntimeError, match="incomplete"):
-        body_literal([(b"1 (BODY[] {3}", b"abc"), b" UID 7 RFC822.SIZE 4)"], 7)
+    with pytest.raises(RuntimeError, match="identity or FETCH envelope"):
+        body_literal([(b"1 (UID 8 BODY[] {3}", b"abc"), b")", b'2 (UID 7 BODY[] "")'], 7)
+    with pytest.raises(RuntimeError, match="incomplete") as failure:
+        body_literal([(b"1 (BODY[] {5}", b"abc"), b" UID 7 RFC822.SIZE 3)"], 7)
+    assert "UID=7, RFC822.SIZE=3, declared literal length=5, received byte count=3" in str(failure.value)
+
+
+@pytest.mark.parametrize("reported", [b" RFC822.SIZE 6383", b""])
+def test_body_literal_accepts_advisory_size_disagreement(reported: bytes, caplog: pytest.LogCaptureFixture) -> None:
+    """ACQUISITION: the literal length governs acceptance even with incorrect or missing RFC822.SIZE."""
+    raw = b"x" * 6054
+    assert body_literal([(b"1 (UID 1380747" + reported + b" BODY[] {6054}", raw), b")"], 1380747) == raw
+    if reported:
+        assert "UID=1380747: server reported 6383 bytes, BODY[] delivered 6054 bytes" in caplog.text
+    else:
+        assert not caplog.records
 
 
 def test_untrusted_tls_is_rejected_before_login(imap_server: DisposableImap) -> None:

@@ -194,7 +194,7 @@ class DisposableImap:
 
 class ImapFault(BaseModel):
     command: bytes
-    mode: Literal["timeout", "disconnect", "partial", "malformed", "reject"]
+    mode: Literal["timeout", "disconnect", "partial", "malformed", "reject", "fetch-reply"]
     refusal: bytes = b"NO [ALERT] Too many simultaneous connections."
     skip: int = 0
     once: bool = False
@@ -252,8 +252,12 @@ class InterruptibleImap(DisposableImap):
                             elif fault.mode == "malformed":
                                 writer.write(fault.response)
                                 await writer.drain()
+                            elif fault.mode == "fetch-reply":
+                                writer.write(fault.response + line.split()[0] + b" OK FETCH completed\r\n")
+                                await writer.drain()
+                                continue
                             if fault.mode != "disconnect":
-                                await reader.read()  # Client timeout closes this stalled transport.
+                                await reader.read()  # Let the client close the transport after the injected fault.
                             return
                     remote_writer.write(line)
                     await remote_writer.drain()

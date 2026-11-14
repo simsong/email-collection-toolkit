@@ -489,8 +489,13 @@ literal ampersands/quotes; the pymap fixture covers legacy Unicode selection.
 Each worker owns a TLS session,
 enumerates at most 65,536 UID numbers per SEARCH, fetches metadata in batches of
 256 messages, and streams complete BODY.PEEK literals through ordinary ingest.
-BODY size and UID identity must match the original wire literal before
-`normalize_download` replaces CRLF pairs with LF. It does not decode or
+`body_literal` verifies the requested UID in the FETCH that carries the full
+BODY[] literal and compares the declared literal length in imaplib's prefix to
+the received byte count. A missing or mismatched literal length produces a saved
+error with the UID and available byte counts. RFC822.SIZE is optional for
+validation. A conflicting value logs a warning, and the literal proceeds to
+`normalize_download`. These diagnostics contain no body bytes. Normalization
+replaces CRLF pairs with LF and does not decode or
 reserialize MIME, remove lone CR, or add a final newline. `ImapDownload` records
 `source_sha256`, `source_byte_length`, `crlf_pairs` and the `crlf-to-lf` policy;
 `remember` preserves this evidence across metadata-only refreshes, including

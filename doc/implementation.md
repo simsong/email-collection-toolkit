@@ -25,7 +25,9 @@ than a second change log. Platform acceptance is stated alongside its evidence.
   full processing worker pool. Interrupted sessions retry with fresh TLS and
   epoch checks, retaining delivered UID state; exhausted recovery pauses safely. Protocol failures and private diagnostics
   retain their distinct handling, including malformed greetings and full CLI login
-  diagnostics. Expected configuration problems use actionable warnings without
+  diagnostics. IMAP checks the received byte count against the literal declaration
+  and logs RFC822.SIZE discrepancies without interrupting acquisition.
+  Expected configuration problems use actionable warnings without
   validator dumps or tracebacks. Retry classification precedes redaction; CLI backoff remains visible,
   console cancellation wakes discovery, and pending password validation blocks Escape. See [acquisition](implementation/ACQUISITION.md).
 
