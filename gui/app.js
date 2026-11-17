@@ -90,7 +90,7 @@ window.addEventListener("resize", () => {
 window.addEventListener("focus", () => { void window.pywebview?.api?.activate?.(); });
 window.addEventListener("pywebviewready", initialize);
 window.mailArchiverNotice = notice => typeof notice === "string"
-  ? showError(notice) : showError(notice.message, notice.severity, notice.notice_id);
+  ? showError(notice) : showError(notice.message, notice.severity, notice.notice_id, notice.imap_source_id);
 window.archiveDidChange = async () => {
   const status = await call(() => window.pywebview.api.status());
   if (!status) return;
@@ -479,7 +479,7 @@ function applyStatus(status) {
   elements["archive-status-banner"].hidden = !status.ready;
   renderArchiveStatus(status.ready ? status.archive_status_messages || [] : []);
   for (const notice of status.notices || []) {
-    if (notice.severity !== "information") showError(notice.message, notice.severity, notice.notice_id);
+    if (notice.severity !== "information") window.mailArchiverNotice(notice);
   }
   if (status.ready) elements.search.focus();
 }
@@ -2177,14 +2177,14 @@ async function call(operation) {
   catch (error) { showError(String(error?.message || error)); return null; }
 }
 
-function showError(message, severity = "error", noticeId = null) {
+function showError(message, severity = "error", noticeId = null, imapSourceId = null) {
   const panel = byId("error");
   const pill = byId("notice-pill");
   if (!showError.messages) showError.messages = [];
   if (!showError.seen) showError.seen = new Set();
   if (noticeId ? showError.seen.has(noticeId) : showError.messages.at(-1)?.message === message) return;
   if (noticeId) showError.seen.add(noticeId);
-  showError.messages.push({message, severity});
+  showError.messages.push({message, severity, imapSourceId});
   const warningOnly = showError.messages.every(item => item.severity === "warning");
   panel.classList.toggle("warning", warningOnly);
   pill.classList.toggle("warning", warningOnly);
@@ -2214,7 +2214,20 @@ function showError(message, severity = "error", noticeId = null) {
     pill.hidden = true;
     elements.search.focus();
   });
-  panel.append(history, collapse, dismiss);
+  const actions = document.createElement("div");
+  actions.className = "notice-actions";
+  actions.append(collapse, dismiss);
+  const authenticationNotice = showError.messages.findLast(notice => notice.imapSourceId);
+  if (authenticationNotice) {
+    const update = document.createElement("button");
+    update.type = "button";
+    update.textContent = "Update IMAP Credentials";
+    update.addEventListener("click", () => {
+      void call(() => window.pywebview.api.open_ingest_window(null, authenticationNotice.imapSourceId));
+    });
+    actions.append(update);
+  }
+  panel.append(history, actions);
   panel.hidden = false;
   pill.hidden = true;
   pill.textContent = `Messages (${showError.messages.length})`;

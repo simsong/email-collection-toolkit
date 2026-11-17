@@ -20,7 +20,8 @@ does not establish that every platform or release gate has passed.
 ## Shared boundaries
 
 - IMAP credential checks authenticate without mailbox access or archive writes;
-  replacement passwords are tested before saving. Account acquisition uses
+  replacement passwords are tested before saving. The search window's IMAP
+  authentication error offers Update IMAP Credentials. Account acquisition uses
   a saved per-account limit (default 8, range 1–15) and cancellable capacity backoff while retaining the
   full processing worker pool. Interrupted sessions retry with fresh TLS and
   epoch checks, retaining delivered UID state; exhausted recovery pauses safely. Protocol failures and private diagnostics

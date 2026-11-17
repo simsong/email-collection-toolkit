@@ -6,6 +6,12 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a90 — open IMAP credential recovery from the error
+
+- Add **Update IMAP Credentials** alongside **Collapse messages** and
+  **Dismiss messages** in the IMAP authentication error popup.
+- Open the Ingests password dialog with the rejected account selected.
+
 ## 1.0.0a89 — accept complete IMAP literals with inaccurate size metadata
 
 - Continue importing when RFC822.SIZE disagrees with a complete BODY[] literal.

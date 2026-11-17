@@ -60,6 +60,9 @@ credential. `--set-password` is a separate interactive operation: validate a hid
 replacement before saving only that account's native-vault item, without importing.
 Ingests offers the same test-before-save replacement through **Update IMAP Password**
 when no import is active. Failed validation retains the old stored password.
+The search window's IMAP authentication error also offers **Update IMAP Credentials**
+alongside its collapse and dismiss controls. It opens the same dialog with the
+rejected account selected.
 Login rejection shall identify account/server and retain a bounded, sanitized
 server reason without exposing plaintext, escaped passwords or SASL payloads.
 Temporary server capacity/rate-limit refusals during session initialization shall

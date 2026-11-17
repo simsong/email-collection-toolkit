@@ -4,7 +4,10 @@
 "use strict";
 
 let statuses = [];
-let selectedStatusId = new URLSearchParams(window.location.search).get("status");
+const parameters = new URLSearchParams(window.location.search);
+let selectedStatusId = parameters.get("status");
+const initialPasswordSource = parameters.get("imap_password");
+let requestedPassword = initialPasswordSource ? {sourceId: initialPasswordSource} : null;
 let initialized = false;
 let importing = false;
 let starting = false;
@@ -41,18 +44,7 @@ async function initialize() {
   byId("import-directory").addEventListener("click", importDirectory);
   byId("suspend-import").addEventListener("click", () => controlImport("suspend_import"));
   byId("resume-import").addEventListener("click", () => controlImport("resume_import"));
-  byId("update-imap-password").addEventListener("click", () => {
-    byId("imap-account").replaceChildren(...imapAccounts.map(account => {
-      const option = document.createElement("option");
-      option.value = account.id;
-      option.textContent = `${account.username} on ${account.server}:${account.port}`;
-      return option;
-    }));
-    byId("imap-password-status").textContent = "";
-    byId("cancel-imap-password").textContent = "Cancel";
-    byId("imap-password-dialog").showModal();
-    byId("imap-password").focus();
-  });
+  byId("update-imap-password").addEventListener("click", () => openImapPassword());
   byId("cancel-imap-password").addEventListener("click", () => byId("imap-password-dialog").close());
   byId("imap-password-dialog").addEventListener("cancel", event => {
     if (byId("save-imap-password").disabled) event.preventDefault();
@@ -65,6 +57,10 @@ async function initialize() {
 }
 
 window.refreshHistory = refreshHistory;
+window.requestImapPassword = sourceId => {
+  requestedPassword = {sourceId};
+  if (initialized) void historyRefresh.changed();
+};
 window.selectIngest = statusId => {
   selectedStatusId = statusId;
   render();
@@ -87,6 +83,7 @@ function ingestReply(method) {
 }
 
 async function readHistory() {
+  const passwordRequest = requestedPassword;
   try {
     const antivirus = await ingestReply("antivirus");
     const history = await ingestReply("history");
@@ -104,7 +101,8 @@ async function readHistory() {
     byId("configuration-warning").textContent = (history.warnings || []).join("\n");
     byId("configuration-warning").hidden = !history.warnings?.length;
     byId("update-imap-password").hidden = imapAccounts.length === 0;
-    byId("update-imap-password").disabled = Boolean(history.active) || importing;
+    const passwordBlocked = Boolean(history.active || starting || statuses[0]?.state === "running") || importing;
+    byId("update-imap-password").disabled = passwordBlocked;
     byId("suspend-import").disabled = importing || !history.active || history.suspending;
     byId("resume-import").disabled = importing || !history.can_resume;
     byId("resume-import").textContent = statuses[0]?.state === "paused" ? "Resume" : "Continue Import";
@@ -116,9 +114,36 @@ async function readHistory() {
     byId("starting-import").hidden = !starting;
     render(history.errors || []);
     byId("import-directory").disabled = importing || !canImport;
+    if (passwordRequest && requestedPassword === passwordRequest && !byId("save-imap-password").disabled) {
+      requestedPassword = null;
+      if (passwordBlocked) showError("Suspend the import before updating its password.");
+      else openImapPassword(passwordRequest.sourceId);
+    }
   } catch (error) {
     showError(`Could not read ingest history: ${error}`);
   }
+}
+
+function openImapPassword(sourceId = null) {
+  if (sourceId && !imapAccounts.some(account => account.id === sourceId)) {
+    showError("The selected IMAP account is unavailable.");
+    return;
+  }
+  const dialog = byId("imap-password-dialog");
+  const select = byId("imap-account");
+  if (dialog.open && (!sourceId || select.value === sourceId)) return;
+  select.replaceChildren(...imapAccounts.map(account => {
+    const option = document.createElement("option");
+    option.value = account.id;
+    option.textContent = `${account.username} on ${account.server}:${account.port}`;
+    return option;
+  }));
+  if (sourceId) select.value = sourceId;
+  byId("imap-password").value = "";
+  byId("imap-password-status").textContent = "";
+  byId("cancel-imap-password").textContent = "Cancel";
+  if (!dialog.open) dialog.showModal();
+  byId("imap-password").focus();
 }
 
 async function updateImapPassword(event) {
@@ -143,6 +168,7 @@ async function updateImapPassword(event) {
     byId("imap-password").disabled = false;
     byId("save-imap-password").disabled = false;
     byId("cancel-imap-password").disabled = false;
+    if (requestedPassword) void historyRefresh.changed();
   }
 }
 

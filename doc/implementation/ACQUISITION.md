@@ -444,7 +444,9 @@ reducing the configured processing worker pool. `make test-imap-auth`
 covers real TLS replies, automatic retry, cancellation, credential-only
 immutability, replacement safety, connection counts and the shipped browser form.
 Both desktop Ingests entry points expose the same explicit bridge methods used by
-the browser recovery test. The password dialog locks account/password controls,
+the browser recovery test. An authentication failure carries the source ID in
+the search notice. The notice action opens Ingests or refreshes the existing
+window before opening the password dialog for that account. The dialog locks account/password controls,
 rejects duplicate submission and blocks native cancel/Escape while its Test and Save call is pending and restores ordinary cancellation afterward. Initial discovery rejection saves the accepted source
 request before pipeline creation, allowing password repair and Continue Import
 after application restart without losing the chosen import policy. Early backoff

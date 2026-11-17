@@ -15,9 +15,11 @@ from playwright.sync_api import Page, expect
 
 from e2e_tests.browser_notifications import notify_status
 from mailarchiver.__main__ import IngestRequest
+from mailarchiver.archive_config import load_archive_config, save_archive_config
 from mailarchiver.file_events import wait_for_path_state
-from mailarchiver.gui_app import GUI_DIRECTORY, INGEST_BRIDGE_METHODS, IngestWindowApi, WindowBridge
+from mailarchiver.gui_app import GUI_DIRECTORY, INGEST_BRIDGE_METHODS, SEARCH_BRIDGE_METHODS, IngestWindowApi, WindowBridge
 from mailarchiver.gui_processing import unfinished_work
+from mailarchiver.imap_models import ImapAccount
 from mailarchiver.imap_source import imap_locator
 from mailarchiver.imap_cli import parser, synchronize
 from mailarchiver.imap_credentials import password_for, save_password
@@ -35,9 +37,13 @@ from tests.test_imap import imap_server as imap_server, imap_server_identity as 
 
 def test_password_replacement_form_checks_real_login_before_saving(imap_archive: Path,
         imap_inbox: DisposableImap, page: Page, tmp_path: Path) -> None:
-    """ACQUISITION: the shipped password form reports rejection and saves only a validated replacement."""
+    """ACQUISITION: recovery selects the rejected account and saves only a validated replacement."""
     account = imap_inbox.account
     assert account is not None
+    other = ImapAccount(server=account.server, port=account.port, username="another-user")
+    config = load_archive_config(imap_archive)
+    config.imap_sources.insert(0, other)
+    save_archive_config(imap_archive, config)
     save_password(account, "old-password")
     app, api = open_headless(imap_archive, tmp_path / "preferences.json")
     try:
@@ -45,16 +51,41 @@ def test_password_replacement_form_checks_real_login_before_saving(imap_archive:
                                 workers=1, scan_policy="not-scanned", index_attachments=True)
         assert app.start_import(api, [], processing_request=request)
         wait_for_import(api)
+        for future in tuple(app._tasks):
+            future.result(timeout=10)
         status = read_ingest_history(imap_archive).statuses[0]
         assert status.state == "failed" and status.failure_detail and "authentication failed" in status.failure_detail
         assert "Traceback" not in status.failure_detail and "Message prefix" not in status.failure_detail
+        search = page.context.new_page()
+        try:
+            bridge(search, api, SEARCH_BRIDGE_METHODS)
+            search.add_init_script("""window.addEventListener('DOMContentLoaded', () => {
+              window.pywebview.api.open_ingest_window = (...args) => {
+                window.openedIngests = args;
+                return Promise.resolve(true);
+              };
+            });""")
+            search.goto((GUI_DIRECTORY / "index.html").as_uri())
+            search.get_by_role("button", name="Leave import suspended", exact=True).click()
+            expect(search.locator("#error button")).to_have_text(
+                ["Collapse messages", "Dismiss messages", "Update IMAP Credentials"])
+            search.get_by_role("button", name="Update IMAP Credentials").click()
+            assert search.evaluate("window.openedIngests") == [None, account.id]
+        finally:
+            search.close()
         app.shutdown()
         api.close()
         app, api = open_headless(imap_archive, tmp_path / "preferences.json")
         controls = IngestWindowApi(imap_archive, application=app, document=api.document)
         bridge(page, WindowBridge(controls, INGEST_BRIDGE_METHODS), INGEST_BRIDGE_METHODS)
-        page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
-        page.get_by_role("button", name="Update IMAP Password…").click()
+        page.goto((GUI_DIRECTORY / "ingests.html").as_uri() + f"?imap_password={account.id}")
+        expect(page.locator("#imap-password-dialog")).to_be_visible()
+        expect(page.locator("#imap-account")).to_have_value(account.id)
+        page.locator("#imap-account").select_option(other.id)
+        page.get_by_label("New password or app password").fill("another-accounts-password")
+        page.evaluate("(sourceId) => window.requestImapPassword(sourceId)", account.id)
+        expect(page.locator("#imap-account")).to_have_value(account.id)
+        expect(page.locator("#imap-password")).to_have_value("")
         page.get_by_label("New password or app password").fill("incorrect")
         page.get_by_role("button", name="Test and Save").click()
         expect(page.locator("#imap-password-status")).to_contain_text("authentication failed")
@@ -88,6 +119,11 @@ def test_password_replacement_form_checks_real_login_before_saving(imap_archive:
         expect(page.locator("#imap-password-dialog")).not_to_be_visible()
         page.get_by_role("button", name="Update IMAP Password…").click()
         expect(page.get_by_role("button", name="Cancel", exact=True)).to_be_enabled()
+        page.keyboard.press("Escape")
+        expect(page.locator("#imap-password-dialog")).not_to_be_visible()
+        page.evaluate("(sourceId) => window.requestImapPassword(sourceId)", account.id)
+        expect(page.locator("#imap-password-dialog")).to_be_visible()
+        expect(page.locator("#imap-account")).to_have_value(account.id)
         page.keyboard.press("Escape")
         expect(page.locator("#imap-password-dialog")).not_to_be_visible()
         page.get_by_role("button", name="Continue Import", exact=True).click()

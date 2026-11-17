@@ -184,6 +184,7 @@ class ApplicationNotice(BaseModel):
     severity: Literal["information", "warning", "error"]
     message: str
     window_id: str | None = None
+    imap_source_id: str | None = None
 
 
 class ApplicationTask(BaseModel):
@@ -632,6 +633,11 @@ def macos_owner_rules(destination: Path, defaults: OwnerRules) -> OwnerRules | N
     return result.result()
 
 
+def _ingest_window_parameters(status_id: str | None, imap_source_id: str | None) -> list[tuple[str, str]]:
+    return [(key, value) for key, value in (("status", status_id), ("imap_password", imap_source_id))
+            if value is not None]
+
+
 class IngestWindowApi:
     """History and explicit import actions bound to one archive."""
 
@@ -1020,23 +1026,26 @@ class GuiApi:
         active = bool(self.document and self.document.ingest_job) or bool(status and status.state == "running")
         return GuiIngestOverview(status=status, active=active).model_dump(mode="json")
 
-    def open_ingest_window(self, status_id: str | None = None) -> bool:
+    def open_ingest_window(self, status_id: str | None = None, imap_source_id: str | None = None) -> bool:
         """Open or focus the ingest browser shared by this archive document."""
         if self.e2e_directory is not None:
             return True
         if self.application is not None and self.document is not None:
-            return self.application.open_ingest_window(self.document, status_id)
+            return self.application.open_ingest_window(self.document, status_id, imap_source_id)
         with self._ingest_window_lock:
             api = self._ingest_window_api
             if api is not None and api.window is not None:
                 api.archive = self.archive
                 if status_id is not None:
                     api.window.run_js(f"window.selectIngest({json.dumps(status_id)});")
+                if imap_source_id is not None:
+                    api.window.run_js(f"window.requestImapPassword?.({json.dumps(imap_source_id)});")
                 api.window.restore()
                 api.window.show()
                 return True
             api = IngestWindowApi(self.archive)
-            selected = "" if status_id is None else f"?status={status_id}"
+            parameters = _ingest_window_parameters(status_id, imap_source_id)
+            selected = f"?{urlencode(parameters)}" if parameters else ""
             window = webview.create_window(
                 "Email Collection Toolkit — Ingests",
                 str(GUI_DIRECTORY / f"ingests.html{selected}"),
@@ -2069,8 +2078,9 @@ class PyWebViewApplication:
         self._refresh_menus()
         return True
 
-    def add_notice(self, severity: Literal["information", "warning", "error"], message: str, *, window_id: str | None = None) -> None:
-        notice = ApplicationNotice(severity=severity, message=message, window_id=window_id)
+    def add_notice(self, severity: Literal["information", "warning", "error"], message: str, *,
+                   window_id: str | None = None, imap_source_id: str | None = None) -> None:
+        notice = ApplicationNotice(severity=severity, message=message, window_id=window_id, imap_source_id=imap_source_id)
         with self._lock:
             self._notices.append(notice)
             self._notices = self._notices[-100:]
@@ -2599,11 +2609,12 @@ class PyWebViewApplication:
         notice_task = task or ApplicationTask(name=f"Import for {document.display_path}")
         notice_task.window_id = job.owner_window_id if job is not None else ""
 
-        def notice(severity: Literal["information", "warning", "error"], message: str) -> None:
+        def notice(severity: Literal["information", "warning", "error"], message: str, *,
+                   imap_source_id: str | None = None) -> None:
             current = document.ingest_job
             if current is not None and current.operation_id == operation_id:
                 notice_task.window_id = current.owner_window_id
-            self.add_notice(severity, message, window_id=notice_task.window_id)
+            self.add_notice(severity, message, window_id=notice_task.window_id, imap_source_id=imap_source_id)
 
         try:
             run_ingest(request, lease, stop_event=stop, outcome=outcome, terminal=False)
@@ -2648,7 +2659,7 @@ class PyWebViewApplication:
         elif error is None:
             notice("information", f"Import completed for {document.display_path}")
         elif isinstance(error, ImapAuthenticationError):
-            notice("error", str(error))
+            notice("error", str(error), imap_source_id=error.source_id)
         elif isinstance(error, ConfigurationError):
             notice("warning", str(error))
         else:
@@ -2876,7 +2887,8 @@ class PyWebViewApplication:
         self._refresh_menus()
         return True
 
-    def open_ingest_window(self, document: ArchiveDocument, status_id: str | None = None) -> bool:
+    def open_ingest_window(self, document: ArchiveDocument, status_id: str | None = None,
+                           imap_source_id: str | None = None) -> bool:
         if document.path is None:
             return False
         document_id = document.descriptor.document_id
@@ -2889,7 +2901,7 @@ class PyWebViewApplication:
                     f"{APPLICATION_NAME} — Ingests — {document.display_path}",
                     self.asset_url(
                         "ingests.html",
-                        [("status", status_id)] if status_id is not None else None,
+                        _ingest_window_parameters(status_id, imap_source_id),
                     ),
                     js_api=WindowBridge(api, INGEST_BRIDGE_METHODS),
                     width=1050,
@@ -2920,6 +2932,8 @@ class PyWebViewApplication:
         if reused is not None:
             if status_id is not None:
                 reused.run_js(f"window.selectIngest({json.dumps(status_id)});")
+            if imap_source_id is not None:
+                reused.run_js(f"window.requestImapPassword?.({json.dumps(imap_source_id)});")
             reused.restore()
             reused.show()
             return True
