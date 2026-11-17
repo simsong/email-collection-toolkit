@@ -50,10 +50,11 @@ settings, including after reopening the archive. Suspension also frees the
 archive for manual name edits. A message already being downloaded may finish
 before suspension completes.
 
-IMAP imports automatically retry interrupted connections using fresh sessions
-and short waits. Saved progress is retained. If recovery keeps failing, the
-import pauses with a yellow circle and horizontal dash. Reconnect to the network,
-then click **Resume** in Ingests. Messages already saved are not downloaded again.
+macOS IMAP imports wait through connectivity loss and captive portal sign-in,
+retesting the server every 2½ minutes using a fresh session. Ingests shows the
+waiting status while saved progress is retained. Complete the network sign-in
+when needed. **Suspend Import** remains available during the wait. Messages
+already saved are not downloaded again.
 
 Downloads and saved-message processing can run at the same time after unfinished
 ingest recovery. Ingests shows their worker groups separately, so a saved-mail backlog

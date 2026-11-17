@@ -882,8 +882,8 @@ fixtures exercise destination rejection and exact resume through
 ## Automatic transport recovery
 
 Discovery and acquisition discard interrupted sessions before cancellable
-1, 2 and 4 second reconnect waits. After three unsuccessful recovery attempts,
-retain the existing paused/Resume behavior. Successful message delivery resets
+1, 2 and 4 second reconnect waits in the CLI. After three unsuccessful CLI recovery
+attempts, retain the paused/Resume behavior. Successful message delivery resets
 the acquisition retry budget. Authentication, TLS trust, malformed protocol and
 local storage failures are not retried as transport failures. Every replacement
 session EXAMINEs and checks UIDVALIDITY/capabilities before using old UID plans.
@@ -897,9 +897,12 @@ context. Sleep expires a session token checked by the owning worker before a
 new IMAP command, and reconnects wait for wake or cancellation. A command already
 in progress retains its socket timeout and literal validation. Session expiry
 from sleep does not spend the failure retry budget. Wake and route
-notifications can shorten the transport backoff. With no reported default route,
-a failed connection gives the route up to 30 seconds to return before retrying.
-A temporary resolver failure uses the same transport retry path. Replacement
+notifications can shorten the transport backoff. macOS discovery and acquisition
+wait 150 seconds between failed connection attempts without exhausting a retry
+budget. Their progress describes waiting for connectivity and possible network
+sign-in. Cancellation immediately releases the wait. Resolver EAI_AGAIN, EAI_NONAME
+and EAI_FAIL use this path because portal DNS may reject an otherwise valid host.
+Replacement
 sessions follow the same EXAMINE and UIDVALIDITY checks.
 `make test-imap-recovery` exercises transient and persistent faults, epoch change,
 source integrity and owned scratch-process lifecycle.

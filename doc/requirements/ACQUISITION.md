@@ -141,9 +141,13 @@ committed progress. Workers shall close source iterators on their owning threads
 terminal process-group interrupts shall not abort scanner children mid-message.
 The standalone IMAP CLI acknowledges Ctrl-C immediately, before waiting for active
 downloads to stop and their checkpoint to finish.
-IMAP timeouts and lost connections, including after laptop sleep, shall record a
-**paused** run rather than a failure, including host-down socket errors where the
-platform exposes them. Retain committed per-message progress and accepted
+IMAP timeouts and lost connections, including after laptop sleep, retain committed
+per-message progress and accepted settings. macOS imports stay running while
+connectivity is unavailable and retry every 150 seconds, including DNS unknown-host
+replies from captive portals. Show a waiting/network-sign-in message and allow
+Suspend or Quit to interrupt that wait immediately.
+The CLI exhausts its short retry budget into a **paused** run, including host-down
+socket errors where the platform exposes them. Retain committed progress and accepted
 settings, release the connection and writer lease, and offer **Resume**
 in Ingests. Resume reconnects and downloads missing checkpoints without repeating
 committed bodies. Incomplete literals must never become successful checkpoints.
@@ -486,8 +490,8 @@ fixtures exercise destination rejection and exact resume through
 ## Automatic transport recovery
 
 Discovery and acquisition discard interrupted sessions before cancellable
-1, 2 and 4 second reconnect waits. After three unsuccessful recovery attempts,
-retain the existing paused/Resume behavior. Successful message delivery resets
+1, 2 and 4 second reconnect waits in the CLI. After three unsuccessful CLI recovery
+attempts, retain the paused/Resume behavior. Successful message delivery resets
 the acquisition retry budget. Authentication, TLS trust, malformed protocol and
 local storage failures are not retried as transport failures. Every replacement
 session EXAMINEs and checks UIDVALIDITY/capabilities before using old UID plans.
@@ -498,8 +502,9 @@ literals never reach publication. Initial capacity-refusal backoff retains its
 existing policy. CLI progress exposes reconnect deadlines while counts are still.
 On macOS, sleep expires active IMAP sessions and workers defer new connections
 until wake or cancellation. A default route or DNS configuration change can
-advance a pending transport retry. A failed connection allows a bounded grace
-period for a missing default route. These events do not resume a stopped import.
+advance a pending transport retry. macOS connection attempts continue at
+150-second intervals through prolonged outages and captive portal sign-in.
+These events do not resume a stopped import.
 `make test-imap-recovery` exercises transient and persistent faults, epoch change,
 source integrity and owned scratch-process lifecycle.
 

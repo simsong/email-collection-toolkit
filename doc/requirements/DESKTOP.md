@@ -896,6 +896,8 @@ the import as failed, or enable password editing while login validation is pendi
 On macOS, wake and network configuration changes refresh Ingests without a focus
 change. A successful status refresh clears its own earlier error and preserves
 command errors.
+On macOS, an IMAP connection blocked by network availability or captive portal sign-in
+shows a waiting status while it retests every 150 seconds. Suspend remains available.
 Collection-only completion, including a drag export for an unselected row, must
 notify state observers even when it changes no visible DOM.
 Large search batches must append without depending on JavaScript's function

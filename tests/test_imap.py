@@ -33,6 +33,7 @@ from threading import Barrier, Event
 import pytest
 
 from mailarchiver.file_events import wait_for_path_state
+from mailarchiver.change_signal import ChangeEvent
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import create_empty_archive
 from mailarchiver.archive_config import load_archive_config, save_archive_config
@@ -899,10 +900,11 @@ def test_host_down_handling_requires_a_transport_errno(error: OSError) -> None:
     assert not connection_interrupted(error)
 
 
-def test_only_temporary_dns_failure_retries() -> None:
-    """ACQUISITION: a resolver that is still restoring service is a transport interruption."""
-    assert connection_interrupted(socket.gaierror(socket.EAI_AGAIN, "Temporary failure"))
-    assert not connection_interrupted(socket.gaierror(socket.EAI_NONAME, "Unknown server"))
+@pytest.mark.parametrize("code", [socket.EAI_AGAIN, socket.EAI_NONAME, socket.EAI_FAIL])
+def test_dns_unavailability_retries(code: int) -> None:
+    """ACQUISITION: captive portals can return either temporary failure or an unknown hostname."""
+    assert connection_interrupted(socket.gaierror(code, "Name lookup unavailable"))
+    assert not connection_interrupted(socket.gaierror(socket.EAI_BADFLAGS, "Invalid resolver flags"))
 
 
 def test_imaplib_wrapped_send_timeout_retains_timeout_presentation() -> None:
@@ -1488,7 +1490,7 @@ def test_desktop_transport_signal_recovers_without_replaying_bodies(imap_archive
             transport.network_changed(False)
             imap_inbox.fault = ImapFault(command=b"BODY.PEEK[]", mode="disconnect", once=True)
             retry = next(stream)
-            assert isinstance(retry, ProgressEvent) and "reconnecting in 30s" in retry.phase
+            assert isinstance(retry, ProgressEvent) and "retrying in 150s" in retry.phase
             transport.network_changed(True)
         cursors = [first.cursor, *(item.cursor for item in stream if isinstance(item, MailObject))]
         assert time.monotonic() - started < 10
@@ -1497,6 +1499,87 @@ def test_desktop_transport_signal_recovers_without_replaying_bodies(imap_archive
     assert len(requests) == (3 if power_cycle else 4)
     assert requests.count(requests[0]) == 1
     assert sum(b" EXAMINE " in line for line in imap_inbox.commands) >= 3
+
+
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+@pytest.mark.parametrize("acquiring", [False, True], ids=["discovery", "acquisition"])
+def test_desktop_waits_through_captive_portal_dns_failure(imap_archive: Path, imap_inbox: DisposableImap,
+        monkeypatch: pytest.MonkeyPatch, acquiring: bool) -> None:
+    """ACQUISITION: four unknown-host replies retain a live import and exact delivered UID state."""
+    assert isinstance(imap_inbox, InterruptibleImap) and imap_inbox.account is not None
+    with closing(sqlite3.connect(imap_archive / "archive.sqlite3")) as database, database:
+        initialize_state(database)
+    transport = ImapTransport()
+    plugin = ImapSourcePlugin(PluginContext(imap_transport=transport))
+    source = SourceSpec(locator=imap_locator(imap_archive, imap_inbox.account, 1))
+    discovery = plugin.discover(source)
+    stream = discovery
+    cursors: list[str | None] = []
+    if acquiring:
+        containers = [item for item in discovery if isinstance(item, MailContainer)]
+        stream = plugin.messages(containers[0], None)
+        cursors.append(next(item.cursor for item in stream if isinstance(item, MailObject)))
+        imap_inbox.fault = ImapFault(command=b"BODY.PEEK[]", mode="disconnect", once=True)
+        interrupted = next(stream)
+        assert isinstance(interrupted, ProgressEvent) and "Waiting for IMAP connectivity" in interrupted.phase
+        transport.network_changed(True)
+
+    # Replace only the OS resolver boundary to reproduce the screenshot's DNS
+    # error. All successful sessions use the real fixture's verified TLS server.
+    resolve = socket.getaddrinfo
+    attempts = 0
+
+    def unavailable(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise socket.gaierror(socket.EAI_NONAME, "nodename nor servname provided, or not known")
+
+    monkeypatch.setattr(socket, "getaddrinfo", unavailable)
+    with closing(stream):
+        for _ in range(4):
+            waiting = next(stream)
+            assert isinstance(waiting, ProgressEvent)
+            assert "Waiting for IMAP connectivity; retrying in 150s" in waiting.phase
+            assert "sign-in" in waiting.phase
+            transport.network_changed(True)
+        monkeypatch.setattr(socket, "getaddrinfo", resolve)
+        remaining = list(stream)
+    assert attempts == 4
+    if acquiring:
+        cursors.extend(item.cursor for item in remaining if isinstance(item, MailObject))
+        assert len(cursors) == len(set(cursors)) == 3
+        requests = [line.split()[3] for line in imap_inbox.commands if b"BODY.PEEK[]" in line]
+        assert requests.count(requests[0]) == 1
+    else:
+        assert sum(isinstance(item, MailContainer) for item in remaining) == 1
+
+
+@pytest.mark.parametrize("finish", ["deadline", "suspend"])
+def test_desktop_connectivity_wait_retests_or_cancels(monkeypatch: pytest.MonkeyPatch, finish: str) -> None:
+    """ACQUISITION: automatic retests survive failed attempts and cancellation wakes the 150-second wait."""
+    from mailarchiver.imap_source import IMAP_NETWORK_RETEST_SECONDS
+    assert 120 <= IMAP_NETWORK_RETEST_SECONDS <= 180
+    stop = ChangeEvent()
+    plugin = ImapSourcePlugin(PluginContext(cancellation=stop, imap_transport=ImapTransport()))
+    if finish == "deadline":
+        monkeypatch.setattr("mailarchiver.imap_source.IMAP_NETWORK_RETEST_SECONDS", 0.01)
+    waiting = plugin._recover("fixture", 4, ImapPaused("Network unavailable"), None)
+    assert "Waiting for IMAP connectivity" in next(waiting).phase
+
+    def advance() -> bool:
+        try:
+            next(waiting)
+        except StopIteration as completed:
+            return bool(completed.value)
+        raise AssertionError("Connectivity wait emitted another event before completion")
+
+    with closing(waiting), ThreadPoolExecutor(max_workers=1) as pool:
+        # Advancing the iterator waits for the actual retry deadline or Stop.
+        result = pool.submit(advance)
+        if finish == "suspend":
+            stop.set()
+        assert result.result(timeout=2) == (finish == "deadline")
+        assert stop.is_set() == (finish == "suspend")
 
 
 @pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
@@ -1646,7 +1729,6 @@ def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive:
         imap_inbox: DisposableImap, imap_messages: tuple[bytes, ...], tmp_path: Path, cancel: bool, duplicate: bool) -> None:
     """ACQUISITION/PROCESSING: publish fresh TLS bodies while a saved content invocation is held open."""
     from mailarchiver.__main__ import IngestInterrupted
-    from mailarchiver.change_signal import ChangeEvent
     from mailarchiver.processing.api import ProcessingObject
     from mailarchiver.processing_progress import saved_messages_remaining
     from mailarchiver.processing.store import connect, enqueue

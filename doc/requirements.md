@@ -24,7 +24,9 @@ does not establish that every platform or release gate has passed.
   authentication error offers Update IMAP Credentials. Account acquisition uses
   a saved per-account limit (default 8, range 1–15) and cancellable capacity backoff while retaining the
   full processing worker pool. Interrupted sessions retry with fresh TLS and
-  epoch checks, retaining delivered UID state; exhausted recovery pauses safely. Protocol failures and private diagnostics
+  epoch checks, retaining delivered UID state. macOS connectivity failures wait
+  for network sign-in and retest every 150 seconds until recovery or cancellation.
+  CLI recovery exhaustion pauses safely. Protocol failures and private diagnostics
   retain their distinct handling, including malformed greetings and full CLI login
   diagnostics. IMAP verifies the declared body literal length and treats
   RFC822.SIZE disagreements as warnings.

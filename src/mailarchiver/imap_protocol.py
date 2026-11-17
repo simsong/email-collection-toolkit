@@ -113,7 +113,8 @@ def connection_interrupted(error: BaseException) -> bool:
     error = connection_cause(error)
     return isinstance(error, (TimeoutError, ConnectionError,
                               ssl.SSLEOFError, ssl.SSLZeroReturnError)) or (
-        isinstance(error, socket.gaierror) and error.errno == socket.EAI_AGAIN) or (
+        isinstance(error, socket.gaierror) and error.errno in {
+            socket.EAI_AGAIN, socket.EAI_NONAME, socket.EAI_FAIL}) or (
         isinstance(error, OSError) and error.errno in {
             errno.ENETDOWN, errno.ENETRESET, errno.ENETUNREACH, errno.EHOSTUNREACH,
             getattr(errno, "EHOSTDOWN", errno.EHOSTUNREACH)}) or (

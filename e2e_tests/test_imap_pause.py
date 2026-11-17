@@ -7,20 +7,23 @@
 # These checks establish local behavior, not live Gmail or native-window acceptance.
 """Requirements: expected IMAP interruptions pause with a working Resume action."""
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import socket
 import sqlite3
 
 import pytest
 from playwright.sync_api import Page, expect
 
 from e2e_tests.browser_notifications import notify_status
-from mailarchiver.__main__ import IngestRequest
+from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.archive_config import load_archive_config, save_archive_config
 from mailarchiver.file_events import wait_for_path_state
 from mailarchiver.gui_app import GUI_DIRECTORY, INGEST_BRIDGE_METHODS, SEARCH_BRIDGE_METHODS, IngestWindowApi, WindowBridge
 from mailarchiver.gui_processing import unfinished_work
 from mailarchiver.imap_models import ImapAccount
 from mailarchiver.imap_source import imap_locator
+from mailarchiver.imap_transport import ImapTransport
 from mailarchiver.imap_cli import parser, synchronize
 from mailarchiver.imap_credentials import password_for, save_password
 from mailarchiver.imap_state import totals
@@ -33,6 +36,45 @@ from tests.test_gui_processing import open_headless, wait_for_import
 from tests.test_imap import assert_imap_searchable
 from tests.test_imap import imap_archive as imap_archive, imap_inbox as imap_inbox, imap_messages as imap_messages
 from tests.test_imap import imap_server as imap_server, imap_server_identity as imap_server_identity
+
+
+def test_captive_portal_waiting_status_recovers_through_real_import(imap_archive: Path,
+        imap_inbox: DisposableImap, monkeypatch: pytest.MonkeyPatch, page: Page, tmp_path: Path) -> None:
+    """DESKTOP: portal DNS failures display waiting, then fresh TLS resumes the same running import."""
+    assert imap_inbox.account is not None
+    resolve = socket.getaddrinfo
+
+    def unavailable(*args, **kwargs):
+        raise socket.gaierror(socket.EAI_NONAME, "nodename nor servname provided, or not known")
+
+    transport = ImapTransport()
+    request = IngestRequest(archive=imap_archive, roots=[imap_locator(imap_archive, imap_inbox.account, 1)],
+                            workers=1, scan_policy="not-scanned")
+    monkeypatch.setattr(socket, "getaddrinfo", unavailable)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        completed = pool.submit(run_ingest, request, terminal=False, imap_transport=transport)
+        try:
+            def waiting() -> bool:
+                statuses = read_ingest_history(imap_archive).statuses
+                return bool(statuses and "Waiting for IMAP connectivity" in statuses[0].phase)
+
+            wait_for_path_state([imap_archive / "status"], waiting, timeout=10)
+            bridge(page, IngestWindowApi(imap_archive), ("history", "antivirus", "can_import_directory"))
+            page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
+            expect(page.locator(".state-badge")).to_have_text("running")
+            expect(page.locator(".progress-caption")).to_contain_text("retrying in 150s")
+            expect(page.locator(".progress-caption")).to_contain_text("Network sign-in")
+            expect(page.get_by_role("heading", name="Failure", exact=True)).to_have_count(0)
+            expect(page.locator("#error")).to_be_hidden()
+            page.screenshot(path=str(tmp_path / "captive-portal-waiting.png"))
+        finally:
+            monkeypatch.setattr(socket, "getaddrinfo", resolve)
+            transport.network_changed(True)
+        completed.result(timeout=15)
+    page.evaluate("refreshHistory()")
+    expect(page.locator(".state-badge")).to_have_text("completed")
+    assert len(read_ingest_history(imap_archive).statuses) == 1
+    assert totals(imap_archive).archived == 3 and not verify_archive(imap_archive)
 
 
 def test_password_replacement_form_checks_real_login_before_saving(imap_archive: Path,

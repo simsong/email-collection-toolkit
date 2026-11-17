@@ -24,7 +24,9 @@ than a second change log. Platform acceptance is stated alongside its evidence.
   Replacement passwords are tested before saving. Account acquisition uses
   a saved per-account limit (default 8, range 1–15) and cancellable capacity backoff while retaining the
   full processing worker pool. Interrupted sessions retry with fresh TLS and
-  epoch checks, retaining delivered UID state; exhausted recovery pauses safely. Protocol failures and private diagnostics
+  epoch checks, retaining delivered UID state. macOS transport recovery waits
+  150 seconds between connection attempts, waking early for route changes or
+  cancellation. CLI recovery exhaustion pauses safely. Protocol failures and private diagnostics
   retain their distinct handling, including malformed greetings and full CLI login
   diagnostics. IMAP checks the received byte count against the literal declaration
   and logs RFC822.SIZE discrepancies without interrupting acquisition.

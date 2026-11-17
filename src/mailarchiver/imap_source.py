@@ -45,7 +45,7 @@ from .sqlite_paths import sqlite_uri
 
 UID_SEARCH_WINDOW = 65536
 IMAP_RECOVERY_ATTEMPTS = 3
-IMAP_ROUTE_WAIT = 30
+IMAP_NETWORK_RETEST_SECONDS = 150
 IMAP_RECOVERY_PHASE = "IMAP connection interrupted;"
 IMAP_SLEEP_PHASE = "Computer slept; reconnecting to IMAP when awake"
 IMAP_RETRY_INITIAL = 1.0
@@ -163,11 +163,14 @@ class ImapSourcePlugin(SourcePlugin):
 
     def _recover(self, work_id: str, attempt: int, error: ImapPaused,
                  changed: Future[None] | None) -> Generator[ProgressEvent, None, bool]:
+        if self.transport is not None:
+            yield ProgressEvent(work_id=work_id, phase=f"Waiting for IMAP connectivity; retrying in "
+                f"{IMAP_NETWORK_RETEST_SECONDS:g}s. Network sign-in may be needed.")
+            return not _backoff_cancelled(self.cancellation, IMAP_NETWORK_RETEST_SECONDS,
+                                          transport=self.transport, changed=changed)
         if attempt > IMAP_RECOVERY_ATTEMPTS:
             raise error
         delay = min(IMAP_RETRY_INITIAL * 2 ** (attempt - 1), IMAP_RETRY_MAXIMUM)
-        if self.transport is not None and self.transport.path_available is False:
-            delay = max(delay, IMAP_ROUTE_WAIT)
         yield ProgressEvent(work_id=work_id,
             phase=f"{IMAP_RECOVERY_PHASE} reconnecting in {delay:g}s ({attempt}/{IMAP_RECOVERY_ATTEMPTS})")
         return not _backoff_cancelled(self.cancellation, delay, transport=self.transport, changed=changed)

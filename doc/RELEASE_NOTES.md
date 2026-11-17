@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a92 — wait for IMAP connectivity and captive portal sign-in
+
+- Keep active macOS imports waiting through DNS failures and blocked connections.
+  Retest every 150 seconds and resume the existing UID plan when connectivity returns.
+- Show a network sign-in hint. Wake, network changes, Suspend and Quit can interrupt
+  the reconnect wait.
+
 ## 1.0.0a91 — recover after macOS sleep and network changes
 
 - Refresh Ingests after wake or a network configuration change. Clear recovered
