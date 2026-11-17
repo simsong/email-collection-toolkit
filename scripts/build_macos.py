@@ -548,6 +548,7 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
                    "--workpath", str(work / "work"), "--specpath", str(work),
                    "--copy-metadata", "mailarchiver", "--collect-data", "mailarchiver",
                    "--collect-data", "webview", "--hidden-import", "webview.platforms.cocoa",
+                   "--hidden-import", "SystemConfiguration",
                    *plugin_import_arguments(),
                    "--exclude-module", "pypff",
                    "--hidden-import", "mailarchiver.processing.builtin",

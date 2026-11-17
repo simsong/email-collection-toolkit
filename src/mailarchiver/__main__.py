@@ -54,6 +54,7 @@ from .configuration_diagnostics import ConfigurationError
 from .identity import APPLICATION_VERSION
 from .imap_source import IMAP_BUSY_PHASE
 from .imap_preferences import ImapConnectionLimit
+from .imap_transport import ImapTransport
 from .worker_preferences import half_cpus, worker_argument
 from .archive_integrity import ArchiveIntegrityWarning, MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
@@ -1471,6 +1472,7 @@ class IngestInterrupted(KeyboardInterrupt):
 
 def run_ingest(
     request: IngestRequest, writer_lease: WriterLease | None = None, *, outcome: IngestOutcome | None = None, terminal: bool = True, stop_event: threading.Event | None = None,
+    imap_transport: ImapTransport | None = None,
 ) -> None:
     """Run ingest under the archive's OS writer lock."""
     validate_ingest_paths(request.roots, request.archive)
@@ -1497,13 +1499,14 @@ def run_ingest(
             lease.release()
         raise ValueError("an acquired writer lease for this archive is required")
     try:
-        _run_ingest(request, lease, outcome if outcome is not None else IngestOutcome(), terminal, stop_event)
+        _run_ingest(request, lease, outcome if outcome is not None else IngestOutcome(), terminal, stop_event, imap_transport)
     finally:
         if owned:
             lease.release()
 
 
-def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: IngestOutcome, terminal: bool, stop_event: threading.Event | None = None) -> None:
+def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: IngestOutcome, terminal: bool,
+                stop_event: threading.Event | None, imap_transport: ImapTransport | None) -> None:
     from .archive_config import load_archive_config
     mbox_max_bytes = load_archive_config(request.archive).mbox_max_bytes
     options = DocumentOptions(request.archive)
@@ -1522,7 +1525,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         if stop_event.is_set():
             stop.set()
     plugins = load_plugins(request.plugin_dir, archive=request.archive, installation_config=request.installation_config,
-                           scan_policy=request.scan_policy, cancellation=stop,
+                           scan_policy=request.scan_policy, cancellation=stop, imap_transport=imap_transport,
                            imap_connections=request.imap_connections if request.imap_connections is not None
                            else configured_imap_connections())
     source_specs = [SourceSpec(locator=str(Path(root).resolve())

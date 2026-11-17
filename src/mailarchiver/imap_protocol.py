@@ -19,8 +19,10 @@ import errno
 import imaplib
 import logging
 import re
+import socket
 import ssl
 from collections.abc import Sequence
+from concurrent.futures import Future
 from email.utils import parsedate_to_datetime
 from types import TracebackType
 from typing import Protocol, cast
@@ -73,6 +75,13 @@ class ImapPaused(ConnectionError):
     """A lost IMAP connection requires a fresh session and an explicit resume."""
 
 
+class ImapSessionExpired(ImapPaused):
+    """A desktop power transition retired this transport."""
+
+    def __init__(self) -> None:
+        super().__init__("Computer slept during the IMAP session. Saved progress is retained.")
+
+
 class ImapServerBusy(ImapPaused):
     """A temporary server refusal permits another connection attempt after backoff."""
 
@@ -104,6 +113,7 @@ def connection_interrupted(error: BaseException) -> bool:
     error = connection_cause(error)
     return isinstance(error, (TimeoutError, ConnectionError,
                               ssl.SSLEOFError, ssl.SSLZeroReturnError)) or (
+        isinstance(error, socket.gaierror) and error.errno == socket.EAI_AGAIN) or (
         isinstance(error, OSError) and error.errno in {
             errno.ENETDOWN, errno.ENETRESET, errno.ENETUNREACH, errno.EHOSTUNREACH,
             getattr(errno, "EHOSTDOWN", errno.EHOSTUNREACH)}) or (
@@ -317,7 +327,8 @@ def body_literal(data: Sequence[bytes | tuple[bytes, bytes] | None], uid: int) -
 
 class ImapSession:
     def __init__(self, account: ImapAccount, password: str,
-                 context: ssl.SSLContext | None = None, *, authentication_only: bool = False) -> None:
+                 context: ssl.SSLContext | None = None, *, authentication_only: bool = False,
+                 session_expired: Future[None] | None = None) -> None:
         self.account = account
         self.password = password
         self.context = context or ssl.create_default_context()
@@ -325,11 +336,13 @@ class ImapSession:
         self.gmail = False
         self.utf8 = False
         self.authentication_only = authentication_only
+        self._session_expired = session_expired
 
     def __enter__(self) -> ImapSession:
         if not self.context.check_hostname or self.context.verify_mode != ssl.CERT_REQUIRED:
             raise ValueError("Verified TLS is required for IMAP")
         try:
+            self._check_transport()
             if any(character in self.password for character in "\r\n\x00"):
                 raise ValueError("IMAP passwords cannot contain CR, LF or NUL")
             if self.account.tls == "implicit":
@@ -338,8 +351,10 @@ class ImapSession:
             else:
                 client = _ImapClient(self.account.server, self.account.port, timeout=IMAP_TIMEOUT)
             self.client = client
+            self._check_transport()
             if self.account.tls == "starttls":
                 client.starttls(ssl_context=self.context)
+                self._check_transport()
             try:
                 if "AUTH=PLAIN" in client.capabilities:
                     credentials = b"\x00" + self.account.username.encode("utf-8") + b"\x00" + self.password.encode("utf-8")
@@ -357,11 +372,13 @@ class ImapSession:
                 raise ImapAuthenticationError(self.account, detail) from None
             if self.authentication_only:
                 return self
+            self._check_transport()
             status, capabilities = client.capability()
             self._initial_ok(status, capabilities, "CAPABILITY")
             advertised = b" ".join(item for item in capabilities if item).upper().split()
             self.gmail = b"X-GM-EXT-1" in advertised
             if {b"UTF8=ACCEPT", b"UTF8=ONLY"}.intersection(advertised):
+                self._check_transport()
                 # ENABLE checks imaplib's cached, potentially pre-login capabilities.
                 client.capabilities = tuple(item.decode("ascii") for item in advertised)
                 status, data = client.enable("UTF8=ACCEPT")
@@ -381,8 +398,7 @@ class ImapSession:
                 if (isinstance(error, _ServerRefusal) or closed) and temporary_refusal(error):
                     failure = ImapServerBusy(detail)
                 elif connection_interrupted(error) or closed:
-                    reason = "timed out" if isinstance(connection_cause(error), TimeoutError) else "was interrupted"
-                    failure = ImapPaused(f"IMAP connection {reason}. Saved progress is retained; use Resume when connected.")
+                    failure = self._transport_error(error)
                 else:
                     # Malformed replies remain protocol failures even when their
                     # text mentions capacity. Never retain an unsanitized cause.
@@ -402,7 +418,7 @@ class ImapSession:
         if client is not None:
             try:
                 # A timed-out buffered socket cannot be reused, even for LOGOUT.
-                if _error is None:
+                if _error is None and not self._expired():
                     client.logout()
             except (OSError, imaplib.IMAP4.error):
                 logging.getLogger(__name__).debug("IMAP logout did not complete", exc_info=True)
@@ -413,8 +429,13 @@ class ImapSession:
                 except OSError:
                     logging.getLogger(__name__).debug("IMAP socket cleanup did not complete", exc_info=True)
         if _error is not None and not isinstance(_error, ImapPaused) and (connection_interrupted(_error) or server_closed):
-            reason = "timed out" if isinstance(connection_cause(_error), TimeoutError) else "was interrupted"
-            raise ImapPaused(f"IMAP connection {reason}. Saved progress is retained; use Resume when connected.") from _error
+            raise self._transport_error(_error) from _error
+
+    def _transport_error(self, error: BaseException) -> ImapPaused:
+        if self._expired():
+            return ImapSessionExpired()
+        reason = "timed out" if isinstance(connection_cause(error), TimeoutError) else "was interrupted"
+        return ImapPaused(f"IMAP connection {reason}. Saved progress is retained; use Resume when connected.")
 
     @staticmethod
     def _ok(status: str, command: str) -> None:
@@ -433,7 +454,15 @@ class ImapSession:
     def _client(self) -> imaplib.IMAP4:
         if self.client is None:
             raise RuntimeError("IMAP session is not connected")
+        self._check_transport()
         return self.client
+
+    def _expired(self) -> bool:
+        return self._session_expired is not None and self._session_expired.done()
+
+    def _check_transport(self) -> None:
+        if self._expired():
+            raise ImapSessionExpired()
 
     def mailboxes(self) -> list[ImapMailbox]:
         status, data = self._client().list('""', '"*"')
@@ -482,16 +511,18 @@ class ImapSession:
         status, data = client.uid("FETCH", ",".join(str(uid) for uid in uids), fields)
         self._ok(status, "UID FETCH metadata")
         messages = message_metadata(data, mailbox, uids, self.gmail)
-        self.check_epoch(mailbox.uid_validity)
+        self._check_epoch(client, mailbox.uid_validity)
         return messages
 
-    def check_epoch(self, expected: int) -> None:
-        values = self._client().response("UIDVALIDITY")[1]
+    @staticmethod
+    def _check_epoch(client: imaplib.IMAP4, expected: int) -> None:
+        values = client.response("UIDVALIDITY")[1]
         if values and any(int(value) != expected for value in values if value is not None):
             raise RuntimeError("IMAP UIDVALIDITY changed during download; retry synchronization")
 
     def body(self, message: ImapMessageMetadata) -> bytes:
-        status, data = self._client().uid("FETCH", str(message.uid), "(UID RFC822.SIZE BODY.PEEK[])")
+        client = self._client()
+        status, data = client.uid("FETCH", str(message.uid), "(UID RFC822.SIZE BODY.PEEK[])")
         self._ok(status, "UID FETCH body")
-        self.check_epoch(message.uid_validity)
+        self._check_epoch(client, message.uid_validity)
         return body_literal(data, message.uid)

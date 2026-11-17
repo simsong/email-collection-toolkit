@@ -892,6 +892,15 @@ Each worker retains temporary SQL sets of prior and already-delivered UIDs, so
 reconnecting cannot replay an object already handed to publication. Partial
 literals never reach publication. Initial capacity-refusal backoff retains its
 existing policy. CLI progress exposes reconnect deadlines while counts are still.
+The macOS desktop supplies a transient `ImapTransport` through the plugin
+context. Sleep expires a session token checked by the owning worker before a
+new IMAP command, and reconnects wait for wake or cancellation. A command already
+in progress retains its socket timeout and literal validation. Session expiry
+from sleep does not spend the failure retry budget. Wake and route
+notifications can shorten the transport backoff. With no reported default route,
+a failed connection gives the route up to 30 seconds to return before retrying.
+A temporary resolver failure uses the same transport retry path. Replacement
+sessions follow the same EXAMINE and UIDVALIDITY checks.
 `make test-imap-recovery` exercises transient and persistent faults, epoch change,
 source integrity and owned scratch-process lifecycle.
 

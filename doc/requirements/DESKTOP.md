@@ -893,6 +893,9 @@ acknowledgement. Ingests status and Suspend/Resume requests have a 15-second
 reply deadline. A missing reply reports an unconfirmed outcome, releases refresh
 ownership and permits a fresh status read; it must not replay a command, classify
 the import as failed, or enable password editing while login validation is pending.
+On macOS, wake and network configuration changes refresh Ingests without a focus
+change. A successful status refresh clears its own earlier error and preserves
+command errors.
 Collection-only completion, including a drag export for an unselected row, must
 notify state observers even when it changes no visible DOM.
 Large search batches must append without depending on JavaScript's function

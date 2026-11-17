@@ -12,6 +12,7 @@ let initialized = false;
 let importing = false;
 let starting = false;
 let imapAccounts = [];
+let historyError = false;
 const historyRefresh = new RefreshTask(readHistory);
 const byId = id => document.getElementById(id);
 const integer = value => Number(value || 0).toLocaleString();
@@ -74,11 +75,26 @@ function ingestReply(method) {
   const action = {antivirus: "checking antivirus status", history: "reading import status",
     can_import_directory: "checking import availability", suspend_import: "suspending the import",
     resume_import: "resuming the import"}[method] || "updating this window";
+  const callbacks = window.pywebview._returnValuesCallbacks?.[method];
   return new Promise((resolve, reject) => {
-    const deadline = window.setTimeout(() => reject(new Error(
-      `No confirmation from the application while ${action}. The import may still be running or changing state. `
-      + "Return to this window to refresh status before repeating the command.")), 15000);
-    Promise.resolve().then(() => operation()).then(resolve, reject).finally(() => window.clearTimeout(deadline));
+    let callbackId;
+    const release = () => {
+      window.clearTimeout(deadline);
+      if (callbackId !== undefined) delete callbacks[callbackId];
+    };
+    const deadline = window.setTimeout(() => {
+      release();
+      reject(new Error(
+        `No confirmation from the application while ${action}. The import may still be running or changing state. `
+        + "Return to this window to refresh status before repeating the command."));
+    }, 15000);
+    Promise.resolve().then(() => {
+      if (!callbacks) return operation();
+      // The pinned bridge registers its reply synchronously before posting the request.
+      const previous = new Set(Object.keys(callbacks));
+      try { return operation(); }
+      finally { callbackId = Object.keys(callbacks).find(id => !previous.has(id)); }
+    }).then(resolve, reject).finally(release);
   });
 }
 
@@ -114,13 +130,20 @@ async function readHistory() {
     byId("starting-import").hidden = !starting;
     render(history.errors || []);
     byId("import-directory").disabled = importing || !canImport;
+    if (historyError) {
+      byId("error").hidden = true;
+      historyError = false;
+    }
     if (passwordRequest && requestedPassword === passwordRequest && !byId("save-imap-password").disabled) {
       requestedPassword = null;
       if (passwordBlocked) showError("Suspend the import before updating its password.");
       else openImapPassword(passwordRequest.sourceId);
     }
   } catch (error) {
-    showError(`Could not read ingest history: ${error}`);
+    if (historyError || byId("error").hidden) {
+      showError(`Could not read ingest history: ${error}`);
+      historyError = true;
+    }
   }
 }
 
@@ -480,6 +503,7 @@ function formatBytes(value) {
 }
 
 function showError(message) {
+  historyError = false;
   const error = byId("error");
   error.textContent = message;
   error.hidden = false;

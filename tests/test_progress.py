@@ -362,6 +362,7 @@ def test_cancelled_ingest_scanner_startup_reaps_native_worker(monkeypatch: pytes
             start_ingest_scanner(cancel, 2)
         assert cancelled and all(not worker.is_alive() for worker in cancelled)
         assert all(scanner.process is None and scanner.runtime is None for scanner in scanners)
+        assert all(scanner.startup_reader is None for scanner in scanners)
     finally:
         for scanner in scanners:
             scanner.__exit__()

@@ -4,7 +4,7 @@
 from typing import Any, Self
 from collections.abc import Mapping
 from Foundation import NSURL as NSURL
-from Foundation import NSRect
+from Foundation import NSNotificationCenter, NSRect
 
 type Point = tuple[float, float]
 type Rect = tuple[Point, Point]
@@ -13,6 +13,8 @@ NSPasteboardTypeString: str
 NSPasteboardTypeFileURL: str
 NSPasteboardTypeURL: str
 NSFilenamesPboardType: str
+NSWorkspaceWillSleepNotification: str
+NSWorkspaceDidWakeNotification: str
 
 class NSPasteboard:
     @classmethod
@@ -33,6 +35,7 @@ class NSWorkspace:
     def sharedWorkspace(cls) -> Self: ...
     def openURL_(self, url: NSURL) -> bool: ...
     def iconForFile_(self, path: str) -> NSImage: ...
+    def notificationCenter(self) -> NSNotificationCenter: ...
 
 class NSImage:
     @classmethod

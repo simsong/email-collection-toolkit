@@ -53,6 +53,7 @@ from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argume
 from .imap_protocol import ImapAuthenticationError, ImapPaused, ImapSession
 from .imap_credentials import save_password
 from .imap_models import ImapAccount
+from .macos_lifecycle import MacOSLifecycle
 from .search_completion import SearchSuggestions
 from .processor_graph import ProcessorGraphStatus, processor_graph
 from .updates import UpdateChannel, UpdateService, UpdateStatus, default_channel
@@ -1771,6 +1772,7 @@ class PyWebViewApplication:
         self._notices: list[ApplicationNotice] = []
         self._pending_notices: SimpleQueue[ApplicationNotice] = SimpleQueue()
         self._connectivity: ConnectivityMonitor | None = None
+        self._lifecycle: MacOSLifecycle | None = None
         self._status_observers: dict[str, PathObserver] = {}
         self._menu_observer: Any = None
         self._lock = RLock()
@@ -2210,7 +2212,17 @@ class PyWebViewApplication:
         activity = getattr(self._sparkle, "activity_changed", None)
         if activity is not None:
             activity()
-        for window in self._registered_windows():
+        self._post_status_change(self._registered_windows())
+
+    def _lifecycle_status_changed(self) -> None:
+        # Cocoa may need to finish opening a window while a worker holds the
+        # application lock. The native window list suffices for this refresh.
+        if not self._quitting:
+            self._post_status_change(tuple(webview.windows))
+
+    @staticmethod
+    def _post_status_change(windows: tuple[webview.Window, ...]) -> None:
+        for window in windows:
             try:
                 post_window_event(window, "mailarchiver-status-changed")
             except Exception:  # pylint: disable=broad-exception-caught
@@ -2617,7 +2629,8 @@ class PyWebViewApplication:
             self.add_notice(severity, message, window_id=notice_task.window_id, imap_source_id=imap_source_id)
 
         try:
-            run_ingest(request, lease, stop_event=stop, outcome=outcome, terminal=False)
+            run_ingest(request, lease, stop_event=stop, outcome=outcome, terminal=False,
+                       imap_transport=self._lifecycle.transport if self._lifecycle is not None else None)
             try:
                 if request.roots:
                     remember_import_directory(request.archive, [Path(root) for root in request.roots])
@@ -3211,6 +3224,9 @@ class PyWebViewApplication:
             release(lambda key=key, observer=observer: self._close_status_observer(key, observer))
         if self._connectivity is not None:
             release(self._connectivity.close)
+        if self._lifecycle is not None:
+            release(self._lifecycle.close)
+            self._lifecycle = None
         if self.asset_server is not None:
             release(self.asset_server.close)
         if cleanup_errors:
@@ -3492,6 +3508,7 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
     install_file_drag()
     from .native_javascript import install_cocoa_reply_boundary  # pylint: disable=import-outside-toplevel
     install_cocoa_reply_boundary()
+    application._lifecycle = MacOSLifecycle(application._lifecycle_status_changed)
 
     class MailArchiverDelegate(BrowserView.AppDelegate):
         def applicationShouldTerminate_(self, app):

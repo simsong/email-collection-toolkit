@@ -22,6 +22,7 @@ from pathlib import Path
 import sqlite3
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -51,11 +52,12 @@ from mailarchiver.gui_service import SearchPage, search_page
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.ingest_diagnostics import format_failure
 from mailarchiver.imap_source import ImapSourcePlugin, imap_locator
+from mailarchiver.imap_transport import ImapTransport
 from mailarchiver.standalone_verify import verify_archive
 from tests.test_gui_processing import open_headless, wait_for_import
 from mailarchiver.mbox import MboxLocation, read_verified_location
 from mailarchiver.owner_rules import OwnerRules
-from mailarchiver.plugin_api import MailContainer, MailObject, ProgressEvent, SourceObservation, SourceReference, SourceSpec
+from mailarchiver.plugin_api import MailContainer, MailObject, PluginContext, ProgressEvent, SourceObservation, SourceReference, SourceSpec
 
 from tests.imap_fixture import DisposableImap, FixtureKeyring, ImapFault, InterruptibleImap, Utf8Imap
 
@@ -897,6 +899,12 @@ def test_host_down_handling_requires_a_transport_errno(error: OSError) -> None:
     assert not connection_interrupted(error)
 
 
+def test_only_temporary_dns_failure_retries() -> None:
+    """ACQUISITION: a resolver that is still restoring service is a transport interruption."""
+    assert connection_interrupted(socket.gaierror(socket.EAI_AGAIN, "Temporary failure"))
+    assert not connection_interrupted(socket.gaierror(socket.EAI_NONAME, "Unknown server"))
+
+
 def test_imaplib_wrapped_send_timeout_retains_timeout_presentation() -> None:
     """Stdlib's command-send wrapper must retain the same Timeout reason as socket reads."""
     session = ImapSession(ImapAccount(server="fixture.example.test", username="fixture"), "unused")
@@ -1449,6 +1457,71 @@ def test_transient_reads_recover_without_replaying_delivered_bodies(imap_archive
         assert requested_uids.count(requested_uids[1]) == 2
     assert not verify_archive(imap_archive)
     assert_imap_searchable(imap_archive)
+
+
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+@pytest.mark.parametrize("power_cycle", [True, False], ids=["sleep-wake", "network-change"])
+def test_desktop_transport_signal_recovers_without_replaying_bodies(imap_archive: Path,
+        imap_inbox: DisposableImap, power_cycle: bool) -> None:
+    """ACQUISITION: native hints replace pre-sleep sessions or advance a waiting route retry."""
+    assert isinstance(imap_inbox, InterruptibleImap) and imap_inbox.account is not None
+    with closing(sqlite3.connect(imap_archive / "archive.sqlite3")) as database, database:
+        initialize_state(database)
+    transport = ImapTransport()
+    plugin = ImapSourcePlugin(PluginContext(imap_transport=transport))
+    source = SourceSpec(locator=imap_locator(imap_archive, imap_inbox.account, 1))
+    containers = [item for item in plugin.discover(source) if isinstance(item, MailContainer)]
+    # Iterate on one owner thread, as production does, across the lifecycle transition.
+    with closing(plugin.messages(containers[0], None)) as stream:
+        first = next(item for item in stream if isinstance(item, MailObject))
+        started = time.monotonic()
+        if power_cycle:
+            # Repeated sleep while between downloads does not exhaust attempts.
+            for _ in range(4):
+                transport.sleep()
+                retry = next(stream)
+                assert isinstance(retry, ProgressEvent) and "Computer slept" in retry.phase
+                transport.wake()
+                searching = next(stream)
+                assert isinstance(searching, ProgressEvent) and searching.phase == "finding unarchived IMAP messages"
+        else:
+            transport.network_changed(False)
+            imap_inbox.fault = ImapFault(command=b"BODY.PEEK[]", mode="disconnect", once=True)
+            retry = next(stream)
+            assert isinstance(retry, ProgressEvent) and "reconnecting in 30s" in retry.phase
+            transport.network_changed(True)
+        cursors = [first.cursor, *(item.cursor for item in stream if isinstance(item, MailObject))]
+        assert time.monotonic() - started < 10
+    assert len(cursors) == len(set(cursors)) == 3
+    requests = [line.split()[3] for line in imap_inbox.commands if b"BODY.PEEK[]" in line]
+    assert len(requests) == (3 if power_cycle else 4)
+    assert requests.count(requests[0]) == 1
+    assert sum(b" EXAMINE " in line for line in imap_inbox.commands) >= 3
+
+
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+def test_desktop_transport_signal_during_tls_session_setup(imap_archive: Path, imap_inbox: DisposableImap) -> None:
+    """ACQUISITION: repeated sleep-induced setup aborts allow discovery to complete on wake."""
+    assert isinstance(imap_inbox, InterruptibleImap) and imap_inbox.account is not None
+    transport = ImapTransport()
+    attempts = 0
+
+    def sleep_during_setup() -> None:
+        nonlocal attempts
+        attempts += 1
+        transport.sleep()
+        transport.wake()
+        if attempts == 4:
+            imap_inbox.fault = None
+
+    imap_inbox.before_fault = sleep_during_setup
+    imap_inbox.fault = ImapFault(command=b" CAPABILITY", mode="disconnect", once=False)
+    source = SourceSpec(locator=imap_locator(imap_archive, imap_inbox.account, 1))
+    plugin = ImapSourcePlugin(PluginContext(imap_transport=transport))
+    events = list(plugin.discover(source))
+    assert attempts == 4
+    assert sum(isinstance(event, ProgressEvent) and "Computer slept" in event.phase for event in events) == 4
+    assert sum(isinstance(event, MailContainer) for event in events) == 1
 
 
 @pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)

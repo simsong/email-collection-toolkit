@@ -38,7 +38,8 @@ def install_api_reply_delivery() -> None:
             # The calling page has already entered its API: loaded may not yet be
             # published during startup. Close still cancels delivery to that page.
             try:
-                post_window_script(window, script, require_loaded=False)
+                # A page can discard a callback after its reply deadline.
+                post_window_script(window, script.replace("](", "]?.(", 1), require_loaded=False)
             except Exception:  # pylint: disable=broad-exception-caught
                 logging.getLogger(__name__).warning("Application reply could not be delivered; refresh the window's status.")
             return None

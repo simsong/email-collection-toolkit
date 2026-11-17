@@ -54,6 +54,7 @@ def test_lost_control_reply_is_visible_and_never_replays_the_command(tmp_path: P
     expect(page.locator("#error")).to_contain_text("No confirmation from the application")
     expect(page.locator("#error")).to_contain_text("before repeating the command")
     page.wait_for_function("!importing && historyRefresh.pending === null")
+    expect(page.locator("#error")).to_be_visible()
     page.screenshot(path=str(tmp_path / "unconfirmed-control.png"), full_page=True)
     page.evaluate("window.lateControlReply(true)")
     assert page.evaluate("window.controlCalls") == 1
@@ -72,18 +73,24 @@ def test_lost_history_reply_releases_refresh_for_a_fresh_read(tmp_path: Path, pa
 
     page.evaluate("""() => {
       window.savedHistory = window.pywebview.api.history;
-      window.pywebview.api.history = () => { window.statusReadStarted = true; return new Promise(() => {}); };
+      const callbacks = {existing: () => {}};
+      window.pywebview._returnValuesCallbacks = {history: callbacks};
+      window.pywebview.api.history = () => new Promise(resolve => { callbacks.timedOut = resolve; });
       void refreshHistory();
     }""")
-    page.wait_for_function("window.statusReadStarted")
+    page.wait_for_function("window.pywebview._returnValuesCallbacks?.history.timedOut !== undefined")
     page.clock.fast_forward(15001)
     expect(page.locator("#error")).to_contain_text("No confirmation from the application")
     page.wait_for_function("historyRefresh.pending === null")
-    page.evaluate("""async () => {
+    assert page.evaluate("Object.keys(pywebview._returnValuesCallbacks.history)") == ["existing"]
+    snapshot = read_ingest_history(tmp_path).statuses[0]
+    saved.write(snapshot.model_copy(update={"state": "interrupted"}))
+    page.evaluate("""() => {
       window.pywebview.api.history = window.savedHistory;
-      await refreshHistory();
+      window.dispatchEvent(new Event("mailarchiver-status-changed"));
     }""")
-    expect(page.locator(".state-badge")).to_have_text("completed")
+    expect(page.locator(".state-badge")).to_have_text("interrupted")
+    expect(page.locator("#error")).to_be_hidden()
 
 
 def test_concurrent_download_and_processing_have_separate_rows(tmp_path: Path, page: Page) -> None:

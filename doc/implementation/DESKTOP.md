@@ -1198,6 +1198,14 @@ It preserves ordinary evaluations and Promise callbacks, including their native
 errors and 15-second failure deadline. One-way replies do not create a waiting
 Python future; the page's Promise resolution establishes actual delivery. Closed
 windows discard queued replies, including a Close that races native dispatch.
+Ingests removes expired reply callbacks, and late delivery skips a removed callback.
+The macOS lifecycle observer listens on the workspace notification center for
+sleep and wake. A SystemConfiguration run-loop source observes default IPv4,
+IPv6 and DNS changes. Wake and network events post status changes to pywebview's
+native window list without taking the application lock on Cocoa's main thread.
+Ingests coalesces the read with any in-flight refresh
+and clears its history error after a successful reply. Shutdown releases both
+subscriptions.
 Ingests bounds status/control reply waits at 15 seconds and reports an unconfirmed
 outcome before reading fresh status. Commands are never automatically repeated;
 password validation retains its existing lifetime and cancellation safeguards.

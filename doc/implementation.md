@@ -50,6 +50,8 @@ than a second change log. Platform acceptance is stated alongside its evidence.
   Failure deadlines remain explicit; readiness must be observed.
   The pinned SDK's API replies are posted to the native view without a second
   synchronous acknowledgement; Ingests bounds its own reply waits.
+  Workspace sleep/wake and SystemConfiguration changes feed the desktop status
+  event and active IMAP recovery without starting a new import.
   The estimator tracks unfinished unknown-size containers separately from known
   source bytes. Promoted attachments increment archival counts without affecting
   source totals or dates. IMAP run details show

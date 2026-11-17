@@ -496,6 +496,10 @@ Each worker retains temporary SQL sets of prior and already-delivered UIDs, so
 reconnecting cannot replay an object already handed to publication. Partial
 literals never reach publication. Initial capacity-refusal backoff retains its
 existing policy. CLI progress exposes reconnect deadlines while counts are still.
+On macOS, sleep expires active IMAP sessions and workers defer new connections
+until wake or cancellation. A default route or DNS configuration change can
+advance a pending transport retry. A failed connection allows a bounded grace
+period for a missing default route. These events do not resume a stopped import.
 `make test-imap-recovery` exercises transient and persistent faults, epoch change,
 source integrity and owned scratch-process lifecycle.
 

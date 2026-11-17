@@ -207,6 +207,7 @@ class InterruptibleImap(DisposableImap):
     def __init__(self, directory: Path) -> None:
         super().__init__(directory, "implicit")
         self.fault: ImapFault | None = None
+        self.before_fault: Callable[[], None] | None = None
         self.commands: list[bytes] = []
         self.replacement_uid_validity: int | None = None
 
@@ -239,6 +240,8 @@ class InterruptibleImap(DisposableImap):
                         else:
                             if fault.once:
                                 self.fault = None
+                            if self.before_fault is not None:
+                                self.before_fault()
                             if fault.next_uid_validity is not None:
                                 self.replacement_uid_validity = fault.next_uid_validity
                             if fault.mode == "reject":

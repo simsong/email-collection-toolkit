@@ -33,8 +33,9 @@ from .change_signal import ActivityCallback, ChangeEvent, await_activity
 from .imap_credentials import password_for
 from .imap_models import ImapAccount, ImapDownload, ImapMailbox, ImapMessageMetadata
 from .imap_preferences import DEFAULT_IMAP_CONNECTIONS
-from .imap_protocol import ImapPaused, ImapServerBusy, ImapSession, UID_BATCH_SIZE
+from .imap_protocol import ImapPaused, ImapServerBusy, ImapSession, ImapSessionExpired, UID_BATCH_SIZE
 from .imap_state import known_observation
+from .imap_transport import ImapTransport
 from .plugin_api import (
     IntegrityDecision, IntegrityEvidence, MailContainer, MailObject, PluginCapabilities,
     PluginContext, ProgressEvent, SkippedInput, SourceIntegrityControls, SourceObservation, SourcePlugin,
@@ -44,22 +45,30 @@ from .sqlite_paths import sqlite_uri
 
 UID_SEARCH_WINDOW = 65536
 IMAP_RECOVERY_ATTEMPTS = 3
+IMAP_ROUTE_WAIT = 30
 IMAP_RECOVERY_PHASE = "IMAP connection interrupted;"
+IMAP_SLEEP_PHASE = "Computer slept; reconnecting to IMAP when awake"
 IMAP_RETRY_INITIAL = 1.0
 IMAP_RETRY_MAXIMUM = 60.0
 IMAP_BUSY_PHASE = "IMAP server busy;"
 
 
-def _backoff_cancelled(cancellation: ChangeEvent, delay: float) -> bool:
+def _backoff_cancelled(cancellation: ChangeEvent, delay: float, *, transport: ImapTransport | None = None,
+                       changed: Future[None] | None = None) -> bool:
     """Wake for native console signals as well as worker/GUI cancellation, without polling."""
     result: Future[bool] = Future()
 
     def check() -> None:
-        if cancellation.is_set() and not result.done():
+        if result.done():
+            return
+        if cancellation.is_set():
             result.set_result(True)
+        elif transport is not None and transport.path_available is not False and changed is not None and changed.done():
+            result.set_result(False)
 
+    signals = (cancellation.changed, transport.changed) if transport is not None else (cancellation.changed,)
     try:
-        return await_activity(result, ActivityCallback(check, (cancellation.changed,)), delay)
+        return await_activity(result, ActivityCallback(check, signals), delay)
     except TimeoutError:
         return False
 
@@ -129,14 +138,19 @@ class ImapSourcePlugin(SourcePlugin):
         if services is not None:
             self.capabilities = self.capabilities.model_copy(update={"max_concurrency": services.imap_connections})
         self.cancellation = services.cancellation if services and services.cancellation is not None else ChangeEvent()
+        self.transport = services.imap_transport if services is not None else None
 
     def _connect(self, account: ImapAccount, connections: ExitStack, work_id: str
                  ) -> Generator[ProgressEvent, None, ImapSession | None]:
         """Retry only unopened sessions; never replay a body or discard committed progress."""
         delay = IMAP_RETRY_INITIAL
         while not self.cancellation.is_set():
+            session = self.transport.session(self.cancellation) if self.transport is not None else None
+            if self.cancellation.is_set():
+                return None
             try:
-                return connections.enter_context(ImapSession(account, self.credentials(account), self.context))
+                return connections.enter_context(ImapSession(account, self.credentials(account), self.context,
+                                                             session_expired=session))
             except ImapServerBusy as error:
                 detail = error.detail
             yield ProgressEvent(work_id=work_id,
@@ -147,13 +161,16 @@ class ImapSourcePlugin(SourcePlugin):
             delay = min(delay * 2, IMAP_RETRY_MAXIMUM)
         return None
 
-    def _recover(self, work_id: str, attempt: int, error: ImapPaused) -> Generator[ProgressEvent, None, bool]:
+    def _recover(self, work_id: str, attempt: int, error: ImapPaused,
+                 changed: Future[None] | None) -> Generator[ProgressEvent, None, bool]:
         if attempt > IMAP_RECOVERY_ATTEMPTS:
             raise error
         delay = min(IMAP_RETRY_INITIAL * 2 ** (attempt - 1), IMAP_RETRY_MAXIMUM)
+        if self.transport is not None and self.transport.path_available is False:
+            delay = max(delay, IMAP_ROUTE_WAIT)
         yield ProgressEvent(work_id=work_id,
             phase=f"{IMAP_RECOVERY_PHASE} reconnecting in {delay:g}s ({attempt}/{IMAP_RECOVERY_ATTEMPTS})")
-        return not _backoff_cancelled(self.cancellation, delay)
+        return not _backoff_cancelled(self.cancellation, delay, transport=self.transport, changed=changed)
 
     def recognizes(self, source: SourceSpec) -> bool:
         return source.kind == "imap" or source.locator.startswith("imap://")
@@ -180,6 +197,7 @@ class ImapSourcePlugin(SourcePlugin):
         mode: tuple[bool, bool] | None = None
         failures = 0
         while not self.cancellation.is_set():
+            changed = self.transport.changed.ready if self.transport is not None else None
             try:
                 with ExitStack() as connections:
                     session = yield from self._connect(account, connections, account.id)
@@ -216,11 +234,13 @@ class ImapSourcePlugin(SourcePlugin):
                                 emitted.add(container.work_id)
                                 yield container
                 return
+            except ImapSessionExpired:
+                yield ProgressEvent(work_id=account.id, phase=IMAP_SLEEP_PHASE)
             except ImapPaused as error:
                 if self.cancellation.is_set():
                     return
                 failures += 1
-                if not (yield from self._recover(account.id, failures, error)):
+                if not (yield from self._recover(account.id, failures, error, changed)):
                     return
 
     def messages(self, container: MailContainer, resume_cursor: str | None
@@ -238,6 +258,7 @@ class ImapSourcePlugin(SourcePlugin):
             database.commit()
             failures = 0
             while not self.cancellation.is_set():
+                changed = self.transport.changed.ready if self.transport is not None else None
                 try:
                     with ExitStack() as connections:
                         session = yield from self._connect(work.account, connections, container.work_id)
@@ -273,9 +294,11 @@ class ImapSourcePlugin(SourcePlugin):
                                     yield ProgressEvent(work_id=container.work_id, phase=phase,
                                                         completed=completed, unit="messages")
                     return
+                except ImapSessionExpired:
+                    yield ProgressEvent(work_id=container.work_id, phase=IMAP_SLEEP_PHASE)
                 except ImapPaused as error:
                     if self.cancellation.is_set():
                         return
                     failures += 1
-                    if not (yield from self._recover(container.work_id, failures, error)):
+                    if not (yield from self._recover(container.work_id, failures, error, changed)):
                         return

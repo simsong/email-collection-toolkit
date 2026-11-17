@@ -49,6 +49,7 @@ does not establish that every platform or release gate has passed.
   Failure deadlines remain explicit; readiness must be observed.
   Native API replies use one-way delivery; lost Ingests replies display an unknown
   outcome without retrying a command or marking the import failed.
+  macOS wake refreshes Ingests, and route changes wake pending IMAP reconnects.
   Unfinished unknown-size acquisition reports ETA unavailable, including mixed
   local and remote runs. Source counts and dates exclude promoted attachments.
   IMAP run details show

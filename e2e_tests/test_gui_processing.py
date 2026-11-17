@@ -17,7 +17,7 @@ from mailarchiver.__main__ import IngestRequest, load_processing_request, run_in
 from mailarchiver.application import IngestJob
 from mailarchiver.gui_app import AboutApi, ApplicationNotice, DocumentOptionsApi, GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, GuiApi, IdentityPickerApi, IngestWindowApi
 from mailarchiver.gui_processing import PickerPage, connection, resume_request, unfinished_work
-from mailarchiver.ingest_status import IngestStatusFile, read_ingest_history
+from mailarchiver.ingest_status import ImapDownloadCoverage, IngestStatusFile, read_ingest_history
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.writer_lock import WriterLease
 from tests.test_gui_processing import build_entity_archive, build_phone_archive, build_deferred_archive, build_interrupted_archive, open_headless, wait_for_import
@@ -571,7 +571,8 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
     expect(page.locator(".statistics")).not_to_contain_text("Peak workers")
     status_file.write(status.model_copy(update={"state": "completed", "updated_at": datetime.now(UTC),
         "activity_kind": "processing", "source_roots": ["imap://unavailable-account"],
-        "processed_messages": 25, "files_processed": 8, "files_total": 8, "saved_messages_remaining": 0}))
+        "processed_messages": 28, "files_processed": 8, "files_total": 8, "saved_messages_remaining": 0,
+        "download_coverage": ImapDownloadCoverage(messages=25)}))
     page.evaluate("window.refreshHistory()")
     expect(page.locator(".statistics")).to_contain_text("Source messages downloaded")
     expect(page.locator(".statistics")).to_contain_text("Processing tasks finished")

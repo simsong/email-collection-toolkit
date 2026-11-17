@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a91 — recover after macOS sleep and network changes
+
+- Refresh Ingests after wake or a network configuration change. Clear recovered
+  status errors after a successful read.
+- Replace IMAP sessions that span sleep and wake pending reconnects when the
+  network configuration changes. Keep explicit Suspend and Resume controls.
+- Wake the ClamAV startup reply reader when startup is cancelled.
+
 ## 1.0.0a90 — open IMAP credential recovery from the error
 
 - Add **Update IMAP Credentials** alongside **Collapse messages** and
