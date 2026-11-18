@@ -287,7 +287,10 @@ def test_ingest_history_ui_end_to_end(built_archive: BuiltArchive, page: Page) -
     page.wait_for_selector(".history-row")
     assert page.locator(".history-row").count() == 1
     assert "Completed" in page.locator(".history-row").inner_text()
-    assert page.locator(".worker-table tbody tr").count() == 2
+    tables = page.locator(".worker-table")
+    expect(tables).to_have_count(2)
+    for table in tables.all():
+        expect(table.locator("tbody tr td:first-child")).to_have_text(["1", "2"])
     assert str(PROCESSED_MESSAGE_COUNT) in page.locator(".statistics").inner_text()
 
 

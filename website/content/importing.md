@@ -50,10 +50,21 @@ settings, including after reopening the archive. Suspension also frees the
 archive for manual name edits. A message already being downloaded may finish
 before suspension completes.
 
-If an IMAP connection times out, including after laptop sleep, the
-download shows **Timeout** with a yellow circle and horizontal dash, and keeps
-its saved progress. No timeout traceback is displayed. Reconnect to the network,
-then click **Resume** in Ingests. Messages already saved are not downloaded again.
+macOS IMAP imports wait through connectivity loss and captive portal sign-in,
+retesting the server every 2½ minutes using a fresh session. Ingests shows the
+waiting status while saved progress is retained. Complete the network sign-in
+when needed. **Suspend Import** remains available during the wait. Messages
+already saved are not downloaded again.
+
+Downloads and saved-message processing can run at the same time after unfinished
+ingest recovery. Ingests shows their worker groups separately, so a saved-mail backlog
+does not have to finish before new downloads begin.
+
+The download details show the number of messages downloaded in this run, their
+earliest and latest server-reported dates in UTC, and counts by year. Emails
+extracted from attachments are counted separately from downloads. If the amount
+remaining is unknown, the display says **ETA unavailable** rather than claiming
+that downloading is finalizing.
 
 ![The import history window showing a completed synthetic collection import](../images/importing-interface.png)
 

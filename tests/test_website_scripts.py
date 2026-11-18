@@ -145,7 +145,7 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
         }
     }
     jobs = configuration[JOBS]
-    assert set(jobs) == {"ci-gate", "static-rust", "python-browser", "release-candidate"}
+    assert set(jobs) == {"ci-gate", "static-rust", "python-browser", "windows-lifecycle", "release-candidate"}
     # Release validation must work on any branch, including notes-only candidates.
     assert jobs["release-candidate"]["if"] == "contains(github.event.head_commit.message, '[release-ci]')"
     assert jobs["release-candidate"]["uses"] == "./.github/workflows/release-candidate.yml"
@@ -166,7 +166,7 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     assert ":(exclude)README.md" in gate_script
     assert ":(exclude)doc/RELEASE_NOTES.md" in gate_script
     assert ":(exclude)doc/**" not in gate_script
-    ordinary_jobs = [jobs["static-rust"], jobs["python-browser"]]
+    ordinary_jobs = [jobs["static-rust"], jobs["python-browser"], jobs["windows-lifecycle"]]
     assert all(job[NEEDS] == "ci-gate" for job in ordinary_jobs)
     assert all(
         job["if"] == "${{ needs.ci-gate.outputs.run_checks == 'true' }}"
@@ -176,6 +176,10 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     test_runs = [step.get(RUN, "") for step in jobs["python-browser"][STEPS]]
     assert any("make check-static" in run for run in static_runs)
     assert any("make check-tests" in run for run in test_runs)
+    assert "make test-frozen-lifecycle" in test_runs
+    windows = jobs["windows-lifecycle"]
+    assert windows[RUNS_ON] == "windows-latest"
+    assert any("test-windows-lifecycle" in step.get(RUN, "") for step in windows[STEPS])
     assert all("make check-tests" not in run for run in static_runs)
     assert all("make check-static" not in run for run in test_runs)
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
@@ -184,8 +188,11 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
         if definition.name == "windows-msix.yml":
             continue  # Its explicit multi-platform build matrix is checked below.
         configuration = safe_load(definition.read_text())
-        for job in configuration[JOBS].values():
-            assert job.get(RUNS_ON) == "macos-15" or "uses" in job, definition
+        for name, job in configuration[JOBS].items():
+            if definition.name == "continuous-integration.yml" and name == "windows-lifecycle":
+                assert job[RUNS_ON] == "windows-latest"
+            else:
+                assert job.get(RUNS_ON) == "macos-15" or "uses" in job, definition
 
 
 @pytest.mark.parametrize(("changed_file", "expected"), [

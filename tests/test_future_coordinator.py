@@ -7,14 +7,39 @@
 # Real ingestion and interruption acceptance complement these focused contracts.
 """Source coordination requirements: ownership, notification and failure release."""
 
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from collections.abc import Callable, Generator
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeout
 import sqlite3
 from threading import Barrier, Event, get_ident
 
 import pytest
 
 from mailarchiver.__main__ import run_file_workers
+from mailarchiver.change_signal import ChangeEvent
 from mailarchiver.future_coordinator import BoundedWorkers, FutureCoordinator, WORKER_NUMBER
+
+
+def test_source_failure_preserves_ready_background_result_and_original_error() -> None:
+    """PROCESSING: source cancellation drains a ready owner step before reporting its original failure."""
+    stop, started = ChangeEvent(), Event()
+    returned: Future[object] = Future()
+    consumed: list[object] = []
+
+    def background(_failed: Callable[[BaseException], None]) -> Generator[tuple[Future[object], ...], None, None]:
+        started.set()
+        yield (returned,)
+        consumed.append(returned.result())
+
+    def source(_item: int) -> None:
+        assert started.wait(5)
+        returned.set_result("checkpoint ready")
+        stop.set()
+        raise OSError("original source error")
+
+    with pytest.raises(OSError, match="original source error"):
+        run_file_workers([0], 1, source, stop, lambda: None,
+            signals=(stop.changed,), background=background)
+    assert consumed == ["checkpoint ready"]
 
 
 def test_source_workers_retain_inputs_and_owner_alone_commits() -> None:

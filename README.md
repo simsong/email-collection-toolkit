@@ -190,6 +190,7 @@ reference; their workflows are in [For developers](doc/FOR_DEVELOPERS.md).
 
 | Variable / Make parameter | Purpose |
 | --- | --- |
+| `CONCURRENT_IMAP_TESTS` | Optional Python test selection for `make test-concurrent-imap`; browser checks still run |
 | `CARGO`, `RUST_TARGET_DIR`, `CARGO_TARGET_DIR` | Cargo executable and build output; Make uses `RUST_TARGET_DIR`, direct Cargo uses `CARGO_TARGET_DIR` |
 | `RUSTUP_TOOLCHAIN` | Override the compiler selected by `rust-toolchain.toml` |
 | `CARGO_BUILD_JOBS` | Limit native Rust compilation parallelism |
@@ -278,3 +279,14 @@ Additional licenses are available from the copyright holder.
 Original project material is covered by [COPYRIGHT](COPYRIGHT). Vendored and
 separately licensed components are identified in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Developer scratch IMAP acceptance uses `make imap-acceptance` with
+`IMAP_ACCEPTANCE_ARGS="--source-archive SOURCE --scratch-archive SCRATCH --seconds 600"`.
+This Make argument selects disjoint archives and a cancellation deadline (default
+ten minutes, plus two minutes for cleanup and a separate two-minute verification budget); it contains no password. The tool
+reuses one configured account through its existing vault reference and one extra
+connection, retains the scratch archive for subsequent runs, and prints status
+and canonical-integrity results. A forced stop is a failed evaluation.
+
+A scratch evaluation succeeds only after downloading at least one source message;
+a completed metadata-only refresh is explicitly not a successful download test.

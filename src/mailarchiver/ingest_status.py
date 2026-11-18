@@ -53,6 +53,25 @@ class YearProgress(BaseModel):
     messages: int = 0
 
 
+class ImapDownloadCoverage(BaseModel):
+    """Source-acquisition counts and INTERNALDATE bounds, independent of parsed MIME children."""
+    messages: int = 0
+    earliest_date: datetime | None = None
+    latest_date: datetime | None = None
+    years: list[YearProgress] = Field(default_factory=list)
+
+    def record(self, date: datetime) -> None:
+        date = date.astimezone(UTC)
+        self.messages += 1
+        self.earliest_date = date if self.earliest_date is None else min(date, self.earliest_date)
+        self.latest_date = date if self.latest_date is None else max(date, self.latest_date)
+        entry = next((item for item in self.years if item.year == date.year), None)
+        if entry is None:
+            entry = YearProgress(year=date.year)
+            self.years.append(entry)
+        entry.messages += 1
+
+
 class IngestCounts(BaseModel):
     archived: int = 0
     duplicates: int = 0
@@ -88,6 +107,7 @@ class IngestStatus(BaseModel):
     archive: str
     run_pk: int
     process_id: int
+    application_version: str | None = None
     source_roots: list[str]
     started_at: datetime
     updated_at: datetime
@@ -123,6 +143,9 @@ class IngestStatus(BaseModel):
     processing_processor: str | None = None
     activity_kind: Literal["source", "processing"] | None = None
     saved_messages_remaining: int | None = Field(default=None, ge=0)
+    download_coverage: ImapDownloadCoverage | None = None
+    saved_workers: list[IngestWorkerStatus] = Field(default_factory=list)
+    concurrent_processing: bool = False
 
     @field_validator("started_at", "updated_at", "completed_at")
     @classmethod

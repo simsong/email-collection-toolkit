@@ -509,6 +509,12 @@ test-config-diagnostics: ruff
 	uv run --locked pytest -q tests/test_archive_config.py tests/test_cli.py::test_configuration_failure_prints_repair_message tests/test_cli.py::test_installation_configuration_failure_stays_concise_in_console_and_history tests/test_gui_processing.py::test_history_labels_preserve_saved_imap_locators tests/test_gui_processing.py::test_invalid_configuration_warns_without_error_trace tests/test_gui_service.py tests/test_plugin_configuration.py tests/test_ingest_diagnostics.py $(PYTEST_ARGS)
 	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_diagnostics.py $(PYTEST_ARGS)
 
+# Preserve producer launch versions across metadata updates and old failure-history reads.
+.PHONY: test-ingest-version
+test-ingest-version: ruff
+	uv run --locked pytest -q tests/test_build_info.py::test_about_keeps_launch_version_after_installed_metadata_changes tests/test_progress.py tests/test_ingest_diagnostics.py $(PYTEST_ARGS)
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_diagnostics.py $(PYTEST_ARGS)
+
 run:
 	uv run ect $(ARGS)
 
@@ -633,6 +639,15 @@ test-quit: ruff
 test-native-quit: ruff
 	MAILARCHIVER_NATIVE_GUI_E2E=1 uv run --locked pytest -q tests/test_quit.py::test_native_quit_during_status_polling
 
+# Disposable native window checks SDK replies; browser faults check visible loss handling.
+.PHONY: test-native-replies
+test-native-replies: ruff
+	uv run --locked pylint src/mailarchiver/native_javascript.py src/mailarchiver/desktop_platform.py tests/test_native_javascript.py e2e_tests/native_reply_probe.py e2e_tests/test_ingest_diagnostics.py
+	uv run --locked ty check src/mailarchiver/native_javascript.py src/mailarchiver/desktop_platform.py tests/test_native_javascript.py e2e_tests/native_reply_probe.py e2e_tests/test_ingest_diagnostics.py --error-on-warning
+	uv run --locked pyright src/mailarchiver/native_javascript.py src/mailarchiver/desktop_platform.py tests/test_native_javascript.py e2e_tests/native_reply_probe.py e2e_tests/test_ingest_diagnostics.py --warnings
+	MAILARCHIVER_NATIVE_GUI_E2E=1 uv run --locked pytest -q tests/test_native_javascript.py $(PYTEST_ARGS)
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_diagnostics.py $(PYTEST_ARGS)
+
 test-apple-mail-compare:
 	uv run pytest -q tests/test_apple_mail_compare.py
 
@@ -726,6 +741,15 @@ test-source-coordination: ruff
 	uv run --locked ty check $(SOURCE_COORDINATION_CHECK_FILES) --error-on-warning
 	uv run --locked pyright $(SOURCE_COORDINATION_CHECK_FILES) --warnings
 	uv run --locked pytest -q $(SOURCE_COORDINATION_TESTS)
+
+.PHONY: test-concurrent-imap
+# CONCURRENT_IMAP_TESTS optionally narrows Python regressions after a fixture repair.
+CONCURRENT_IMAP_TESTS ?= tests/test_imap.py tests/test_progress.py tests/test_ingest_recovery.py tests/test_processing.py tests/test_processing_objects.py tests/test_future_coordinator.py tests/test_quit_import.py
+test-concurrent-imap: ruff
+	$(MAKE) pylint
+	$(MAKE) types
+	uv run --locked pytest -q $(CONCURRENT_IMAP_TESTS) $(PYTEST_ARGS)
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_diagnostics.py $(PYTEST_ARGS)
 
 test-headers:
 	uv run pytest -q tests/test_message.py tests/test_search.py
@@ -932,6 +956,20 @@ test-pff: pst-importer mcti-scan pff-converter test-pff-converter
 	uv run --locked pytest -q --durations=20 $(CI_DIAGNOSTICS_ARGS) tests/test_pff_source.py tests/test_cli_processing.py tests/test_plugin_loader.py tests/test_source_integrity.py $(PYTEST_ARGS)
 
 .PHONY: test-gui-processing
+.PHONY: test-search-placeholder
+test-search-placeholder: ruff
+	uv run --locked pylint e2e_tests/test_gui_processing.py
+	uv run --locked ty check e2e_tests/test_gui_processing.py --error-on-warning
+	uv run --locked pyright e2e_tests/test_gui_processing.py --warnings
+	uv run --locked pytest -q --browser chromium e2e_tests/test_gui_processing.py::test_searching_does_not_claim_there_are_no_messages $(PYTEST_ARGS)
+
+.PHONY: test-worker-columns
+test-worker-columns: ruff
+	uv run --locked pylint e2e_tests/test_gui_processing.py
+	uv run --locked ty check e2e_tests/test_gui_processing.py --error-on-warning
+	uv run --locked pyright e2e_tests/test_gui_processing.py --warnings
+	uv run --locked pytest -q --browser chromium e2e_tests/test_gui_processing.py::test_worker_columns_stay_fixed_during_status_changes $(PYTEST_ARGS)
+
 .PHONY: test-worker-preferences test-native-worker-preferences
 test-worker-preferences: ruff
 	uv run --locked pytest -q tests/test_worker_preferences.py tests/test_updates.py $(PYTEST_ARGS)
@@ -1067,3 +1105,48 @@ test-customizable-lists: ruff
 .PHONY: test-customizable-lists-browser
 test-customizable-lists-browser:
 	uv run --locked pytest -q --browser chromium e2e_tests/test_default_lists.py
+
+# Validate honest unknown-size ETA and run-specific IMAP date/year coverage.
+.PHONY: test-imap-progress
+test-imap-progress: ruff
+	uv run --locked pylint e2e_tests/test_ingest_diagnostics.py scripts/imap_acceptance.py
+	uv run --locked ty check e2e_tests/test_ingest_diagnostics.py scripts/imap_acceptance.py --error-on-warning
+	uv run --locked pyright e2e_tests/test_ingest_diagnostics.py scripts/imap_acceptance.py --warnings
+	uv run --locked pytest -q tests/test_progress.py tests/test_imap.py -k 'overall_progress or unknown_byte_inventory or scratch_' $(PYTEST_ARGS)
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_diagnostics.py $(PYTEST_ARGS)
+
+# IMAP_ACCEPTANCE_ARGS selects source/scratch archives and the acquisition deadline.
+.PHONY: imap-acceptance
+imap-acceptance:
+	uv run --locked python -m scripts.imap_acceptance $(IMAP_ACCEPTANCE_ARGS)
+
+# Native platform subscriptions use registered synthetic callbacks only.
+LIFECYCLE_SOURCES = src/mailarchiver/desktop_lifecycle.py src/mailarchiver/macos_lifecycle.py \
+	src/mailarchiver/windows_lifecycle.py src/mailarchiver/imap_transport.py \
+	tests/test_desktop_lifecycle.py tests/test_windows_lifecycle.py tests/test_native_javascript.py
+.PHONY: test-frozen-lifecycle
+test-frozen-lifecycle: ruff
+	PYTHONPATH="$(CURDIR):$(CURDIR)/scripts" uv run --locked pylint scripts/check_frozen_lifecycle.py scripts/build_macos.py
+	uv run --locked ty check scripts/check_frozen_lifecycle.py scripts/build_macos.py --error-on-warning
+	uv run --locked pyright scripts/check_frozen_lifecycle.py scripts/build_macos.py --warnings
+	uv run --locked --group packaging python scripts/check_frozen_lifecycle.py
+
+.PHONY: test-desktop-lifecycle test-windows-lifecycle
+test-desktop-lifecycle: ruff
+	PYTHONPATH="$(CURDIR)" uv run --locked pylint $(LIFECYCLE_SOURCES)
+	uv run --locked ty check $(LIFECYCLE_SOURCES) --error-on-warning
+	uv run --locked ty check $(LIFECYCLE_SOURCES) --python-platform win32 --error-on-warning
+	uv run --locked pyright $(LIFECYCLE_SOURCES) --warnings
+	uv run --locked pyright $(LIFECYCLE_SOURCES) --pythonplatform Windows --warnings
+	uv run --locked pytest -q tests/test_desktop_lifecycle.py tests/test_windows_lifecycle.py tests/test_native_javascript.py $(PYTEST_ARGS)
+
+test-windows-lifecycle: test-desktop-lifecycle
+	uv run --locked python -c "import sys; assert sys.platform == 'win32', 'Requires native Windows execution'"
+
+# Real TLS transient faults, persistent pause fallback and source-byte validation.
+.PHONY: test-imap-recovery
+test-imap-recovery: ruff
+	uv run --locked pylint src/mailarchiver/imap_source.py src/mailarchiver/imap_cli.py src/mailarchiver/ingest_status.py scripts/imap_acceptance.py
+	uv run --locked ty check src/mailarchiver/imap_source.py src/mailarchiver/imap_cli.py src/mailarchiver/ingest_status.py scripts/imap_acceptance.py --error-on-warning
+	uv run --locked pyright src/mailarchiver/imap_source.py src/mailarchiver/imap_cli.py src/mailarchiver/ingest_status.py scripts/imap_acceptance.py --warnings
+	uv run --locked pytest -q tests/test_imap.py -k 'transient_reads or reconnect_epoch or standalone_cli_reports_network_pause or invalid_imap_response or scratch_ or desktop_transport_signal or captive_portal or connectivity_wait or dns_unavailability' $(PYTEST_ARGS)

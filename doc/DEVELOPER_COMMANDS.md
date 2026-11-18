@@ -24,6 +24,11 @@ and outputs. They do not modify source stores or replace canonical messages.
 See [Apple Mail comparison](APPLE_MAIL_CACHE.md), [audit tooling](DATA_QUALITY_AUDIT.md)
 and the [research notebook](research/name-matcher/README.md) for interpretation.
 
+`make test-native-replies PYTEST_ARGS='--browser-channel chrome'` runs a disposable
+Cocoa reply probe and Ingests browser regressions, including lost status and
+Suspend/Resume replies. It uses synthetic state only and requires an unlocked
+macOS desktop; Windows WebView2 acceptance remains separate.
+
 ## Rust tools
 
 `make rust-programs` builds the supported workspace release binaries in
@@ -234,3 +239,17 @@ Preconditions and interpretation: [CERTIFICATE_MANAGEMENT](CERTIFICATE_MANAGEMEN
 ```sh
 (cd "$(dirname "$DMG")" && shasum -a 256 "$(basename "$DMG")")
 ```
+
+### Desktop power and network events
+
+`make test-desktop-lifecycle` checks common transport, cancellation and shutdown
+behavior, plus native Cocoa subscriptions on macOS. `make test-windows-lifecycle`
+requires Windows and checks native power registration, .NET network subscriptions and registered
+callback dispatch without suspending the computer or changing its network. Branch CI
+runs that focused Windows gate; installed-package and real sleep/network-change
+acceptance remain separate checks.
+
+`make test-frozen-lifecycle` requires macOS and builds a disposable PyInstaller
+executable with the production Python collection flags. It verifies native
+lifecycle adapter discovery, synthetic Workspace sleep/wake and subscription
+cleanup without an installed source checkout. Signed DMG acceptance is separate.

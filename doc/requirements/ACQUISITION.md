@@ -60,6 +60,9 @@ credential. `--set-password` is a separate interactive operation: validate a hid
 replacement before saving only that account's native-vault item, without importing.
 Ingests offers the same test-before-save replacement through **Update IMAP Password**
 when no import is active. Failed validation retains the old stored password.
+The search window's IMAP authentication error also offers **Update IMAP Credentials**
+alongside its collapse and dismiss controls. It opens the same dialog with the
+rejected account selected.
 Login rejection shall identify account/server and retain a bounded, sanitized
 server reason without exposing plaintext, escaped passwords or SASL payloads.
 Temporary server capacity/rate-limit refusals during session initialization shall
@@ -99,6 +102,10 @@ membership through `X-GM-MSGID` and `X-GM-LABELS`; other folders are not fetched
 All Mail coverage is explicit: Spam/Trash-only messages are not included.
 
 Acquisition uses EXAMINE and BODY.PEEK, never mutating source messages or flags.
+Accept a full BODY.PEEK response for the requested UID when its declared literal
+length equals the received byte count. Missing RFC822.SIZE does not prevent
+acquisition. A conflicting RFC822.SIZE logs a warning with the UID and counts.
+A missing or mismatched literal length fails acquisition without logging the body.
 After validating the complete BODY.PEEK literal, replace CRLF pairs with LF
 before ingest; retain lone CR, existing LF, and missing final newlines. Do not
 parse/reserialize MIME. This applies throughout the message, including unencoded
@@ -134,9 +141,13 @@ committed progress. Workers shall close source iterators on their owning threads
 terminal process-group interrupts shall not abort scanner children mid-message.
 The standalone IMAP CLI acknowledges Ctrl-C immediately, before waiting for active
 downloads to stop and their checkpoint to finish.
-IMAP timeouts and lost connections, including after laptop sleep, shall record a
-**paused** run rather than a failure, including host-down socket errors where the
-platform exposes them. Retain committed per-message progress and accepted
+IMAP timeouts and lost connections, including after laptop sleep, retain committed
+per-message progress and accepted settings. macOS and Windows imports stay running while
+connectivity is unavailable and retry every 150 seconds, including DNS unknown-host
+replies from captive portals. Show a waiting/network-sign-in message and allow
+Suspend or Quit to interrupt that wait immediately.
+The CLI exhausts its short retry budget into a **paused** run, including host-down
+socket errors where the platform exposes them. Retain committed progress and accepted
 settings, release the connection and writer lease, and offer **Resume**
 in Ingests. Resume reconnects and downloads missing checkpoints without repeating
 committed bodies. Incomplete literals must never become successful checkpoints.
@@ -460,3 +471,52 @@ own provenance, long subjects may use folded encoded words, and DEL/C1 controls
 are rejected. Validate with `make test-imap`, `make test-pst` and `make test-pff`.
 PDF-derived MBOX publication must atomically refuse a racing destination without
 requiring hardlink-capable storage; existing output remains untouched.
+
+## Timed scratch IMAP evaluation
+
+`make imap-acceptance` runs `scripts.imap_acceptance` against an explicit,
+disjoint scratch archive. It copies one enabled account reference and owner
+settings from the source archive without reading mail or modifying credentials
+there. Only marked, matching scratch archives can be resumed. An owned child
+uses the production importer with one connection and an acquisition deadline,
+followed by bounded cleanup grace. The existing owned-command supervisor
+contains descendants on timeout or owner death on POSIX and Windows. Canonical
+verification has its own configurable deadline (default 120 seconds). Forced termination, child failure, invalid
+final status or canonical verification errors fail the evaluation. The JSON
+summary retains the status, date/year counts and integrity result. Disposable TLS
+fixtures exercise destination rejection and exact resume through
+`make test-imap-progress`; live Gmail evaluation is separate evidence.
+
+## Automatic transport recovery
+
+Discovery and acquisition discard interrupted sessions before cancellable
+1, 2 and 4 second reconnect waits in the CLI. After three unsuccessful CLI recovery
+attempts, retain the paused/Resume behavior. Successful message delivery resets
+the acquisition retry budget. Authentication, TLS trust, malformed protocol and
+local storage failures are not retried as transport failures. Every replacement
+session EXAMINEs and checks UIDVALIDITY/capabilities before using old UID plans.
+Discovery freezes mailbox bounds and avoids emitting duplicate containers.
+Each worker retains temporary SQL sets of prior and already-delivered UIDs, so
+reconnecting cannot replay an object already handed to publication. Partial
+literals never reach publication. Initial capacity-refusal backoff retains its
+existing policy. CLI progress exposes reconnect deadlines while counts are still.
+On macOS and Windows, sleep expires active IMAP sessions and workers defer new
+connections until wake or cancellation. A macOS route/DNS configuration change
+or Windows interface address/availability change can advance a pending transport
+retry. Desktop connection attempts continue at
+150-second intervals through prolonged outages and captive portal sign-in.
+These events do not resume a stopped import.
+`make test-imap-recovery` exercises transient and persistent faults, epoch change,
+source integrity and owned scratch-process lifecycle.
+
+A scratch evaluation succeeds only after downloading at least one source message;
+a completed metadata-only refresh is explicitly not a successful download test.
+
+The import worker returns a receipt containing only a newly created status for
+its own process. The evaluator uses that receipt, never the archive's latest
+status, so failed/suppressed writes cannot borrow a prior run's positive coverage.
+
+After mandatory ingest recovery, active source reads shall overlap saved content
+processing rather than waiting for the archived-content queue to drain. Per-account
+IMAP connection limits remain independent of the processing worker pool. Only the
+archive owner may publish canonical bytes, observations and processing results.

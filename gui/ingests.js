@@ -4,16 +4,20 @@
 "use strict";
 
 let statuses = [];
-let selectedStatusId = new URLSearchParams(window.location.search).get("status");
+const parameters = new URLSearchParams(window.location.search);
+let selectedStatusId = parameters.get("status");
+const initialPasswordSource = parameters.get("imap_password");
+let requestedPassword = initialPasswordSource ? {sourceId: initialPasswordSource} : null;
 let initialized = false;
 let importing = false;
 let starting = false;
 let imapAccounts = [];
+let historyError = false;
 const historyRefresh = new RefreshTask(readHistory);
 const byId = id => document.getElementById(id);
 const integer = value => Number(value || 0).toLocaleString();
 const stateLabel = status => status.timed_out ? "Timeout" : status.state;
-const processingMode = status => !(status.state !== "running" && (status.processed_messages || status.files_processed))
+const processingMode = status => !status.concurrent_processing && !(status.state !== "running" && (status.processed_messages || status.files_processed))
   && (status.activity_kind === "processing" || status.processing_active
     || ["recovering archived content", "recovering pending imports", "processing content"].includes(status.phase));
 const processingActive = status => processingMode(status) && status.state === "running";
@@ -41,18 +45,7 @@ async function initialize() {
   byId("import-directory").addEventListener("click", importDirectory);
   byId("suspend-import").addEventListener("click", () => controlImport("suspend_import"));
   byId("resume-import").addEventListener("click", () => controlImport("resume_import"));
-  byId("update-imap-password").addEventListener("click", () => {
-    byId("imap-account").replaceChildren(...imapAccounts.map(account => {
-      const option = document.createElement("option");
-      option.value = account.id;
-      option.textContent = `${account.username} on ${account.server}:${account.port}`;
-      return option;
-    }));
-    byId("imap-password-status").textContent = "";
-    byId("cancel-imap-password").textContent = "Cancel";
-    byId("imap-password-dialog").showModal();
-    byId("imap-password").focus();
-  });
+  byId("update-imap-password").addEventListener("click", () => openImapPassword());
   byId("cancel-imap-password").addEventListener("click", () => byId("imap-password-dialog").close());
   byId("imap-password-dialog").addEventListener("cancel", event => {
     if (byId("save-imap-password").disabled) event.preventDefault();
@@ -65,6 +58,10 @@ async function initialize() {
 }
 
 window.refreshHistory = refreshHistory;
+window.requestImapPassword = sourceId => {
+  requestedPassword = {sourceId};
+  if (initialized) void historyRefresh.changed();
+};
 window.selectIngest = statusId => {
   selectedStatusId = statusId;
   render();
@@ -72,11 +69,41 @@ window.selectIngest = statusId => {
 
 function refreshHistory() { return historyRefresh.run(); }
 
+function ingestReply(method) {
+  const operation = window.pywebview.api[method];
+  if (!operation) return Promise.resolve(undefined);
+  const action = {antivirus: "checking antivirus status", history: "reading import status",
+    can_import_directory: "checking import availability", suspend_import: "suspending the import",
+    resume_import: "resuming the import"}[method] || "updating this window";
+  const callbacks = window.pywebview._returnValuesCallbacks?.[method];
+  return new Promise((resolve, reject) => {
+    let callbackId;
+    const release = () => {
+      window.clearTimeout(deadline);
+      if (callbackId !== undefined) delete callbacks[callbackId];
+    };
+    const deadline = window.setTimeout(() => {
+      release();
+      reject(new Error(
+        `No confirmation from the application while ${action}. The import may still be running or changing state. `
+        + "Return to this window to refresh status before repeating the command."));
+    }, 15000);
+    Promise.resolve().then(() => {
+      if (!callbacks) return operation();
+      // The pinned bridge registers its reply synchronously before posting the request.
+      const previous = new Set(Object.keys(callbacks));
+      try { return operation(); }
+      finally { callbackId = Object.keys(callbacks).find(id => !previous.has(id)); }
+    }).then(resolve, reject).finally(release);
+  });
+}
+
 async function readHistory() {
+  const passwordRequest = requestedPassword;
   try {
-    const antivirus = await window.pywebview.api.antivirus?.();
-    const history = await window.pywebview.api.history();
-    const canImport = await window.pywebview.api.can_import_directory?.();
+    const antivirus = await ingestReply("antivirus");
+    const history = await ingestReply("history");
+    const canImport = await ingestReply("can_import_directory");
     byId("antivirus-warning").hidden = !antivirus || antivirus.configured;
     byId("antivirus-detail").textContent = antivirus?.detail || "";
     const previousLatestId = statuses[0]?.status_id;
@@ -90,7 +117,8 @@ async function readHistory() {
     byId("configuration-warning").textContent = (history.warnings || []).join("\n");
     byId("configuration-warning").hidden = !history.warnings?.length;
     byId("update-imap-password").hidden = imapAccounts.length === 0;
-    byId("update-imap-password").disabled = Boolean(history.active) || importing;
+    const passwordBlocked = Boolean(history.active || starting || statuses[0]?.state === "running") || importing;
+    byId("update-imap-password").disabled = passwordBlocked;
     byId("suspend-import").disabled = importing || !history.active || history.suspending;
     byId("resume-import").disabled = importing || !history.can_resume;
     byId("resume-import").textContent = statuses[0]?.state === "paused" ? "Resume" : "Continue Import";
@@ -102,9 +130,43 @@ async function readHistory() {
     byId("starting-import").hidden = !starting;
     render(history.errors || []);
     byId("import-directory").disabled = importing || !canImport;
+    if (historyError) {
+      byId("error").hidden = true;
+      historyError = false;
+    }
+    if (passwordRequest && requestedPassword === passwordRequest && !byId("save-imap-password").disabled) {
+      requestedPassword = null;
+      if (passwordBlocked) showError("Suspend the import before updating its password.");
+      else openImapPassword(passwordRequest.sourceId);
+    }
   } catch (error) {
-    showError(`Could not read ingest history: ${error}`);
+    if (historyError || byId("error").hidden) {
+      showError(`Could not read ingest history: ${error}`);
+      historyError = true;
+    }
   }
+}
+
+function openImapPassword(sourceId = null) {
+  if (sourceId && !imapAccounts.some(account => account.id === sourceId)) {
+    showError("The selected IMAP account is unavailable.");
+    return;
+  }
+  const dialog = byId("imap-password-dialog");
+  const select = byId("imap-account");
+  if (dialog.open && (!sourceId || select.value === sourceId)) return;
+  select.replaceChildren(...imapAccounts.map(account => {
+    const option = document.createElement("option");
+    option.value = account.id;
+    option.textContent = `${account.username} on ${account.server}:${account.port}`;
+    return option;
+  }));
+  if (sourceId) select.value = sourceId;
+  byId("imap-password").value = "";
+  byId("imap-password-status").textContent = "";
+  byId("cancel-imap-password").textContent = "Cancel";
+  if (!dialog.open) dialog.showModal();
+  byId("imap-password").focus();
 }
 
 async function updateImapPassword(event) {
@@ -129,6 +191,7 @@ async function updateImapPassword(event) {
     byId("imap-password").disabled = false;
     byId("save-imap-password").disabled = false;
     byId("cancel-imap-password").disabled = false;
+    if (requestedPassword) void historyRefresh.changed();
   }
 }
 
@@ -156,7 +219,7 @@ async function controlImport(method) {
   byId("import-control-status").textContent = method === "suspend_import" ? "Suspending import…" : "Continuing import…";
   byId("import-control-status").hidden = false;
   try {
-    if (!await window.pywebview.api[method]()) throw new Error("The import state changed. Please try again.");
+    if (!await ingestReply(method)) throw new Error("The import state changed. Please try again.");
   } catch (error) { showError(String(error?.message || error)); }
   finally { importing = false; await historyRefresh.fresh(); }
 }
@@ -195,15 +258,22 @@ function historyRow(status) {
   title.append(state, percent);
   const time = document.createElement("span");
   time.className = "history-time";
-  time.textContent = new Date(status.started_at).toLocaleString();
+  time.textContent = runTimestamp(status);
   const summary = document.createElement("span");
   summary.className = "history-summary";
+  const imapOnly = status.source_roots.length && status.source_roots.every(root => root.startsWith("imap://"));
+  const messages = imapOnly ? status.download_coverage?.messages : status.processed_messages;
   summary.textContent = `${processingMode(status) ? `${integer(status.processing_jobs_completed)} processing tasks finished`
-    : `${integer(status.processed_messages)} source messages`} · ${formatDuration(status.elapsed_seconds)}`;
+    : messages == null ? "Source message count unavailable" : `${integer(messages)} source messages`} · ${formatDuration(status.elapsed_seconds)}`;
   main.append(title, time, summary);
   row.append(dot, main);
   row.addEventListener("click", () => { selectedStatusId = status.status_id; render(); });
   return row;
+}
+
+function runTimestamp(status) {
+  const timestamp = new Date(status.started_at).toLocaleString();
+  return `${timestamp} (${status.application_version || "version unavailable"})`;
 }
 
 function renderDetail(status) {
@@ -222,7 +292,7 @@ function renderDetail(status) {
   const title = document.createElement("h1");
   title.textContent = `Ingest ${status.run_pk}`;
   const subtitle = document.createElement("p");
-  subtitle.textContent = `${new Date(status.started_at).toLocaleString()} · process ${status.process_id}`;
+  subtitle.textContent = `${runTimestamp(status)} · process ${status.process_id}`;
   if (status.scan_policy === "not-scanned") {
     subtitle.textContent += " · WARNING: imported without antivirus scanning";
     subtitle.className = "failure";
@@ -249,20 +319,28 @@ function renderDetail(status) {
   track.setAttribute("aria-valuetext", processingNow ? processing : `${Number(status.percent).toFixed(1)}%`);
   if (!processingNow) track.setAttribute("aria-valuenow", Number(status.percent));
   caption.append(textSpan(phaseLabel(status)), textSpan(processingNow ? processing : status.state === "paused"
-    ? `${Number(status.percent).toFixed(1)}% saved` : `${Number(status.percent).toFixed(1)}% · ETA ${status.eta}`));
+    ? `${Number(status.percent).toFixed(1)}% saved` : `${Number(status.percent).toFixed(1)}% · ETA ${!status.bytes_total && status.files_processed < status.files_total ? "unavailable" : status.eta}`));
 
   detail.append(heading, track, caption, statistics(status));
+  if (status.state === "running" && status.concurrent_processing) {
+    detail.append(textBlock("Source work and saved message processing are running together.", "processing-explanation"));
+  }
   if (processingMode(status)) {
     const explanation = document.createElement("p");
     explanation.className = "processing-explanation";
     explanation.textContent = "Processing messages and MIME parts already saved in this archive. Each email stays in the count until all its tasks finish. The count can stay level while earlier processing stages finish.";
-    if (phaseLabel(status) === "Processing saved mail" && status.state === "running" && status.source_roots.length) {
+    if (phaseLabel(status) === "Processing saved mail" && status.state === "running" && status.source_roots.length
+        && !status.saved_workers?.length) {
       explanation.textContent += " Source downloading/importing resumes after this saved work finishes.";
     }
     detail.append(explanation);
   }
+  if (status.source_roots.some(root => root.startsWith("imap://"))) {
+    detail.append(section("Downloaded message coverage", messageCoverage(status)));
+  }
   if (status.failure_detail) detail.append(section("Failure", textBlock(status.failure_detail, "failure")));
   detail.append(section("Workers", workerTable(status.workers)));
+  if (status.saved_workers?.length) detail.append(section("Saved-mail processing workers", workerTable(status.saved_workers)));
   if (status.source_roots.length) {
     const sources = document.createElement("ul");
     sources.className = "source-list";
@@ -284,10 +362,10 @@ function statistics(status) {
     ["Average processing rate", `${(Number(status.processing_jobs_completed) / Math.max(Number(status.elapsed_seconds), 1)).toFixed(2)} tasks/s`],
     ["Elapsed", formatDuration(status.elapsed_seconds)],
   ] : [
-    [imap ? "Source messages downloaded" : "Source messages imported", integer(status.processed_messages)],
+    [imap ? "Source messages downloaded" : "Source messages imported", imap ? status.download_coverage ? integer(status.download_coverage.messages) : "Unavailable" : integer(status.processed_messages)],
     [imap ? "Download partitions finished" : "Source files finished", `${integer(status.files_processed)} / ${integer(status.files_total)}`],
     ["Elapsed", formatDuration(status.elapsed_seconds)],
-    [imap ? "Average download rate" : "Average import rate", `${Number(status.message_rate).toFixed(2)} messages/s`],
+    [imap ? "Average download rate" : "Average import rate", imap && !status.download_coverage ? "Unavailable" : `${Number(imap && status.download_coverage ? status.download_coverage.messages / Math.max(status.elapsed_seconds, 1) : status.message_rate).toFixed(2)} messages/s`],
     ["Archived", integer(status.counts.archived)],
     ["Previously seen", integer(status.counts.duplicates)],
     ["Autosaved", integer(status.counts.autosaves)],
@@ -308,6 +386,41 @@ function statistics(status) {
     grid.append(cell);
   }
   return grid;
+}
+
+function messageCoverage(status) {
+  const coverage = document.createElement("div");
+  coverage.className = "message-coverage";
+  const measured = status.download_coverage;
+  if (!measured) { coverage.append(textBlock("Download coverage unavailable for this older run.")); return coverage; }
+  const date = value => value ? new Date(value).toISOString().slice(0, 10) : "Unavailable";
+  coverage.append(textBlock(`This run: ${integer(measured.messages)} messages · Earliest: ${date(measured.earliest_date)} · Latest: ${date(measured.latest_date)}`));
+  coverage.append(textBlock("Dates reported by the mail server (UTC). Counts cover downloads in this run; attached emails and later processing are excluded."));
+  const table = document.createElement("table");
+  table.className = "coverage-table";
+  const head = document.createElement("thead");
+  const headings = document.createElement("tr");
+  for (const label of ["Year", "Messages"]) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = label;
+    headings.append(cell);
+  }
+  head.append(headings);
+  const body = document.createElement("tbody");
+  for (const entry of [...measured.years].sort((a, b) => a.year - b.year)) {
+    const row = document.createElement("tr");
+    for (const value of [String(entry.year), integer(entry.messages)]) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  table.append(head, body);
+  coverage.append(table);
+  if (!measured.years.length) coverage.append(textBlock("No dated messages downloaded in this run yet."));
+  return coverage;
 }
 
 function workerTable(workers) {
@@ -344,7 +457,10 @@ function workerTable(workers) {
     body.append(row);
   }
   table.append(head, body);
-  return table;
+  const scroll = document.createElement("div");
+  scroll.className = "worker-table-scroll";
+  scroll.append(table);
+  return scroll;
 }
 
 function section(title, content) {
@@ -387,6 +503,7 @@ function formatBytes(value) {
 }
 
 function showError(message) {
+  historyError = false;
   const error = byId("error");
   error.textContent = message;
   error.hidden = false;

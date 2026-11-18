@@ -6,6 +6,136 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a93 — share desktop power and network recovery
+
+- Route Windows and macOS sleep, wake and network events through common handlers.
+  Native adapters supply only OS subscriptions, path queries and cleanup.
+- Keep Windows imports waiting through outages and captive portal sign-in with
+  the same 150-second retries and immediate event-triggered retests as macOS.
+  Explicit Suspend and Quit remain authoritative.
+
+## 1.0.0a92 — wait for IMAP connectivity and captive portal sign-in
+
+- Keep active macOS imports waiting through DNS failures and blocked connections.
+  Retest every 150 seconds and resume the existing UID plan when connectivity returns.
+- Show a network sign-in hint. Wake, network changes, Suspend and Quit can interrupt
+  the reconnect wait.
+
+## 1.0.0a91 — recover after macOS sleep and network changes
+
+- Refresh Ingests after wake or a network configuration change. Clear recovered
+  status errors after a successful read.
+- Replace IMAP sessions that span sleep and wake pending reconnects when the
+  network configuration changes. Keep explicit Suspend and Resume controls.
+- Wake the ClamAV startup reply reader when startup is cancelled.
+
+## 1.0.0a90 — open IMAP credential recovery from the error
+
+- Add **Update IMAP Credentials** alongside **Collapse messages** and
+  **Dismiss messages** in the IMAP authentication error popup.
+- Open the Ingests password dialog with the rejected account selected.
+
+## 1.0.0a89 — accept complete IMAP literals with inaccurate size metadata
+
+- Continue importing when RFC822.SIZE disagrees with a complete BODY[] literal.
+  Log the discrepancy and verify the literal's UID and declared byte count.
+
+## 1.0.0a88 — diagnose IMAP body-size failures
+
+- Report the failing UID, RFC822.SIZE, declared literal length and received byte
+  count in ingest failures when RFC822.SIZE is missing or disagrees with the
+  received byte count.
+
+## 1.0.0a87 — compact Ingests history and year coverage
+
+- Show the producing version in parentheses after the run timestamp.
+- Size the Year and Messages columns to their contents.
+
+## 1.0.0a86 — count completed IMAP transfers before scanning
+
+- Include received IMAP bodies in the run's download coverage even when scanning
+  or archiving is still pending. Show the source count as unavailable for older
+  IMAP runs without recorded download coverage.
+
+## 1.0.0a85 — separate source counts from saved attachment processing
+
+- Count promoted attached emails as archival work. Source message totals and
+  dates describe the messages acquired from the selected sources in this run.
+
+## 1.0.0a84 — preserve damaged working objects and correct mixed-source status
+
+- Retain corrupt working files for diagnosis, including after a failed import.
+- Refresh the saved-message count at the last source checkpoint and show ETA
+  unavailable while a source of unknown size remains unfinished.
+
+## 1.0.0a83 — reuse active inputs and coalesce saved-work status queries
+
+- Verify and reuse a duplicate's existing input file while another worker reads it.
+- Coalesce backlog counts during combined work, retain the exact final count, and
+  suppress live overlap messages for stale runs.
+
+## 1.0.0a82 — preserve recovery and stop boundaries during overlap
+
+- Complete previously filed ingest roots, keep duplicate metadata jobs in the
+  shared scheduler, and stop new downloads immediately on an explicit processor stop.
+- Retain returned processor results through cancellation and show overlap only
+  while both groups have active work.
+
+## 1.0.0a81 — overlap downloads and saved-message processing
+
+- Download new mail while processing saved messages through separate worker groups.
+  Canonical writes still have one owner, and suspension retains resumable checkpoints.
+  Unpublished ingest recovery and explicit deferred/limited processing keep their safeguards.
+
+## 1.0.0a80 — deliver GUI replies without redundant native waits
+
+- Deliver API replies asynchronously to Cocoa/WebView2 instead of waiting for a
+  second native acknowledgement. Ingests reports a lost status/control reply
+  without repeating Suspend/Resume or marking the import failed.
+
+## 1.0.0a79 — bind scratch evidence to its import
+
+- Require fresh status evidence returned by the current import worker. A missing
+  status write cannot reuse a previous successful run in the evaluation summary.
+
+## 1.0.0a78 — require acquisition progress in scratch evaluation
+
+- Report metadata-only completion as an unsuccessful download evaluation.
+- Verify recovery after a successful body without fetching that body twice.
+
+## 1.0.0a77 — safe transport recovery
+
+- Reconnect interrupted IMAP sessions with bounded, cancellable backoff and
+  epoch validation. Retain delivered UID state and pause safely if recovery fails.
+- Count actual downloaded source messages separately from extracted attachments
+  and saved processing, using IMAP INTERNALDATE for date/year coverage.
+- Contain scratch workers on owner death and bound integrity verification.
+
+## 1.0.0a76 — IMAP run coverage
+
+- Show run-specific message dates and yearly counts. Unknown-size downloads
+  report ETA unavailable instead of claiming finalization. Keep narrow worker
+  tables scrollable within their section.
+
+## 1.0.0a75 — accurate search progress
+
+- Leave the cleared results pane blank while the status line says **Searching…**.
+  Remove the premature **No messages.** placeholder; completed empty searches
+  still report **0 messages** in the status line.
+
+## 1.0.0a74 — stable worker columns
+
+- Keep Thread, Operation, Download / import progress and Processing tasks finished
+  at fixed widths while worker activity changes. Current task / source uses the
+  remaining width and expands with the window; long source names wrap.
+
+## 1.0.0a73 — record the version behind each import result
+
+- Save the producer's launch application version with every ingest snapshot and
+  display it in the history entry and run details, including failures.
+- Keep saved versions stable after an application update. Older history without
+  recorded version evidence displays **Version unavailable** and remains unchanged.
+
 ## 1.0.0a72 — dependency security updates
 
 - Update the PST downloader's ZIP reader to the patched 9.x line and reject

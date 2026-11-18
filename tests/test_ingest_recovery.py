@@ -683,6 +683,31 @@ def test_failed_archived_extraction_does_not_block_new_mail(tmp_path: Path) -> N
     assert not verify_archive(archive)
 
 
+def test_source_resume_completes_already_filed_ingest_root(tmp_path: Path) -> None:
+    """PROCESSING: a different source cannot strand a filed root's durable content handoff."""
+    raw = HEADER + b"\r\nfiledrootrecoverytoken\r\n"
+    archive, original = ingest(tmp_path, raw, "--defer-content", "--workers", "1")
+    with connect(archive) as database, database:
+        root = database.execute("SELECT job_id FROM jobs WHERE json_extract(item_json,'$.pipeline')='ingest'").fetchone()[0]
+        # Filing and its handoff were committed; the root never acknowledged
+        # completion, so its child must wait for the root on restart.
+        assert database.execute("UPDATE jobs SET status='pending' WHERE parent_job_id=?", (root,)).rowcount == 1
+        assert database.execute("SELECT count(*) FROM message_state WHERE parsed_json IS NOT NULL").fetchone() == (1,)
+        database.execute("UPDATE jobs SET status='running' WHERE job_id=?", (root,))
+    incoming = tmp_path / "different.eml"
+    fresh = HEADER.replace(b"<parent@example.test>", b"<different@example.test>") + b"\r\nother source\r\n"
+    incoming.write_bytes(fresh)
+    cli(archive, "ingest", "--no-scan", "--workers", "1", str(incoming))
+    with connect(archive) as database:
+        assert database.execute("SELECT status FROM jobs WHERE job_id=?", (root,)).fetchone() == ("completed",)
+        assert database.execute("SELECT count(*) FROM jobs WHERE status!='completed'").fetchone() == (0,)
+    with sqlite3.connect(archive / "search.sqlite3") as search:
+        assert search.execute("SELECT count(*) FROM message_fts WHERE message_fts MATCH 'filedrootrecoverytoken'").fetchone() == (1,)
+    assert read_message_bytes(archive, 1) == original.read_bytes() == raw
+    assert read_message_bytes(archive, 2) == incoming.read_bytes() == fresh
+    assert not verify_archive(archive)
+
+
 def test_healthy_archived_content_recovers_past_an_unrelated_failure(tmp_path: Path) -> None:
     """SEARCH: failed extraction and failed pending ingest must not starve healthy archived mail."""
     oversized = HEADER + b"Content-Type: text/plain\r\n\r\n" + b"x" * 128

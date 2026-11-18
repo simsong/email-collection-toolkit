@@ -93,6 +93,14 @@ the stated requirement and report any remaining gap.
 
 ## Tests and validation
 
+Run automated code validation only when code is modified as part of the task,
+or when the user explicitly requests that validation. Design, planning,
+source-code examination, reports, and documentation/instruction-only edits do
+not require Python or browser tests, lint, type checks, builds, or test services.
+For those tasks, review the relevant sources, text and diff; do not run tests
+merely to establish a baseline or report completion. Unrelated concurrent code
+changes do not create a validation requirement for this task.
+
 After any change to source code, run `make ruff` against the current final
 source. Ruff must pass with zero diagnostics; if it fails or cannot run, report
 that explicitly rather than claiming a clean handoff. Do not suppress rules or ignore
@@ -109,9 +117,9 @@ idempotence. Use EICAR with the real embedded libclamav engine and configured
 definitions for the scanner integration test; use recorded typed scan results only for
 unit-level routing tests.
 
-Before reporting a phase complete, review the changed implementation and tests
-against every relevant requirement, run the appropriate Makefile target, and
-distinguish validated behavior from untested assumptions.
+Before reporting a code-change phase complete, review the changed implementation
+and tests against every relevant requirement, run the appropriate Makefile
+target, and distinguish validated behavior from untested assumptions.
 
 ## Git and external actions
 
@@ -184,8 +192,8 @@ Follow the shared workflow with these mail-archiver requirements:
 
 ## Validation and cleanup
 
-Use Makefile targets for Ruff and Pylint linting, then ty and Pyright type
-analysis, then pytest. Keep these stages ordered in the aggregate check target,
+When code is modified, use Makefile targets for Ruff and Pylint linting, then ty
+and Pyright type analysis, then pytest. Keep these stages ordered in the aggregate check target,
 even under parallel make. Treat all diagnostics as failures; fix the underlying
 logic or precise types rather than broadly excluding files, disabling checks,
 or adding blanket ignores. Add focused third-party stubs only where needed.

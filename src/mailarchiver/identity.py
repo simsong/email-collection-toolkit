@@ -2,10 +2,10 @@
 
 """Public application identity and read-only discovery of existing settings.
 
-Purpose: Define public application names and per-user data locations.
+Purpose: Define public application names, launch version and per-user data locations.
 
 How it works:
-Centralize current and legacy identity conventions used to find settings outside archives.
+Capture the installed version once and centralize names used to find settings outside archives.
 
 Fundamental dependents:
 
@@ -13,9 +13,11 @@ Fundamental dependents:
 - ``clamav_definitions``: antivirus updates use the same per-user identity boundary.
 """
 
+from importlib.metadata import version
 from pathlib import Path
 
 APPLICATION_NAME = "Email Collection Toolkit"
+APPLICATION_VERSION = version("mailarchiver")
 DEVELOPMENT_BUNDLE_IDENTIFIER = "net.simson.mailarchiver.development"
 # Preserve access to settings created under the former two-word product name.
 LEGACY_DIRECTORY_NAME = " ".join(("Mail", "Archiver"))

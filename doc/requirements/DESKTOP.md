@@ -59,13 +59,22 @@ History status circles are at least 22 pixels, with a check for running/complete
 an X for failed/disk-full/stale, and a pause symbol for interrupted runs, alongside
 text labels. Accepted GUI imports show startup immediately while archive
 preparation precedes the first saved run snapshot; old failures retain their state.
+Each saved run must retain the application version captured at producer launch,
+including a later failure. Show it in parentheses after the timestamp in the
+history entry and selected run details.
+An editable reinstall or a newer history viewer must not relabel a saved run.
+Older snapshots without a version display **(version unavailable)** without rewriting them.
 Explain that finished processing jobs are work for messages or MIME parts,
 potentially several per email, rather than newly imported message counts.
 Label saved work **Processing saved mail**. During processing stages, including
 intervals between jobs, show finished tasks and average tasks/second instead of
 zero source-message/file/rate cards. History summaries use processing counts too.
 The worker table separates operation, current task/source, download/import
-progress and that worker's finished processing tasks. Preserve each worker's
+progress and that worker's finished processing tasks. Keep Thread, Operation,
+download/import progress and finished-task columns at constant widths across
+activity updates and window resizing. Current task/source takes the remaining
+width and wraps long paths. Narrow windows may scroll the table horizontally.
+Preserve each worker's
 count across tasks and idle periods; never copy the global total into its row.
 Old snapshots without worker totals display unavailable rather than invented
 counts. Describe IMAP source containers as download partitions, not files.
@@ -695,7 +704,8 @@ head on any non-main branch must run DMG/MSIX/signature validation regardless
 of that filter, without publishing. Signing must remove temporary private-key
 material even if writing the PFX fails partway through. Forked PRs currently
 need a separate CI policy. Ordinary checks and website jobs use macOS with
-checksum-verified Zola; candidate validation additionally runs Windows x64.
+checksum-verified Zola; a focused Windows lifecycle job verifies native callback
+registration and dispatch. Candidate validation additionally runs Windows x64.
 Release publication requires a version-matching `v*` tag on main.
 The required continuous-integration gate exercises the archive lifecycle and
 complete HTML interface in headless Chromium with disposable fixtures. Native
@@ -879,9 +889,37 @@ existing recovery/checkpoint contract, rather than claiming completed cleanup.
 Native JavaScript replies must settle on completion, execution error, window Close
 or a failure deadline. A closed webview must not leave its caller blocked forever;
 synchronous native evaluations must not wait on their own UI thread.
+Python-to-page API replies must not wait synchronously for a redundant native
+acknowledgement. Ingests status and Suspend/Resume requests have a 15-second
+reply deadline. A missing reply reports an unconfirmed outcome, releases refresh
+ownership and permits a fresh status read; it must not replay a command, classify
+the import as failed, or enable password editing while login validation is pending.
+On macOS and Windows, wake and network configuration changes refresh Ingests without a focus
+change. A successful status refresh clears its own earlier error and preserves
+command errors.
+On macOS and Windows, an IMAP connection blocked by network availability or captive portal sign-in
+shows a waiting status while it retests every 150 seconds. Suspend remains available.
 Collection-only completion, including a drag export for an unselected row, must
 notify state observers even when it changes no visible DOM.
 Large search batches must append without depending on JavaScript's function
 argument limit. Suggestion/preview wait expiry returns a typed error with current
 pending state; it is not a successful polling tick, and explicit retries may read
 later actual completion.
+
+## IMAP run coverage
+
+Concurrent acquisition and saved-content work shall show separate worker groups,
+their actual operations and an explicit overlap explanation. Saved-work events must
+not erase source activity or change unknown-size acquisition ETA into finalizing.
+Do not show live overlap for a stale run. Coalesce saved-backlog queries during
+source activity while sampling the exact remaining count at shutdown.
+
+Unknown-byte source inventory reports ETA unavailable while partitions remain;
+finishing known byte input may still report finalizing before its checkpoint.
+Ingests shows run-specific message count, earliest/latest IMAP INTERNALDATE values
+in UTC and year counts before the workers table. The Year and Messages columns
+size to their contents. The range uses source IMAP INTERNALDATE, not header dates or download times.
+Separate acquisition counters exclude attached-message extraction and saved processing.
+Count complete IMAP bodies when received, including bodies awaiting scanning or
+publication. Historical missing counts or dates show unavailable; no dated messages shows an explicit
+empty state. `make test-imap-progress` validates the estimator and actual browser.

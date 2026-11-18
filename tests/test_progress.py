@@ -157,7 +157,9 @@ def test_unknown_byte_inventory_uses_completed_containers_for_percentage() -> No
         inventory_complete=True,
     )
 
-    assert overall_progress(state, now=20).percent == 25
+    result = overall_progress(state, now=20)
+    assert result.percent == 25
+    assert result.eta == "unavailable"
 
 
 def test_worker_file_progress_does_not_regress_during_post_ingest_hashing() -> None:
@@ -360,6 +362,7 @@ def test_cancelled_ingest_scanner_startup_reaps_native_worker(monkeypatch: pytes
             start_ingest_scanner(cancel, 2)
         assert cancelled and all(not worker.is_alive() for worker in cancelled)
         assert all(scanner.process is None and scanner.runtime is None for scanner in scanners)
+        assert all(scanner.startup_reader is None for scanner in scanners)
     finally:
         for scanner in scanners:
             scanner.__exit__()
@@ -642,6 +645,47 @@ def test_saved_message_backlog_deduplicates_parts_and_tracks_unfinished_work(tmp
         reporter.finish("completed")  # Completion forces a final sample, without waiting another second.
         assert read_ingest_history(archive).statuses[0].saved_messages_remaining == 0
         assert database.execute("SELECT count(*) FROM jobs WHERE status='pending'").fetchone()[0] == 1
+
+
+def test_concurrent_source_heartbeats_coalesce_real_backlog_queries(tmp_path: Path) -> None:
+    """DESKTOP: a burst of source updates must not repeatedly scan the saved queue."""
+    archive = tmp_path / "archive"
+    source = tmp_path / "message.eml"
+    source.write_bytes(b"Subject: fixture\n\nbody\n")
+    with connect(archive, create=True) as database:
+        message_id = submit(database, archive, source, "fixture")
+        payload, = database.execute("SELECT item_json FROM jobs").fetchone()
+        with database:
+            database.execute("INSERT INTO message_state(message_id,root_item_json,catalog_message_pk) VALUES(?,?,1)",
+                             (message_id, payload))
+            database.executemany("INSERT INTO jobs(identity,item_json,registry_hash,status) VALUES(?,?,'fixture','pending')",
+                                 ((f"queued-part-{number}", payload) for number in range(2048)))
+        queries: list[str] = []
+        def trace(statement: str) -> None:
+            if "count(DISTINCT state.catalog_message_pk)" in statement:
+                queries.append(statement)
+        database.set_trace_callback(trace)
+        progress = ProgressReporter(worker_count=1, terminal=False)
+        progress.track_saved_messages(lambda: saved_messages_remaining(database))
+        progress.begin_concurrent_processing()
+        progress._sample_saved_count(100)
+        for number in range(1, 101):
+            progress.state.processed = number
+            progress._sample_saved_count(100 + number / 1000)
+        assert len(queries) == 1 and progress.state.saved_messages_remaining == 1
+        progress._sample_saved_count(101.1)
+        progress._sample_saved_count(102.2)  # No queue-relevant change since the sample.
+        assert len(queries) == 2
+        with database:
+            database.execute("UPDATE jobs SET status='completed'")
+        progress.state.source_files_total = 1
+        progress.state.files_processed = 1
+        progress._sample_saved_count(101.2)  # Last source finishes inside the throttle interval.
+        assert len(queries) == 3 and progress.state.saved_messages_remaining == 0
+        progress._sample_saved_count(102.3)
+        assert len(queries) == 3
+        progress._sample_saved_count(102.3, force=True)
+        assert len(queries) == 4 and progress.state.saved_messages_remaining == 0
 
 
 def test_progress_status_file_preserves_final_run_statistics(tmp_path: Path) -> None:
