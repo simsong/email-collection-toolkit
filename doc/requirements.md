@@ -24,7 +24,7 @@ does not establish that every platform or release gate has passed.
   authentication error offers Update IMAP Credentials. Account acquisition uses
   a saved per-account limit (default 8, range 1–15) and cancellable capacity backoff while retaining the
   full processing worker pool. Interrupted sessions retry with fresh TLS and
-  epoch checks, retaining delivered UID state. macOS connectivity failures wait
+  epoch checks, retaining delivered UID state. Desktop connectivity failures wait
   for network sign-in and retest every 150 seconds until recovery or cancellation.
   CLI recovery exhaustion pauses safely. Protocol failures and private diagnostics
   retain their distinct handling, including malformed greetings and full CLI login
@@ -51,7 +51,7 @@ does not establish that every platform or release gate has passed.
   Failure deadlines remain explicit; readiness must be observed.
   Native API replies use one-way delivery; lost Ingests replies display an unknown
   outcome without retrying a command or marking the import failed.
-  macOS wake refreshes Ingests, and route changes wake pending IMAP reconnects.
+  Desktop wake refreshes Ingests, and route changes wake pending IMAP reconnects.
   Unfinished unknown-size acquisition reports ETA unavailable, including mixed
   local and remote runs. Source counts and dates exclude promoted attachments.
   IMAP run details show

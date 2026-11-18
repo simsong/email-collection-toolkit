@@ -24,7 +24,7 @@ than a second change log. Platform acceptance is stated alongside its evidence.
   Replacement passwords are tested before saving. Account acquisition uses
   a saved per-account limit (default 8, range 1–15) and cancellable capacity backoff while retaining the
   full processing worker pool. Interrupted sessions retry with fresh TLS and
-  epoch checks, retaining delivered UID state. macOS transport recovery waits
+  epoch checks, retaining delivered UID state. Desktop transport recovery waits
   150 seconds between connection attempts, waking early for route changes or
   cancellation. CLI recovery exhaustion pauses safely. Protocol failures and private diagnostics
   retain their distinct handling, including malformed greetings and full CLI login
@@ -52,8 +52,8 @@ than a second change log. Platform acceptance is stated alongside its evidence.
   Failure deadlines remain explicit; readiness must be observed.
   The pinned SDK's API replies are posted to the native view without a second
   synchronous acknowledgement; Ingests bounds its own reply waits.
-  Workspace sleep/wake and SystemConfiguration changes feed the desktop status
-  event and active IMAP recovery without starting a new import.
+  A shared lifecycle controller handles macOS and Windows sleep/wake and network
+  events, feeding desktop status and active IMAP recovery without starting a new import.
   The estimator tracks unfinished unknown-size containers separately from known
   source bytes. Promoted attachments increment archival counts without affecting
   source totals or dates. IMAP run details show

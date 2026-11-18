@@ -28,7 +28,7 @@ class ImapTransport:
         self._sleeping.clear()
         self.changed.notify()
 
-    def network_changed(self, path_available: bool) -> None:
+    def network_changed(self, path_available: bool | None) -> None:
         self.path_available = path_available
         self.changed.notify()
 

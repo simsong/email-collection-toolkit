@@ -20,7 +20,7 @@ import webview
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.gui_app import (
     GUI_DIRECTORY, PyWebViewApplication, configure_macos_application,
-    install_macos_document_events, macos_option_pressed,
+    install_desktop_events, macos_option_pressed,
 )
 from mailarchiver.loopback import LoopbackAssetServer
 from mailarchiver.native_events import ModalObserver, wait_native_state
@@ -61,7 +61,7 @@ def main() -> None:
     configure_macos_application()
     server = LoopbackAssetServer(GUI_DIRECTORY)
     application = PyWebViewApplication(controller, server)
-    install_macos_document_events(application)
+    install_desktop_events(application)
     application.create_about_window(hidden=True)
     about = webview.windows[0]
     failures: list[str] = []

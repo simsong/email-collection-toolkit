@@ -80,6 +80,14 @@ def plugin_import_arguments() -> list[str]:
     return [argument for module in modules for argument in ("--hidden-import", module)]
 
 
+def freezer_import_arguments() -> list[str]:
+    """Share production Python collection flags with frozen component checks."""
+    return ["--copy-metadata", "mailarchiver", "--collect-data", "mailarchiver",
+            "--collect-data", "webview", "--hidden-import", "webview.platforms.cocoa",
+            "--hidden-import", "SystemConfiguration", *plugin_import_arguments(),
+            "--exclude-module", "pypff", "--hidden-import", "mailarchiver.processing.builtin"]
+
+
 class ImageEntry(BaseModel):
     path: str
     kind: Literal["file", "symlink"]
@@ -546,12 +554,7 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
                    "--target-arch", platform.machine(), "--codesign-identity", signing_identity,
                    "--icon", str(app_icon), "--distpath", str(bundle_output),
                    "--workpath", str(work / "work"), "--specpath", str(work),
-                   "--copy-metadata", "mailarchiver", "--collect-data", "mailarchiver",
-                   "--collect-data", "webview", "--hidden-import", "webview.platforms.cocoa",
-                   "--hidden-import", "SystemConfiguration",
-                   *plugin_import_arguments(),
-                   "--exclude-module", "pypff",
-                   "--hidden-import", "mailarchiver.processing.builtin",
+                   *freezer_import_arguments(),
                    "--add-data", f"{plugins}:mailarchiver/plugins",
                    "--add-data", f"{ROOT / 'gui'}:gui",
                    "--add-data", f"{build_info}:mailarchiver",

@@ -114,7 +114,7 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
     import webview  # pylint: disable=import-outside-toplevel
     from webview.menu import MenuAction  # pylint: disable=import-outside-toplevel
     from .application import ApplicationController, ApplicationPreferencesStore  # pylint: disable=import-outside-toplevel
-    from .gui_app import AboutStatus, GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events  # pylint: disable=import-outside-toplevel
+    from .gui_app import AboutStatus, GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_desktop_events  # pylint: disable=import-outside-toplevel
     from .loopback import LoopbackAssetServer  # pylint: disable=import-outside-toplevel
 
     # Sparkle also has native preferences. Keep packaged GUI checks in a unique
@@ -128,7 +128,7 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
     controller = ApplicationController(ApplicationPreferencesStore(directory / "preferences.json"))
     controller.configure_updates("preview", False)
     application = PyWebViewApplication(controller, LoopbackAssetServer(GUI_DIRECTORY))
-    install_macos_document_events(application)
+    install_desktop_events(application)
     application.create_about_window()
     api = application.open_document(archive)
     assert api.document is not None

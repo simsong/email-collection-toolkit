@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a93 — share desktop power and network recovery
+
+- Route Windows and macOS sleep, wake and network events through common handlers.
+  Native adapters supply only OS subscriptions, path queries and cleanup.
+- Keep Windows imports waiting through outages and captive portal sign-in with
+  the same 150-second retries and immediate event-triggered retests as macOS.
+  Explicit Suspend and Quit remain authoritative.
+
 ## 1.0.0a92 — wait for IMAP connectivity and captive portal sign-in
 
 - Keep active macOS imports waiting through DNS failures and blocked connections.

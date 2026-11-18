@@ -142,7 +142,7 @@ terminal process-group interrupts shall not abort scanner children mid-message.
 The standalone IMAP CLI acknowledges Ctrl-C immediately, before waiting for active
 downloads to stop and their checkpoint to finish.
 IMAP timeouts and lost connections, including after laptop sleep, retain committed
-per-message progress and accepted settings. macOS imports stay running while
+per-message progress and accepted settings. macOS and Windows imports stay running while
 connectivity is unavailable and retry every 150 seconds, including DNS unknown-host
 replies from captive portals. Show a waiting/network-sign-in message and allow
 Suspend or Quit to interrupt that wait immediately.
@@ -500,9 +500,10 @@ Each worker retains temporary SQL sets of prior and already-delivered UIDs, so
 reconnecting cannot replay an object already handed to publication. Partial
 literals never reach publication. Initial capacity-refusal backoff retains its
 existing policy. CLI progress exposes reconnect deadlines while counts are still.
-On macOS, sleep expires active IMAP sessions and workers defer new connections
-until wake or cancellation. A default route or DNS configuration change can
-advance a pending transport retry. macOS connection attempts continue at
+On macOS and Windows, sleep expires active IMAP sessions and workers defer new
+connections until wake or cancellation. A macOS route/DNS configuration change
+or Windows interface address/availability change can advance a pending transport
+retry. Desktop connection attempts continue at
 150-second intervals through prolonged outages and captive portal sign-in.
 These events do not resume a stopped import.
 `make test-imap-recovery` exercises transient and persistent faults, epoch change,

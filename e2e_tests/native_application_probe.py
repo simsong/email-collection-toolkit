@@ -21,7 +21,7 @@ import webview
 
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
 from mailarchiver.clamav_definitions import UPDATE_ENV, UPDATER_ENV
-from mailarchiver.gui_app import APPLICATION_VERSION, GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events, macos_import_picker, macos_owner_rules
+from mailarchiver.gui_app import APPLICATION_VERSION, GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_desktop_events, macos_import_picker, macos_owner_rules
 from mailarchiver.desktop_platform import TITLEBAR_VERSION_ID
 from mailarchiver.loopback import LoopbackAssetServer
 from mailarchiver.identity import APPLICATION_NAME
@@ -338,7 +338,7 @@ def main() -> None:
     server = LoopbackAssetServer(GUI_DIRECTORY)
     controller = ApplicationController(ApplicationPreferencesStore(Path(os.environ[PROBE_PREFERENCES_ENV])))
     application = PyWebViewApplication(controller, server)
-    install_macos_document_events(application)
+    install_desktop_events(application)
     application.create_about_window()
     about = webview.windows[0]
     failures: list[str] = []

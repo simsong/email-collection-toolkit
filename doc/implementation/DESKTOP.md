@@ -1199,13 +1199,35 @@ errors and 15-second failure deadline. One-way replies do not create a waiting
 Python future; the page's Promise resolution establishes actual delivery. Closed
 windows discard queued replies, including a Close that races native dispatch.
 Ingests removes expired reply callbacks, and late delivery skips a removed callback.
-The macOS lifecycle observer listens on the workspace notification center for
-sleep and wake. A SystemConfiguration run-loop source observes default IPv4,
-IPv6 and DNS changes. Wake and network events post status changes to pywebview's
-native window list without taking the application lock on Cocoa's main thread.
-Ingests coalesces the read with any in-flight refresh
-and clears its history error after a successful reply. Shutdown releases both
-subscriptions.
+`DesktopLifecycle` owns the common sleep, wake, network and status handlers and
+one `ImapTransport` for each application on macOS and Windows. Native adapters
+pass OS path-query lambdas to these handlers; interface availability remains a
+hint and real IMAP attempts determine connectivity, including captive portals.
+The macOS adapter subscribes to workspace sleep/wake and a SystemConfiguration
+run-loop source for IPv4, IPv6 and DNS. Windows uses the native
+[`PowerRegisterSuspendResumeNotification`](https://learn.microsoft.com/en-us/windows/win32/api/powerbase/nf-powerbase-powerregistersuspendresumenotification)
+callback API, including automatic unattended resume, and reuses pywebview's
+pythonnet runtime for .NET `NetworkChange` address/availability subscriptions.
+Neither adapter polls or changes the machine's power/network state.
+Wake and network events post status changes through the native window list,
+without taking the application lock on Cocoa's main thread. Callback exceptions
+are contained; close serializes with callbacks, rejects queued OS queries and
+removes observers, run-loop sources, native power registration and static .NET
+delegates. An unavailable native subscription logs a warning while the common timed retry policy remains.
+Ingests coalesces reads with any in-flight refresh and clears its history error
+after a successful reply. Explicit Suspend and Quit stay authoritative.
+`make test-desktop-lifecycle` exercises common cancellation/disposal and native
+Cocoa notifications. `make test-frozen-lifecycle` builds a real executable with
+the production freezer import flags and exercises native installation, synthetic
+sleep/wake and cleanup outside the source checkout. The macOS `python-browser`
+CI job runs this frozen component check after installing dependencies.
+Adapter imports stay local
+to their platform branches and statically visible to PyInstaller.
+`make test-windows-lifecycle` requires Windows and exercises
+actual native power registration, registered callback dispatch for suspend and
+both resume types, .NET network delegates against real interface queries, and
+cleanup. It runs in branch CI on Windows; synthetic callbacks do not establish reception of physical sleep,
+wake or interface changes, or installed MSIX acceptance.
 Ingests bounds status/control reply waits at 15 seconds and reports an unconfirmed
 outcome before reading fresh status. Commands are never automatically repeated;
 password validation retains its existing lifetime and cancellation safeguards.

@@ -1120,6 +1120,27 @@ test-imap-progress: ruff
 imap-acceptance:
 	uv run --locked python -m scripts.imap_acceptance $(IMAP_ACCEPTANCE_ARGS)
 
+# Native platform subscriptions use registered synthetic callbacks only.
+LIFECYCLE_SOURCES = src/mailarchiver/desktop_lifecycle.py src/mailarchiver/macos_lifecycle.py \
+	src/mailarchiver/windows_lifecycle.py src/mailarchiver/imap_transport.py \
+	tests/test_desktop_lifecycle.py tests/test_windows_lifecycle.py tests/test_native_javascript.py
+.PHONY: test-frozen-lifecycle
+test-frozen-lifecycle: ruff
+	PYTHONPATH="$(CURDIR):$(CURDIR)/scripts" uv run --locked pylint scripts/check_frozen_lifecycle.py scripts/build_macos.py
+	uv run --locked ty check scripts/check_frozen_lifecycle.py scripts/build_macos.py --error-on-warning
+	uv run --locked pyright scripts/check_frozen_lifecycle.py scripts/build_macos.py --warnings
+	uv run --locked --group packaging python scripts/check_frozen_lifecycle.py
+
+.PHONY: test-desktop-lifecycle test-windows-lifecycle
+test-desktop-lifecycle: ruff
+	PYTHONPATH="$(CURDIR)" uv run --locked pylint $(LIFECYCLE_SOURCES)
+	uv run --locked ty check $(LIFECYCLE_SOURCES) --error-on-warning
+	uv run --locked pyright $(LIFECYCLE_SOURCES) --warnings
+	uv run --locked pytest -q tests/test_desktop_lifecycle.py tests/test_windows_lifecycle.py tests/test_native_javascript.py $(PYTEST_ARGS)
+
+test-windows-lifecycle: test-desktop-lifecycle
+	uv run --locked python -c "import sys; assert sys.platform == 'win32', 'Requires native Windows execution'"
+
 # Real TLS transient faults, persistent pause fallback and source-byte validation.
 .PHONY: test-imap-recovery
 test-imap-recovery: ruff

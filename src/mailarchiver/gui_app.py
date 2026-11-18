@@ -53,7 +53,7 @@ from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argume
 from .imap_protocol import ImapAuthenticationError, ImapPaused, ImapSession
 from .imap_credentials import save_password
 from .imap_models import ImapAccount
-from .macos_lifecycle import MacOSLifecycle
+from .desktop_lifecycle import DesktopLifecycle
 from .search_completion import SearchSuggestions
 from .processor_graph import ProcessorGraphStatus, processor_graph
 from .updates import UpdateChannel, UpdateService, UpdateStatus, default_channel
@@ -1772,7 +1772,7 @@ class PyWebViewApplication:
         self._notices: list[ApplicationNotice] = []
         self._pending_notices: SimpleQueue[ApplicationNotice] = SimpleQueue()
         self._connectivity: ConnectivityMonitor | None = None
-        self._lifecycle: MacOSLifecycle | None = None
+        self._lifecycle: DesktopLifecycle | None = None
         self._status_observers: dict[str, PathObserver] = {}
         self._menu_observer: Any = None
         self._lock = RLock()
@@ -3499,8 +3499,11 @@ def configure_macos_application() -> None:
     install_cocoa_reply_boundary()
 
 
-def install_macos_document_events(application: PyWebViewApplication) -> None:
-    """Extend pywebview's delegate without replacing its quit/ingest safeguards."""
+def install_desktop_events(application: PyWebViewApplication) -> None:
+    """Install common lifecycle handling and the platform's document events."""
+    if application._lifecycle is None:
+        application._lifecycle = DesktopLifecycle(application._lifecycle_status_changed)
+        application._lifecycle.start(sys.platform)
     if sys.platform != "darwin":
         return
     from webview.platforms.cocoa import BrowserView  # pylint: disable=import-outside-toplevel
@@ -3508,7 +3511,6 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
     install_file_drag()
     from .native_javascript import install_cocoa_reply_boundary  # pylint: disable=import-outside-toplevel
     install_cocoa_reply_boundary()
-    application._lifecycle = MacOSLifecycle(application._lifecycle_status_changed)
 
     class MailArchiverDelegate(BrowserView.AppDelegate):
         def applicationShouldTerminate_(self, app):
@@ -3632,7 +3634,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     else:
         controller = ApplicationController()
         application = PyWebViewApplication(controller, asset_server, workers_override=args.workers)
-        install_macos_document_events(application)
+        install_desktop_events(application)
         startup = controller.startup((archive,) if archive is not None else (), new=new_setup)
         prompt_for_archive = any(
             controller.document(session.document_id).descriptor.untitled

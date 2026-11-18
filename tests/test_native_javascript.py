@@ -15,6 +15,7 @@ from threading import Barrier
 import pytest
 
 from mailarchiver.change_signal import ChangeEvent
+from mailarchiver.desktop_lifecycle import DesktopLifecycle
 from mailarchiver.macos_lifecycle import MacOSLifecycle
 from mailarchiver.native_javascript import WindowReplies
 
@@ -69,13 +70,17 @@ def test_macos_lifecycle_observes_power_and_owns_network_source() -> None:
     workspace = appkit.NSWorkspace.sharedWorkspace()
     center = workspace.notificationCenter()
     refreshed: list[str] = []
-    lifecycle = MacOSLifecycle(lambda: refreshed.append("wake"))
-    source = lifecycle._source
+    lifecycle = DesktopLifecycle(lambda: refreshed.append("wake"))
+    lifecycle.start("darwin")
+    adapter = lifecycle._subscription
+    assert isinstance(adapter, MacOSLifecycle)
+    refreshed.clear()  # Initial path observation also refreshes status.
+    source = adapter._source
     cancellation = ChangeEvent()
     session = lifecycle.transport.session(cancellation)
     assert session is not None
     try:
-        assert source is not None and lifecycle._core.CFRunLoopSourceIsValid(source)
+        assert source is not None and adapter._core.CFRunLoopSourceIsValid(source)
         center.postNotificationName_object_(appkit.NSWorkspaceWillSleepNotification, workspace)
         assert session.done() and not refreshed
         center.postNotificationName_object_(appkit.NSWorkspaceDidWakeNotification, workspace)
@@ -84,7 +89,7 @@ def test_macos_lifecycle_observes_power_and_owns_network_source() -> None:
         assert new_session is not None and not new_session.done()
     finally:
         lifecycle.close()
-    assert not lifecycle._core.CFRunLoopSourceIsValid(source)
+    assert not adapter._core.CFRunLoopSourceIsValid(source)
     center.postNotificationName_object_(appkit.NSWorkspaceDidWakeNotification, workspace)
     assert refreshed == ["wake"]
 

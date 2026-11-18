@@ -704,7 +704,8 @@ head on any non-main branch must run DMG/MSIX/signature validation regardless
 of that filter, without publishing. Signing must remove temporary private-key
 material even if writing the PFX fails partway through. Forked PRs currently
 need a separate CI policy. Ordinary checks and website jobs use macOS with
-checksum-verified Zola; candidate validation additionally runs Windows x64.
+checksum-verified Zola; a focused Windows lifecycle job verifies native callback
+registration and dispatch. Candidate validation additionally runs Windows x64.
 Release publication requires a version-matching `v*` tag on main.
 The required continuous-integration gate exercises the archive lifecycle and
 complete HTML interface in headless Chromium with disposable fixtures. Native
@@ -893,10 +894,10 @@ acknowledgement. Ingests status and Suspend/Resume requests have a 15-second
 reply deadline. A missing reply reports an unconfirmed outcome, releases refresh
 ownership and permits a fresh status read; it must not replay a command, classify
 the import as failed, or enable password editing while login validation is pending.
-On macOS, wake and network configuration changes refresh Ingests without a focus
+On macOS and Windows, wake and network configuration changes refresh Ingests without a focus
 change. A successful status refresh clears its own earlier error and preserves
 command errors.
-On macOS, an IMAP connection blocked by network availability or captive portal sign-in
+On macOS and Windows, an IMAP connection blocked by network availability or captive portal sign-in
 shows a waiting status while it retests every 150 seconds. Suspend remains available.
 Collection-only completion, including a drag export for an unselected row, must
 notify state observers even when it changes no visible DOM.

@@ -8,12 +8,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from importlib import import_module
 import logging
 from typing import Any, TYPE_CHECKING
 
-from .imap_transport import ImapTransport
+from .desktop_lifecycle import DesktopLifecycle
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -21,44 +20,43 @@ if TYPE_CHECKING:
 
 
 class MacOSLifecycle:
-    def __init__(self, refresh_status: Callable[[], None]) -> None:
+    def __init__(self, lifecycle: DesktopLifecycle) -> None:
         appkit = import_module("AppKit")
         self._core: Any = import_module("CoreFoundation")
         self._loop = self._core.CFRunLoopGetMain()
         self._center = appkit.NSWorkspace.sharedWorkspace().notificationCenter()
-        self.transport = ImapTransport()
-        self._refresh_status = refresh_status
-        self._observers = [
-            self._center.addObserverForName_object_queue_usingBlock_(name, None, None, action)
-            for name, action in ((appkit.NSWorkspaceWillSleepNotification, self._sleep),
-                                 (appkit.NSWorkspaceDidWakeNotification, self._wake))
-        ]
+        self._lifecycle = lifecycle
+        self._observers: list[Any] = []
         self._store: SCDynamicStoreRef | None = None
         self._source: Any = None
         self._route_keys: tuple[str, ...] = ()
+        try:
+            for name, action in ((appkit.NSWorkspaceWillSleepNotification, self._sleep),
+                                 (appkit.NSWorkspaceDidWakeNotification, self._wake)):
+                self._observers.append(self._center.addObserverForName_object_queue_usingBlock_(
+                    name, None, None, action))
+        except Exception:
+            self.close()
+            raise
         try:
             self._watch_network()
         except (ImportError, OSError, RuntimeError, TypeError, ValueError) as error:
             logging.getLogger(__name__).warning("Network change notifications unavailable: %s", error)
 
     def _sleep(self, _notification: object) -> None:
-        self.transport.sleep()
+        self._lifecycle.sleep()
 
     def _wake(self, _notification: object) -> None:
-        try:
-            if self._store is not None:
-                self._read_path(self._store)
-        finally:
-            self.transport.wake()
-            self._refresh_status()
+        self._lifecycle.wake(lambda: self._read_path())
 
-    def _network_changed(self, store: SCDynamicStoreRef, _keys: Sequence[str], _context: None) -> None:
-        self._read_path(store)
-        self._refresh_status()
+    def _network_changed(self, _store: SCDynamicStoreRef, _keys: Sequence[str], _context: None) -> None:
+        self._lifecycle.network_changed(lambda: self._read_path())
 
-    def _read_path(self, store: SCDynamicStoreRef) -> None:
+    def _read_path(self) -> bool | None:
+        if self._store is None:
+            return None
         config = import_module("SystemConfiguration")
-        self.transport.network_changed(any(config.SCDynamicStoreCopyValue(store, key) for key in self._route_keys))
+        return any(config.SCDynamicStoreCopyValue(self._store, key) for key in self._route_keys)
 
     def _watch_network(self) -> None:
         config = import_module("SystemConfiguration")
@@ -73,9 +71,9 @@ class MacOSLifecycle:
         if source is None:
             raise RuntimeError("Could not create the network notification source")
         self._route_keys = tuple(keys[:2])
-        self._read_path(store)
         self._core.CFRunLoopAddSource(self._loop, source, self._core.kCFRunLoopCommonModes)
         self._store, self._source = store, source
+        self._lifecycle.network_changed(lambda: self._read_path())
 
     def close(self) -> None:
         for observer in self._observers:
