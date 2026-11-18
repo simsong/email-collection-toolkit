@@ -8,16 +8,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from importlib import import_module
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from .desktop_lifecycle import DesktopLifecycle
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-    from SystemConfiguration import SCDynamicStoreRef
-
 
 class MacOSLifecycle:
     def __init__(self, lifecycle: DesktopLifecycle) -> None:
@@ -27,7 +23,7 @@ class MacOSLifecycle:
         self._center = appkit.NSWorkspace.sharedWorkspace().notificationCenter()
         self._lifecycle = lifecycle
         self._observers: list[Any] = []
-        self._store: SCDynamicStoreRef | None = None
+        self._store: object | None = None
         self._source: Any = None
         self._route_keys: tuple[str, ...] = ()
         try:
@@ -49,7 +45,7 @@ class MacOSLifecycle:
     def _wake(self, _notification: object) -> None:
         self._lifecycle.wake(lambda: self._read_path())
 
-    def _network_changed(self, _store: SCDynamicStoreRef, _keys: Sequence[str], _context: None) -> None:
+    def _network_changed(self, _store: object, _keys: Sequence[str], _context: None) -> None:
         self._lifecycle.network_changed(lambda: self._read_path())
 
     def _read_path(self) -> bool | None:

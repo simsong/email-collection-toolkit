@@ -18,6 +18,10 @@ value is an opaque `object` here; the stub grants no unchecked CLR members.
 `make test-desktop-lifecycle` checks ty and Pyright against both host and Windows
 platform definitions; native Windows execution remains a separate CI gate.
 
+`SCDynamicStoreRef` is an opaque `object`: the macOS adapter only retains the
+reference and passes it back to native functions. Its annotations do not import
+the unavailable macOS framework while Windows analyzes the shared sources.
+
 Keep parameter and return types precise. Cocoa `id` values whose concrete class
 depends on the installed window or delegate use `Any` at that native boundary.
 Do not add a catch-all module or class `__getattr__` to hide missing APIs. Extend

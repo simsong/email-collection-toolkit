@@ -12,7 +12,8 @@ kSCEntNetIPv4: str
 kSCEntNetIPv6: str
 kSCEntNetDNS: str
 
-class SCDynamicStoreRef: ...
+# Opaque CF reference: retained and passed back, never inspected by the adapter.
+SCDynamicStoreRef = object
 
 def SCDynamicStoreCreate(allocator: None, name: str,
                          callback: Callable[[SCDynamicStoreRef, Sequence[str], None], None],
