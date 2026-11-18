@@ -1135,7 +1135,9 @@ test-frozen-lifecycle: ruff
 test-desktop-lifecycle: ruff
 	PYTHONPATH="$(CURDIR)" uv run --locked pylint $(LIFECYCLE_SOURCES)
 	uv run --locked ty check $(LIFECYCLE_SOURCES) --error-on-warning
+	uv run --locked ty check $(LIFECYCLE_SOURCES) --python-platform win32 --error-on-warning
 	uv run --locked pyright $(LIFECYCLE_SOURCES) --warnings
+	uv run --locked pyright $(LIFECYCLE_SOURCES) --pythonplatform Windows --warnings
 	uv run --locked pytest -q tests/test_desktop_lifecycle.py tests/test_windows_lifecycle.py tests/test_native_javascript.py $(PYTEST_ARGS)
 
 test-windows-lifecycle: test-desktop-lifecycle

@@ -1216,8 +1216,10 @@ removes observers, run-loop sources, native power registration and static .NET
 delegates. An unavailable native subscription logs a warning while the common timed retry policy remains.
 Ingests coalesces reads with any in-flight refresh and clears its history error
 after a successful reply. Explicit Suspend and Quit stay authoritative.
-`make test-desktop-lifecycle` exercises common cancellation/disposal and native
-Cocoa notifications. `make test-frozen-lifecycle` builds a real executable with
+`make test-desktop-lifecycle` checks host and Windows type definitions and
+exercises common cancellation/disposal and native Cocoa notifications. A focused
+`clr` stub describes pythonnet's dynamic assembly-loading API without replacing
+its runtime. `make test-frozen-lifecycle` builds a real executable with
 the production freezer import flags and exercises native installation, synthetic
 sleep/wake and cleanup outside the source checkout. The macOS `python-browser`
 CI job runs this frozen component check after installing dependencies.
