@@ -6,6 +6,18 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a73 — faster imports
+
+- Progress refreshes no longer recount the whole processing job table and fsync
+  the status file once per message. Those costs grew with archive size, which
+  made imports quadratic. Phase changes and final states still render at once.
+- Processor checkpoints for one message, or one processing job, share a single
+  SQLite commit instead of committing several times per processor. A SIGKILL
+  during ingest or processing, followed by a restart, gives the same archive as
+  an uninterrupted import.
+- `make benchmark-import` times a deterministic 50 MB synthetic corpus and
+  records the result in `benchmarks/import/results.jsonl`.
+
 ## 1.0.0a72 — dependency security updates
 
 - Update the PST downloader's ZIP reader to the patched 9.x line and reject

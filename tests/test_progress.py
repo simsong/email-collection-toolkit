@@ -274,6 +274,7 @@ def test_clamav_preflight_is_repeated_before_workers_start(capsys: pytest.Captur
     """Requirement: the main status driver reports ClamAV readiness before worker activity."""
     progress = ProgressReporter(worker_count=2)
     progress.tty = False
+    progress.refresh_interval = 0.0  # the real driver refreshes over seconds of waiting
     progress.start()
 
     try:
@@ -546,6 +547,7 @@ def test_processor_recovery_publishes_live_activity_and_finished_jobs(tmp_path: 
     started = datetime.now(UTC)
     status_file = IngestStatusFile(archive, new_status_id(started, 1, os.getpid()))
     progress = ProgressReporter(worker_count=2, status_file=status_file, archive=archive, run_pk=1, terminal=False)
+    progress.refresh_interval = 0.0  # observe every refresh; throttling has its own test
     progress.set_phase("Processing saved mail", activity_kind="processing")
     snapshots = []
     partial_snapshots = []
@@ -622,6 +624,7 @@ def test_saved_message_backlog_deduplicates_parts_and_tracks_unfinished_work(tmp
         assert saved_messages_remaining(database) == 2
         reporter = ProgressReporter(status_file=IngestStatusFile(archive, "ingest-remaining"),
                                     archive=archive, run_pk=1, terminal=False)
+        reporter.refresh_interval = reporter.saved_count_min_interval = 0.0  # throttling has its own test
         reporter.track_saved_messages(lambda: saved_messages_remaining(database))
         reporter.set_phase("Processing saved mail", activity_kind="processing")
         assert read_ingest_history(archive).statuses[0].saved_messages_remaining == 2
@@ -752,3 +755,25 @@ def test_status_progress_without_terminal(tmp_path: Path) -> None:
     reporter.finish("completed")
     assert reporter.output is None
     assert read_ingest_history(archive).statuses[0].state == "completed"
+
+
+def test_rapid_refreshes_are_throttled_but_phase_changes_render(capsys: pytest.CaptureFixture[str]) -> None:
+    """Requirement (#202): per-message refreshes must not each re-render, rewrite the
+    status file, or recount saved work; phase changes and the final state still render."""
+    progress = ProgressReporter(worker_count=1)
+    progress.tty = False
+    counts: list[int] = []
+    progress.start()
+    progress.set_phase("Processing message bodies and attachments", activity_kind="processing")
+    progress.track_saved_messages(lambda: counts.append(1) or 7)
+    try:
+        for _ in range(500):
+            progress.refresh()
+        progress.set_phase("verifying archived messages")
+    finally:
+        progress.finish("completed")
+    lines = capsys.readouterr().err.splitlines()
+    assert len([line for line in lines if line.startswith("Processing message bodies")]) < 10
+    assert any(line.startswith("verifying archived messages") for line in lines)
+    assert any(line.startswith("completed") for line in lines)
+    assert len(counts) < 10

@@ -1,6 +1,6 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-.PHONY: benchmark-name-resolution check compare-apple-mail data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
+.PHONY: benchmark-import benchmark-name-resolution check compare-apple-mail data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
 
 # Windows reader uses x64 CPython and the same GUI as macOS. MSIX_TEST_CERT_PFX_BASE64
 # supplies the pinned test key only to the explicit signer; never to the payload build.
@@ -474,6 +474,13 @@ data-quality-babyl-audit:
 
 benchmark-name-resolution:
 	uv run python scripts/benchmark_name_resolution.py
+
+# Import throughput on a deterministic synthetic corpus; appends to
+# benchmarks/import/results.jsonl. BENCH_MB sets corpus size (default 50),
+# BENCH_LABEL tags the row, BENCH_WORKERS overrides --workers.
+BENCH_MB ?= 50
+benchmark-import:
+	uv run python scripts/benchmark_import.py --megabytes $(BENCH_MB) $(if $(BENCH_LABEL),--label "$(BENCH_LABEL)") $(if $(BENCH_WORKERS),--workers $(BENCH_WORKERS))
 
 data-quality-summary:
 	@test -d "$(AUDIT_OUTPUT)" || { echo "missing audit output directory: $(AUDIT_OUTPUT)"; exit 2; }

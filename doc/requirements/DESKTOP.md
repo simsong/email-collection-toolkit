@@ -45,6 +45,9 @@ During saved-mail processing, show **Messages requiring processing**. Count each
 canonical archived email once across its pending, running or failed jobs,
 including body/attachment work and blocked dependencies. Exclude unpublished
 inputs and future downloads. Refresh on committed work/status changes and at completion;
+CLI progress may coalesce unlabelled refreshes (at most four per second) and the
+saved-work count (at most every two seconds, or less often when the count is
+slow), but phase changes and final states always render;
 zero means no known unfinished saved-message work, not that future downloads
 are complete. Explain that an email leaves the count only when all its tasks finish;
 the count may stay level while earlier processing stages complete tasks.

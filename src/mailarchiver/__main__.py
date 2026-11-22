@@ -143,6 +143,10 @@ REFRESH_INDEX_MAX_IN_FLIGHT_BYTES = 256 * 1024 * 1024
 CLAMAV_START_PHASE = "waiting for ClamAV startup"
 DISCOVERY_PHASE = "discovering sources"
 TOP_LINE_STYLE = "\x1b[37;44m"
+# Unlabelled progress refreshes render at most this often (phase changes and
+# final states always render); see ProgressReporter.display.
+REFRESH_INTERVAL_SECONDS = 0.25
+SAVED_COUNT_MIN_INTERVAL_SECONDS = 2.0
 ANSI_RESET = "\x1b[0m"
 WorkerItem = TypeVar("WorkerItem")
 
@@ -566,6 +570,14 @@ class ProgressReporter:
         self.interrupt_announced = False
         self.activity_kind: Literal["source", "processing"] = "source"
         self.saved_message_counter: Callable[[], int] | None = None
+        # Unlabelled refreshes arrive many times per message. Rendering each one
+        # re-printed the status line, rewrote and fsynced the status file, and
+        # (while processing) ran a jobs-table count that grows with the archive,
+        # making imports quadratic. Phase changes and final states always render.
+        self.refresh_interval = REFRESH_INTERVAL_SECONDS
+        self.last_rendered_monotonic: float | None = None
+        self.saved_count_min_interval = SAVED_COUNT_MIN_INTERVAL_SECONDS
+        self.saved_count_due_monotonic = 0.0
 
     def _queue_update(self, update: ProgressUpdate) -> None:
         self.updates.put(update)
@@ -954,9 +966,18 @@ class ProgressReporter:
     ) -> None:
         self._drain_updates()
         now = time.monotonic()
-        if self.activity_kind == "processing" and self.saved_message_counter is not None:
-            self.state.saved_messages_remaining = self.saved_message_counter()
         display_label = label or self._worker_phase()
+        if (label is None and ingest_state == "running" and display_label == self.phase
+                and self.last_rendered_monotonic is not None
+                and now - self.last_rendered_monotonic < self.refresh_interval):
+            return
+        self.last_rendered_monotonic = now
+        if (self.activity_kind == "processing" and self.saved_message_counter is not None
+                and (now >= self.saved_count_due_monotonic or ingest_state != "running")):
+            self.state.saved_messages_remaining = self.saved_message_counter()
+            # The count scans the job table; keep it under ~5% of wall time.
+            counted = time.monotonic()
+            self.saved_count_due_monotonic = counted + max(self.saved_count_min_interval, 20 * (counted - now)) if self.saved_count_min_interval else counted
         if display_label != self.phase:
             self.phase = display_label
             self.phase_started_monotonic = now

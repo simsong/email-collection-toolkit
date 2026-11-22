@@ -20,6 +20,8 @@ import os
 import shutil
 import sqlite3
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
@@ -105,6 +107,59 @@ def snapshot(archive: Path, path: Path) -> ContentReference:
 
 
 USER_CANCELLED = "Cancelled by user"
+
+# Connections whose checkpoint units currently share one SQLite transaction.
+# Each unit is still all-or-nothing (a savepoint); only durability is grouped.
+_GROUPED: set[int] = set()
+
+
+@contextmanager
+def grouped(database: sqlite3.Connection) -> Iterator[None]:
+    """Make nested ``unit`` blocks share one commit, issued when the group ends.
+
+    Rollback-journal commits cost several fsyncs each, and one message used to
+    commit dozens of times. A crash now loses only the uncommitted group, which
+    replays from the last commit exactly like a crash between two old commits.
+    The group commits on exceptions too: every closed unit was already
+    complete, matching the old per-unit commit semantics. Nested groups join
+    the outer one.
+    """
+    key = id(database)
+    if key in _GROUPED:
+        yield
+        return
+    _GROUPED.add(key)
+    try:
+        yield
+    finally:
+        _GROUPED.discard(key)
+        if database.in_transaction:
+            database.commit()
+
+
+def flush_group(database: sqlite3.Connection) -> None:
+    """Commit the open group early, e.g. before object cleanup requires it."""
+    if database.in_transaction:
+        database.commit()
+
+
+@contextmanager
+def unit(database: sqlite3.Connection) -> Iterator[None]:
+    """An atomic checkpoint: commits alone, or as a savepoint inside ``grouped``."""
+    if id(database) not in _GROUPED:
+        with database:
+            yield
+        return
+    if not database.in_transaction:
+        database.execute("BEGIN")
+    database.execute("SAVEPOINT checkpoint_unit")
+    try:
+        yield
+    except BaseException:
+        database.execute("ROLLBACK TO checkpoint_unit")
+        database.execute("RELEASE checkpoint_unit")
+        raise
+    database.execute("RELEASE checkpoint_unit")
 
 
 def enqueue(database: sqlite3.Connection, item: ProcessingObject, registry_hash: str, parent_job_id: int | None = None) -> None:
