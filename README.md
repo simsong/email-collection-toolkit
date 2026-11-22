@@ -41,20 +41,19 @@ See [Versioning and updating](#versioning-and-updating) for update choices.
 Email Collection Toolkit is preservation infrastructure for personal and research email
 collections, not a mail client or a compliance appliance. Its goals are to:
 
-* harvest email from backup drives and active sources into one persistent,
-  deduplicated Mailbag whose canonical MBOX and integrity files can be
-  maintained with ordinary, independently implemented tools;
+* collect email from backup drives and active mail accounts into one long-term,
+  deduplicated Mailbag archive whose standard MBOX and checksum files can be
+  inspected with ordinary tools;
 * provide one local search interface across decades of mail, regardless of the
   programs and providers that originally stored it;
-* support policy-driven redacted derivatives for confidentiality, donor,
-  privacy, and public-release requirements without modifying the canonical
-  messages;
-* maintain structured, rebuildable metadata suitable for reproducible digital
-  humanities reports about correspondents, chronology, threads, attachments,
-  entities, and provenance; and
-* interoperate with heterogeneous backups, including Outlook `.pst` and `.ost`
-  stores, Eudora backups, working IMAP client-cache directories, MBOX, EML,
-  Maildir, Apple Mail, Gmail exports, and live read-only IMAP accounts.
+* support creating redacted copies for confidentiality, donor, privacy, and
+  public-release needs without modifying the original archived messages;
+* maintain structured, rebuildable metadata for reproducible research reports
+  about correspondents, timelines, threads, attachments, and where each message
+  came from; and
+* import mail from several programs, backup formats, or accounts into the same
+  archive: Outlook `.pst`/`.ost`, Eudora, working IMAP client caches, MBOX, EML,
+  Maildir, Apple Mail, Gmail exports, and read-only IMAP accounts.
 
 “Plain-text archive” describes the standard, inspectable RFC 5322/MBOX
 container. Binary attachments remain MIME-encoded so their original bytes are
@@ -84,11 +83,28 @@ Still unfinished or planned:
 - PDF/Office attachment text extraction, redacted derivatives, richer research
   reports, and archive sorting/repacking.
 
-The [user manual](doc/USER_MANUAL.md) covers importing, verification, search,
-and archive care. The [documentation guide](doc/README.md) links to detailed
-format support and the roadmap. Name-matching experiments live in
-[`research/name-matcher`](research/name-matcher), with their
-[research notebook](doc/research/name-matcher/README.md).
+You do not need to read a manual to get started — see [Quick start](#quick-start)
+below. For detailed format notes, troubleshooting, and archive care, see the
+[user manual](doc/USER_MANUAL.md) and the [documentation guide](doc/README.md).
+Name-matching experiments live in [`research/name-matcher`](research/name-matcher),
+with their [research notebook](doc/research/name-matcher/README.md).
+
+## Quick start
+
+**Desktop app:** Download and install the app below, open it, create a new
+archive, and point it at a folder or mail export (`.mbox`, `.eml`, Maildir,
+`.pst`/`.ost`, or Apple Mail). Your original files are never modified.
+
+**Command line:** Install with [uv](https://docs.astral.sh/uv/getting-started/installation/)
+and archive a folder of exported mail in a few commands:
+
+```sh
+uv tool install 'git+https://github.com/simsong/email-collection-toolkit.git'
+ect-create collection.mailarchive --owner sam@example.org
+ect-import --archive collection.mailarchive /path/to/exported-mail
+ect-search --archive collection.mailarchive budget
+ect verify collection.mailarchive
+```
 
 ## Install
 
