@@ -578,6 +578,17 @@ class ProgressReporter:
         self.last_rendered_monotonic: float | None = None
         self.saved_count_min_interval = SAVED_COUNT_MIN_INTERVAL_SECONDS
         self.saved_count_due_monotonic = 0.0
+        self.trailing_render: threading.Timer | None = None
+
+    def _schedule_trailing_render(self, delay: float) -> None:
+        """Wake the status driver once the interval ends, so the last state of a
+        burst (for example an IMAP backoff notice) is shown even if no later
+        event arrives. The driver waits on ``self.changed``."""
+        if self.trailing_render is not None and self.trailing_render.is_alive():
+            return
+        self.trailing_render = threading.Timer(max(delay, 0.0), self.changed.notify)
+        self.trailing_render.daemon = True
+        self.trailing_render.start()
 
     def _queue_update(self, update: ProgressUpdate) -> None:
         self.updates.put(update)
@@ -970,8 +981,12 @@ class ProgressReporter:
         if (label is None and ingest_state == "running" and display_label == self.phase
                 and self.last_rendered_monotonic is not None
                 and now - self.last_rendered_monotonic < self.refresh_interval):
+            self._schedule_trailing_render(self.last_rendered_monotonic + self.refresh_interval - now)
             return
         self.last_rendered_monotonic = now
+        if self.trailing_render is not None:
+            self.trailing_render.cancel()
+            self.trailing_render = None
         if (self.activity_kind == "processing" and self.saved_message_counter is not None
                 and (now >= self.saved_count_due_monotonic or ingest_state != "running")):
             self.state.saved_messages_remaining = self.saved_message_counter()

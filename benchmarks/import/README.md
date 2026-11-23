@@ -38,4 +38,4 @@ The first two rows of `results.jsonl` come from a 4-CPU Linux cloud container
 | Commit | Change | Wall time | Ingest | Body/attachment processing | Messages/s |
 | --- | --- | --- | --- | --- | --- |
 | 056648a | baseline | 920 s | 281 s | 617 s | 5.2 |
-| this PR | grouped commits, throttled progress | see results.jsonl | | | |
+| this PR | grouped commits, throttled progress | 318 s | 152 s | 154 s | 15.1 |
