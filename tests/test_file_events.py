@@ -181,6 +181,8 @@ def test_sqlite_files_are_refused_and_their_directory_sees_commits(tmp_path: Pat
     for name in ("archive.sqlite3", "archive.sqlite3-wal", "archive.sqlite3-journal"):
         with pytest.raises(ValueError, match="SQLite"):
             PathChanges([tmp_path / name])
+    (tmp_path / "named.sqlite3").mkdir()  # A directory with that suffix holds no SQLite locks.
+    PathChanges([tmp_path / "named.sqlite3"]).close()
     with sqlite3.connect(database) as connection:
         connection.execute("CREATE TABLE rows(value)")
     with PathChanges([tmp_path]) as changes, sqlite3.connect(database) as connection:

@@ -57,7 +57,7 @@ class PathChanges(AbstractContextManager["PathChanges"]):
     def __init__(self, paths: Sequence[Path]) -> None:
         if not paths:
             raise ValueError("At least one path is required")
-        if locked := [path for path in paths if path.name.endswith(SQLITE_SUFFIXES)]:
+        if locked := [path for path in paths if path.name.endswith(SQLITE_SUFFIXES) and not path.is_dir()]:
             raise ValueError(f"Watch the directory, not SQLite file {locked[0]}")
         self.paths = tuple(path.absolute() for path in paths)
         self.cancelled = Event()
