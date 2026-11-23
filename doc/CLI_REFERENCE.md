@@ -158,7 +158,7 @@ ect-search --archive collection.mailarchive --mime 42
 ```
 
 `--headers` shows all headers, `--html` prints decoded HTML, and `--mime` prints
-the complete stored RFC 5322/MIME source. See the [search guide](USER_MANUAL.md#search-with-the-graphical-interface)
+the complete stored RFC 5322/MIME source. See the [search guide](https://simsong.github.io/email-collection-toolkit/searching/)
 for shared query and date behavior.
 
 ## Verification
@@ -209,7 +209,7 @@ ect human-contacts --archive collection.mailarchive --format tsv
 `ect identities --help` lists filters and the manual rename, merge and affiliation
 actions. Those actions write durable decisions. `human-contacts` reads likely
 direct correspondents; `--all` includes all human header addresses. See
-[Contacts policy](USER_MANUAL.md#contact-filter-policy).
+[contact filters](CUSTOMIZABLE_DEFAULT_LISTS.md).
 
 ## Desktop
 

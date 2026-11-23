@@ -26,10 +26,13 @@ separate export. Record website changes in `content/changelog.md`, linked from
 `content/about.md`; application release notes remain separate. About also
 provides the author biography and links to the author and project on GitHub.
 
-Use **Email Collection Toolkit** consistently. **User Manual** links to `/manual/`,
-which indexes Importing, Searching, Features, and Advanced; the longer repository
-manual is labeled **detailed reference manual**. Features uses `/features/`;
-`/use-cases/` is retained only as a compatibility redirect. Keep Curation available
+Use **Email Collection Toolkit** consistently. The website is the user guide.
+**User Manual** links to `/manual/`, which indexes Quick start, Importing,
+Searching, Archive care, Command line, and Troubleshooting. Keep user
+instructions here rather than in `doc/`; `doc/USER_MANUAL.md` only points to
+these pages, and `doc/CLI_REFERENCE.md` remains the complete option reference.
+Features uses `/features/`; `/use-cases/` and `/advanced/` are retained only as
+compatibility redirects. Keep Curation available
 as an archival overview, rather than presenting it as the manual. Community links
 use **Community Forum** for Discussions and **Contact Support** for Issues.
 

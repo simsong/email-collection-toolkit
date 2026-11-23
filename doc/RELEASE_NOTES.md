@@ -3,7 +3,7 @@
 # Release notes
 
 Entries describe their recorded revisions. For current behavior use the
-[user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
+[user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
 ## 1.0.0a73 — faster imports

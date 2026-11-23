@@ -1,126 +1,154 @@
 +++
 title = "Importing"
-description = "Configure local and IMAP sources, then choose a fast refresh or complete source rebuild."
+description = "Import email files, folders, and IMAP accounts into an archive without changing the sources."
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+Email Collection Toolkit copies mail into an archive and never changes the
+source files or accounts. You can import the same sources again later: messages
+already in the archive are not stored twice.
 
-Email Collection Toolkit imports supported local email files and folders into
-an archive without changing the sources. MBOX (including Google Takeout),
-Maildir, EML, Babyl, and complete Apple Mail `.emlx` files can be used today.
-The macOS application also reads Outlook PST and OST files, with
-[best-effort extraction](https://github.com/simsong/email-collection-toolkit/blob/main/doc/PST_IMPORTER.md).
+## What you can import
+
+| Source | Notes |
+| --- | --- |
+| MBOX files, including Google Takeout | Most mail programs can export MBOX |
+| Maildir folders | |
+| Individual `.eml` files | A folder of them works too |
+| Emacs RMAIL (Babyl) files | Recognized by content, with or without an extension |
+| Apple Mail `.emlx` messages | Complete messages only; see [Apple Mail](#apple-mail) |
+| Outlook `.pst` and `.ost` files | Best-effort extraction; see [Outlook](#outlook-and-microsoft-365) |
+| IMAP accounts, including Gmail | Read-only download from the command line; see [IMAP](#imap-accounts) |
+
+Files the program does not recognize are listed and skipped.
 
 ## Import with the application
 
-Open or create an archive, then choose **File → Import…**. Select local files
-or folders, review **Owner emails (include)** and **Exclude (applied after include)**,
-then confirm the source and destination. A directory includes supported mail
-files in its subdirectories.
+1. Open or create an archive. **File → New** creates one in an empty folder.
+2. Choose **File → Import…** and select files or folders. A folder includes
+   everything below it.
+3. Review your owner addresses (below), then confirm the sources and
+   destination.
 
-Every import shows both rule fields, using the archive's saved defaults. Enter
-one rule per line or separate rules with commas. `sam` matches `sam@any-domain`
-but not `3sam`; use `*` or `?` to broaden a match. Domains are matched only when
-the rule includes `@`. Exclusions always win.
+Keep the archive folder separate from the mail you are importing. Neither may
+contain the other.
 
-The app saves confirmed rules in `config.yaml` and writes matching sender
-addresses separately to `owner-names-detected.txt`. Editing rules affects future
-imports; correcting old Sent/Archive classifications requires a fresh archive.
+## Your own addresses
+
+The archive files mail you sent separately from mail you received. To do that,
+every import asks for **Owner emails (include)** and **Exclude (applied after
+include)**. Enter one rule per line or separate them with commas.
+
+| Rule | Matches | Does not match |
+| --- | --- | --- |
+| `sam` | `sam@example.org`, `sam@other.org` | `3sam@example.org`, `sam+tag@example.org` |
+| `*sam*` | `sam.lee@example.org` | `alex@example.org` |
+| `*@sam.net` | anything at `sam.net` | `sam@example.org` |
+| `sam@example.org` | that address only | `sam@other.org` |
+
+`*` matches anything, `?` matches one character, and exclusions always win.
+Rules ignore case.
 
 ![Owner include and exclude fields with synthetic examples](../images/owner-rules-interface.png)
 
-*The owner-rule editor, shown here with synthetic examples. macOS uses a native
-dialog with the same two fields.*
+*The owner-rule editor with synthetic examples. macOS uses a native dialog with
+the same two fields.*
 
-Import notices stay in the window owning that import. A yellow **Extra file
-detected** warning means an unrelated file, such as an editor backup, was found;
-importing continues and the file is left alone. Choose **Dismiss messages** to
-clear the warning. Missing or changed archived mail still produces an error.
+The rules are saved in the archive's `config.yaml` and shown again next time.
+After each import, `owner-names-detected.txt` in the archive lists the sender
+addresses your rules matched, so you can check them. **File → Document
+Options…** edits the rules between imports. New rules apply to future imports
+only. To refile mail that was already imported, build a fresh archive from the
+original sources.
 
-The **Ingests** window shows retained runs, source paths, message counts,
-progress, worker activity, and failures. Open it from **Window → Ingests** or
-click the status line; **Import Directory…** starts another import into that
-window's archive. If antivirus scanning is unavailable, the application warns
-you and records scanner-error evidence while importing continues automatically.
-Incomplete scans and encrypted attachments are recorded without a manual-review gate.
+## Watching progress
 
-Use **Suspend Import** to checkpoint the current work without quitting. Wait for
-the suspension to finish, then use **Continue Import** to resume the saved
-settings, including after reopening the archive. Suspension also frees the
-archive for manual name edits. A message already being downloaded may finish
-before suspension completes.
-
-If an IMAP connection times out, including after laptop sleep, the
-download shows **Timeout** with a yellow circle and horizontal dash, and keeps
-its saved progress. No timeout traceback is displayed. Reconnect to the network,
-then click **Resume** in Ingests. Messages already saved are not downloaded again.
+The **Ingests** window lists every import with its sources, counts, workers,
+and any failures. Open it from **Window → Ingests** or by clicking the status
+line. **Import Directory…** in that window starts another import.
 
 ![The import history window showing a completed synthetic collection import](../images/importing-interface.png)
 
-*The working import-history interface after importing synthetic messages.*
+*The import history window after importing synthetic messages.*
 
+An import has three stages:
 
-When reopening an archive with unfinished work, review the source, import start,
-latest interruption and saved imported/duplicate counts. An unclean stop shows
-its last saved progress time because the exact interruption time is unknown.
-Choose **Continue Import** to resume ingest and content processing using the saved
-settings, **Leave import suspended** to keep work paused, or **Stop import** to
-cancel remaining work while keeping archived
-messages and history. A new explicit import can read the source again; use
-explicit reprocessing to regenerate previously cancelled derived work.
+1. **Downloading or importing** reads the sources and saves each message.
+2. **Processing saved mail** extracts message text and attachments and builds
+   the search index. **Messages requiring processing** counts the emails that
+   still have work left.
+3. **Verifying archived messages and saving checksums** rereads the archive and
+   updates its checksum files. This can take a while even after a small import.
 
-## Import from the command line
+Yellow notices, such as **Extra file detected** for an unrelated file in the
+archive folder, are warnings only. Importing continues. Choose **Dismiss
+messages** to clear them.
 
-Install the CLI with uv, then create an archive and import a directory:
+## Stopping and continuing
 
-```sh
-uv tool install 'git+https://github.com/simsong/email-collection-toolkit.git'
-ect-create collection.mailarchive --owner sam@example.org
-ect-import --archive collection.mailarchive /path/to/exported-mail
-```
+Choose **Suspend Import** to pause safely, or quit the application. Choose
+**Continue Import** later, even after reopening the archive, and the import
+picks up where it stopped. When you open an archive with unfinished work, you
+can also **Leave import suspended** or **Stop import**. Stopping keeps
+everything already archived.
 
-For a read-only IMAP account, use the same import command:
+If an IMAP connection times out, for example after the laptop sleeps, Ingests
+shows **Timeout** and keeps its progress. Reconnect, then click **Resume**.
+
+## Importing again
+
+Run the same import again whenever you find more mail or a source has grown.
+Unchanged files are skipped. Two messages count as duplicates only when their
+`Message-ID` and their exact bytes both match, so a copy that a mail program
+altered is kept as a separate variant. Every place a message was found is
+recorded and shown with the message.
+
+## Gmail
+
+Use Google Takeout or read-only IMAP. See [Archive Gmail](@/gmail-authorization.md).
+
+## Outlook and Microsoft 365
+
+The macOS and Windows applications read Outlook `.pst` files and `.ost` cache
+files. Outlook is not needed. Extraction is best effort, and an `.ost` cache
+holds only what Outlook had downloaded, so it may not be complete. Microsoft
+365 has no export like Google Takeout: export a `.pst` from Outlook for Windows,
+or use IMAP if your organization allows it. The
+[PST/OST notes](https://github.com/simsong/email-collection-toolkit/blob/main/doc/PST_IMPORTER.md)
+describe the limits.
+
+## Apple Mail
+
+Apple Mail keeps local copies of messages from Gmail, Microsoft 365,
+Outlook.com, and other IMAP accounts. You can import them from
+`~/Library/Mail`, or export mailboxes from Apple Mail as MBOX.
+
+Before importing from the cache, set Apple Mail's **Download Attachments** to
+**All**, let it finish synchronizing, and quit Mail. Only complete messages are
+imported. Partial messages are reported and skipped, so a cache can never prove
+that every message on the server was saved. The terminal may need Full Disk
+Access. See the
+[Apple Mail cache notes](https://github.com/simsong/email-collection-toolkit/blob/main/doc/APPLE_MAIL_CACHE.md).
+
+## IMAP accounts
+
+IMAP download currently runs from the command line:
 
 ```sh
 ect-import --archive collection.mailarchive --imap
 ```
 
-The first run prompts for connection settings and a hidden password or app
-password. Settings are saved in the archive's `config.yaml`; passwords stay in
-macOS Keychain or Windows Credential Manager. Run the command again to download
-new mail and resume completed checkpoints. Use `--show-messages` for per-message
-output and `--source SOURCE_ID` to select one saved account.
+The first run asks for the server, user name, and password or app password. The
+password is stored in macOS Keychain or Windows Credential Manager, never in the
+archive. Run the command again to fetch new mail; messages already saved are
+not downloaded again. Downloads never change messages or mark them read. Gmail
+downloads All Mail with its labels; other servers skip folders whose names
+contain `spam`. See [Command line](@/command-line.md#imap-accounts) for more
+options.
 
-Generic IMAP excludes mailbox names containing `spam`. Gmail downloads All Mail
-and records Gmail IDs and labels; messages found only in Spam or Trash are outside
-that coverage. OAuth and a graphical account-setup interface are not available.
-See [Gmail acquisition](@/gmail-authorization.md) for supported Gmail paths.
+## Workers and connections
 
-Imports scan for malware by default; the CLI needs the native antivirus runtime
-and verified definitions. The desktop installers include these components.
-The [command-line guide](https://github.com/simsong/email-collection-toolkit/blob/main/doc/CLI_REFERENCE.md)
-covers prerequisites, options, adding accounts, interruption and verification.
-A general source registry and Refresh/Rebuild interface remain
-[planned work](https://github.com/simsong/email-collection-toolkit/blob/main/doc/plans/ACQUISITION.md).
-
-## Processing saved mail
-
-While **Processing saved mail** is displayed, ECT is finishing metadata, body and
-attachment extraction, and search indexing for mail already stored locally.
-The cards show finished processing tasks and their average rate. Each worker row
-separates downloading/importing from processing and reports its own finished-task
-count. Several processing tasks can belong to one email. IMAP source progress is
-reported as download partitions rather than files.
-
-**Messages requiring processing** counts archived emails with unfinished work,
-once per email even when several tasks remain. Pending, running, failed and
-blocked work is included; mail still on the server is excluded. Each email leaves
-the count after its final task finishes.
-
-## Verifying archived messages and saving checksums
-
-This status means the application is checking saved message bytes and updating
-the archive's local integrity files, message inventory and checksum manifests.
-The step reads the whole archive, so it can take time after a small import while
-download workers are idle. It does not upload or share email. The download
-percentage does not measure this final step.
+**Preferences → Maximum number of workers** sets how many processors the
+import uses. The default is half the CPUs. **Maximum IMAP connections per
+account** defaults to 8, which leaves room under Gmail's limit of 15 for your
+other mail programs. Suspend and continue an import to apply new settings.

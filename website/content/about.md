@@ -37,7 +37,8 @@ about his work on [his personal website](https://simson.net/), or visit
 
 - [Source Code](https://github.com/simsong/email-collection-toolkit): project code,
   issues, and contributions.
-- [User Manual](@/manual.md): importing, searching, features, and advanced guidance.
+- [User Manual](@/manual.md): quick start, importing, searching, archive care,
+  command line, and troubleshooting.
 - [Website changelog](@/changelog.md): changes to this website and its explanations.
 - [Software release notes](https://github.com/simsong/email-collection-toolkit/blob/main/doc/RELEASE_NOTES.md):
   application changes, separate from website updates.
