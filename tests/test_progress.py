@@ -7,6 +7,7 @@ from __future__ import annotations
 import queue
 import os
 import re
+import signal
 import subprocess
 import sys
 import textwrap
@@ -447,6 +448,55 @@ def test_file_worker_pool_preserves_deferred_discovery_traceback() -> None:
     frames = traceback.extract_tb(raised.value.__traceback__)
     assert any(frame.name == "failing_discovery" for frame in frames)
     assert stop.is_set()
+
+
+@pytest.mark.skipif(not hasattr(signal, "pthread_kill"), reason="POSIX thread-directed signals")
+def test_interrupt_delivered_to_a_worker_thread_still_wakes_the_owner(tmp_path: Path) -> None:
+    """macOS may deliver Ctrl-C to any thread; the owner must still acknowledge it at once."""
+    release = tmp_path / "release-worker"
+    script = textwrap.dedent("""
+        import signal, sys, threading
+        from pathlib import Path
+        from mailarchiver.__main__ import ProgressReporter, run_file_workers
+
+        release = Path(sys.argv[1])
+        progress = ProgressReporter()
+        def worker(_item):
+            print('worker-ready', flush=True)
+            sys.stdin.readline()
+            signal.pthread_kill(threading.get_ident(), signal.SIGINT)
+            from mailarchiver.file_events import wait_for_path_state
+            wait_for_path_state([release], release.exists, timeout=15)
+        def acknowledged():
+            progress.announce_interrupt()
+            print('acknowledged', flush=True)
+        try:
+            run_file_workers([0], 1, worker, threading.Event(), progress.refresh, on_interrupt=acknowledged)
+        except KeyboardInterrupt:
+            print('cleanup complete', flush=True)
+            raise SystemExit(130)
+    """)
+    process = subprocess.Popen([sys.executable, "-c", script, str(release)], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        assert process.stdin is not None and process.stdout is not None
+        assert process.stdout.readline().rstrip() == b"worker-ready"
+        time.sleep(0.2)  # Let the owner reach its blocking wait before the worker is signalled.
+        started = time.monotonic()
+        process.stdin.write(b"go\n")
+        process.stdin.flush()
+        # Without a wakeup this line only arrives when the worker gives up after 15 s.
+        assert process.stdout.readline().rstrip() == b"acknowledged"
+        assert time.monotonic() - started < 5, "owner waited for the worker instead of the interrupt"
+        release.touch()
+        assert process.stdout.readline().rstrip() == b"cleanup complete"
+        _stdout, stderr = process.communicate(timeout=10)
+        assert process.returncode == 130
+        assert stderr.count(b"**Interrupted. Shutting down") == 1
+    finally:
+        release.touch()
+        process.kill()
+        process.communicate(timeout=10)
 
 
 def test_interrupt_notice_precedes_worker_shutdown(tmp_path: Path) -> None:
