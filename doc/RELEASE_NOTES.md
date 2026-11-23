@@ -19,10 +19,14 @@ Rust delivery plans and historical package checks are not current acceptance.
   as saved. SQLite connections use `fullfsync` too. Expect imports on macOS to
   be slower than before, especially on USB drives. Fewer commits offset part
   of the cost.
-- `make benchmark-import` now checks the result end to end. Every generated
-  message must be in the archive with exactly the expected bytes and must be
-  searchable, with no unfinished processing. The crash-recovery tests use the
-  same check.
+- `make benchmark-import` now checks the result end to end. It checks every
+  generated message's bytes, MBOX pointer, Subject, sender, recipients, date,
+  Message-ID and attachments, and that unique tokens and sampled words are
+  searchable. The corpus (version 2) adds two real documents each of .txt,
+  .pdf, .docx, .doc, .xls, .xlsx, .ppt, .pptx and .jpeg, each with a unique
+  search identifier. Identifiers in types without a text extractor yet are
+  reported as gaps rather than failures. The crash-recovery tests run the same
+  check.
 
 ## 1.0.0a74 — faster body and attachment processing
 
