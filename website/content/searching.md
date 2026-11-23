@@ -66,8 +66,9 @@ message, and Command-G finds the next match.
 The menu above the message lists its text and HTML versions plus **Raw
 Source**, the complete original message. HTML is cleaned before display, and
 remote images stay blocked until you choose **Load Remote Content**. Clicking
-a link asks before opening it. Attachments appear below the message; opening
-one always asks first.
+a link asks before opening it. Attachments appear below the message. Opening
+one asks first unless it is a plain PDF, image, or text file whose type and
+name agree.
 
 The bottom of each message lists where it is stored in the archive and every
 source where it was found. **Save Message…** saves an exact `.eml` copy.

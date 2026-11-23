@@ -21,8 +21,9 @@ lists every option, and `ect COMMAND --help` shows them too.
    ```
 
 3. Install ClamAV for virus scanning, for example `brew install clamav` on
-   macOS or `sudo apt install clamav` on Debian and Ubuntu. The desktop
-   installers include it, but the command-line tools do not. Without it, add
+   macOS or `sudo apt install clamav` on Debian and Ubuntu, then download the
+   virus definitions with `ect update-definitions`. The desktop installers
+   include both, but the command-line tools do not. Without them, add
    `--no-scan` to imports, and messages are recorded as not scanned.
 
 Outlook `.pst` and `.ost` imports also need the
