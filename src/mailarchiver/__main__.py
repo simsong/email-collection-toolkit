@@ -100,7 +100,7 @@ from .mbox import (
 from .message import ParsedMessage
 from .processing.api import PluginStatistics, ProcessingObject
 from .processing.contracts import MailboxReference, ProcessingPolicy, SourceMetadata
-from .processing.production import ProductionPipeline
+from .processing.production import RELEASE_BATCH_SECONDS, ProductionPipeline
 from .processing.store import connect as processing_connection
 from .processing_progress import saved_messages_remaining
 from .plugin_api import (
@@ -1755,6 +1755,33 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             )
         return ContainerIntegrityResult(decision=decision, evidence=tuple(evidence))
 
+    # Source bookkeeping (registration, integrity check start, completion
+    # checkpoint) is not committed on its own: it rides along with the next
+    # message commit, or commits within RELEASE_BATCH_SECONDS while sources
+    # stall. A crash only loses checkpoints, so those sources are rescanned.
+    checkpoint_due: list[float] = []
+
+    def defer_checkpoint_commit() -> None:
+        if not checkpoint_due:
+            checkpoint_due.append(time.monotonic() + RELEASE_BATCH_SECONDS)
+
+    def commit_due_work() -> float | None:
+        """Idle hook: commit deferred checkpoints and collect released objects when due."""
+        assert pipeline is not None
+        if checkpoint_due and not catalog.in_transaction:
+            checkpoint_due.clear()  # A message commit already carried them.
+        bounds: list[float] = []
+        if checkpoint_due:
+            remaining = checkpoint_due[0] - time.monotonic()
+            if remaining > 0:
+                bounds.append(remaining)
+            else:
+                catalog.commit()
+                checkpoint_due.clear()
+        if (released := pipeline.collect_released_when_due()) is not None:
+            bounds.append(released)
+        return min(bounds, default=None)
+
     def begin_integrity_check(source_file_pk: int, work: ContainerWork, result: ContainerIntegrityResult) -> int:
         controls = work.plugin.implementation.integrity_controls
         subject = next(
@@ -1782,7 +1809,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         assert cursor.lastrowid is not None
         integrity_check_pk = cursor.lastrowid
         record_integrity_evidence(integrity_check_pk, result.evidence)
-        catalog.commit()
+        defer_checkpoint_commit()
         return integrity_check_pk
 
     def record_integrity_evidence(
@@ -1883,7 +1910,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     source_file_pk,
                 ),
             )
-            catalog.commit()
+            defer_checkpoint_commit()
         coordinator.call(publish_checkpoint)
         progress.record_file_complete(path, progress_length)
 
@@ -1903,8 +1930,13 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             sha256=parsed.sha256,
         )
         box: mailbox.mbox | None = None
+        committed = False
         try:
-            catalog.execute("BEGIN")
+            # A savepoint, not BEGIN: earlier deferred catalog rows (processor
+            # results, source checkpoints) may already be pending, and a failed
+            # publication must roll back only its own rows. The commit below
+            # makes all of them durable together.
+            catalog.execute("SAVEPOINT publication")
             sender_pk = address_pk(catalog, parsed.sender)
             message_pk = catalog.execute("INSERT INTO messages(message_id_normalized, sha256, sender_address_pk, subject, date_utc, date_source, category) VALUES (?, ?, ?, ?, ?, ?, ?)", (parsed.message_id, parsed.sha256, sender_pk, parsed.subject, parsed.date_utc, parsed.date_source, category)).lastrowid
             assert message_pk is not None
@@ -1946,10 +1978,16 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             )
             observe(candidate.source, "archived", category, parsed.sha256, message_pk)
             catalog.commit()
+            committed = True
             outcome.published = True
             clear_publication_journal(archive)
         except BaseException:
-            catalog.rollback()
+            try:
+                if catalog.in_transaction and not committed:
+                    catalog.execute("ROLLBACK TO publication")
+                    catalog.execute("RELEASE publication")
+            except sqlite3.Error:
+                catalog.rollback()
             if box is not None:
                 box.close()
                 boxes.pop(destination, None)
@@ -2000,7 +2038,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     def register_container(work: ContainerWork) -> tuple[int, tuple[IntegrityEvidence, ...]]:
         source_file_pk = register_source_file(work)
         prior = prior_source_evidence(source_file_pk, work.plugin.implementation.integrity_controls.control_id)
-        catalog.commit()
+        defer_checkpoint_commit()
         return source_file_pk, prior
 
     def scan_source(item: MailObject | SourceObservation | ProgressEvent) -> tuple[MailObject | SourceObservation | ProgressEvent, ScanEvidence | None]:
@@ -2331,8 +2369,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 ),
                 on_interrupt=progress.announce_interrupt,
                 coordinator=coordinator, signals=progress_signals,
-                idle=pipeline.collect_released_when_due,
+                idle=commit_due_work,
             )
+        catalog.commit()
         pipeline.collect_released()
         check_interrupted()
         if request.continue_content:

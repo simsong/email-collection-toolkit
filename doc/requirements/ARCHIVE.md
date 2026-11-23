@@ -222,6 +222,9 @@ finishes. A deadline can interrupt a message or checkpoint: SQLite transaction
 rollback and the durable MBOX append journal support recovery on the next ingest;
 an interrupted archive is not promised to have current BagIt manifests. Continue
 Processing or reimport repairs checkpoints and deduplicates committed messages.
+On macOS, canonical durability points (MBOX appends and their journal, stored
+objects, integrity/BagIt checkpoints, directory entries and SQLite commits) shall
+use `F_FULLFSYNC`, because plain `fsync` there does not flush the drive's cache.
 Do not bypass Sparkle's deferred/installing handoff. Window-close restrictions
 during ingest remain intact.
 

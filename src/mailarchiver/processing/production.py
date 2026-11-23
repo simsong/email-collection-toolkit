@@ -135,9 +135,11 @@ class ProductionPipeline:
 
     def collect_released(self) -> None:
         """Commit finished work, then collect objects of the released messages."""
-        flush_group(self.database)
+        # Object cleanup requires committed catalog records. Callers hold no
+        # partial catalog transaction here, only completed deferred rows.
         if self.catalog.in_transaction:
-            raise ValueError("object cleanup requires committed catalog records")
+            self.catalog.commit()
+        flush_group(self.database)
         released, self._released = sorted(self._released), set()
         self._release_due = time.monotonic() + RELEASE_BATCH_SECONDS
         for message_id in released:
@@ -213,7 +215,9 @@ class ProductionPipeline:
     def ingest(self, source: MailObject, metadata: SourceMetadata) -> IngestedMessage:
         reference = snapshot_bytes(self.archive, source.raw)
         existing = self.catalog.execute("SELECT message_pk FROM messages WHERE sha256=?", (reference.sha256,)).fetchone()
-        with grouped(self.database):
+        # Catalog rows written by processors (headers, defects) commit once,
+        # just before the processing commit that marks their jobs completed.
+        with grouped(self.catalog), commit_first(self.database, self.catalog), grouped(self.database):
             return self._ingest_grouped(reference, metadata, existing is not None)
 
     def _ingest_grouped(self, reference: ContentReference, metadata: SourceMetadata, duplicate: bool) -> IngestedMessage:
@@ -347,7 +351,7 @@ class ProductionPipeline:
         message_pk = row[0] if row else None
         if result.headers is not None and message_pk is not None:
             parsed = result.headers.parsed
-            with self.catalog:
+            with unit(self.catalog):
                 self.catalog.execute("UPDATE messages SET sender_address_pk=?,subject=?,date_utc=?,date_source=? WHERE message_pk=?",
                     (address_pk(self.catalog, parsed.sender), parsed.subject, parsed.date_utc, parsed.date_source, message_pk))
                 self.catalog.execute("DELETE FROM recipients WHERE message_pk=?", (message_pk,))
@@ -376,7 +380,7 @@ class ProductionPipeline:
                         'AND person_id=(SELECT person_id FROM person_addresses WHERE address_id=?)',
                         (matched.name,candidate.address.lower(),address_id))
         if message_pk is not None:
-            with self.catalog:
+            with unit(self.catalog):
                 self.catalog.executemany("INSERT OR IGNORE INTO metadata_defects(message_pk,field,detail) VALUES(?,?,?)",
                     ((message_pk, plugin.manifest.kind, detail) for detail in result.diagnostics))
         for child in result.promotions:

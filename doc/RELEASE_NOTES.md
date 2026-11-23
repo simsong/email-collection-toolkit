@@ -6,6 +6,24 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a75 — fewer ingest commits, full macOS durability
+
+- Ingest makes about 3 commits per message instead of about 9. Catalog rows
+  that processors write share one commit, and per-source checkpoints are
+  committed along with message commits (within one second if sources stall).
+  After a crash, the affected sources are rescanned, and their messages are
+  recognized as already archived.
+- On macOS, every point the archive relies on for crash recovery now uses
+  `F_FULLFSYNC`. Plain `fsync` there does not make the drive flush its cache,
+  so a sleep, unplug or power loss could lose writes that the archive treated
+  as saved. SQLite connections use `fullfsync` too. Expect imports on macOS to
+  be slower than before, especially on USB drives. Fewer commits offset part
+  of the cost.
+- `make benchmark-import` now checks the result end to end. Every generated
+  message must be in the archive with exactly the expected bytes and must be
+  searchable, with no unfinished processing. The crash-recovery tests use the
+  same check.
+
 ## 1.0.0a74 — faster body and attachment processing
 
 - Body/attachment processing commits once per batch of up to 64 messages (or
