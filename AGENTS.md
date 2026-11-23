@@ -27,7 +27,7 @@ Source files created by Codex, including tests and scripts, start after any
 shebang and license header with a 5–10 line comment explaining purpose,
 operation, and system role. Document user-facing environment variables on the
 website's Command line page (`website/content/command-line.md`) and build, test,
-signing and research variables in `doc/FOR_DEVELOPERS.md`, and briefly beside the
+signing and research variables in `doc/DEVELOPING.md`, and briefly beside the
 relevant Makefile targets; never document secret values. Use Makefile targets to run code and tests in every
 language. Test DynamoDB with DynamoDB Local and S3 with MinIO through those
 targets.

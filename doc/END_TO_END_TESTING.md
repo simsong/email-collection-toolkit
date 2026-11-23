@@ -20,7 +20,7 @@ desktop on macOS and Windows. The compiled Rust UI was retired (see
 [the retrospective](RUST_GUI_EXPERIMENTS.md)); its tests are historical. A Chromium
 pass or skipped Cocoa test is not validation of the Windows WebView2 host;
 Windows evidence comes from `make test-python-reader-native` and the installed
-MSIX checks described in [WINDOWS_MSIX_TEST.md](WINDOWS_MSIX_TEST.md).
+MSIX checks described in [MSIX packaging](RELEASING.md#msix-packaging).
 
 ## Import performance benchmark
 

@@ -47,7 +47,7 @@ packaging, runtime provenance, signing, confinement and installed-fixture gates.
 No platform is supported merely because its package builds; validate full ingest,
 scanning, locking, cancellation and recovery in the installed application.
 
-[WINDOWS.md](../WINDOWS.md) documents building and running the x64 Python/WebView2
+[Developing](../DEVELOPING.md#windows) documents building and running the x64 Python/WebView2
 desktop and MSIX; its Rust/MSVC/Dioxus setup sections are historical. Setup must
 distinguish installed tools from validated application support. Windows delivery
 requires full ingest, preservation, recovery, and native desktop validation;
@@ -402,8 +402,8 @@ Use the explicit `.mboxrd` derivative contract in [MBOX_READING.md](../MBOX_READ
 
 ## Platform delivery references
 
-[WINDOWS_MSIX_TEST.md](../WINDOWS_MSIX_TEST.md) owns current x64 Python package
-structure and installed acceptance. [WINDOWS_PUBLIC_SIGNING.md](../WINDOWS_PUBLIC_SIGNING.md)
+[MSIX packaging](../RELEASING.md#msix-packaging) owns current x64 Python package
+structure and installed acceptance. [public signing](../RELEASING.md#microsoft-public-signing)
 owns public trust, publisher identity, OIDC provisioning and verification.
 [MACOS_DISTRIBUTION.md](../MACOS_DISTRIBUTION.md) owns DMG/signing acceptance, and
 [DEVOPS.md](../DEVOPS.md) owns coordinated publication. Historical Rust/MSIX

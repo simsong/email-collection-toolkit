@@ -20,15 +20,15 @@ separate from instructions that apply today.
 
 ## Develop and maintain the toolkit
 
-- [For developers](FOR_DEVELOPERS.md): source setup, builds, tests and platform prerequisites.
-- [Developer commands](DEVELOPER_COMMANDS.md): Make targets, specialist tools,
-  signing and release recipes.
+- [Developing](DEVELOPING.md): **start here.** Setup, repository layout,
+  everyday commands, tests, benchmarks, Rust tools and all Make targets.
+- [Releasing](RELEASING.md): versions, the release sequence, macOS signing
+  recipes, Windows packaging, public signing and the installer checklist.
 - [Testing](END_TO_END_TESTING.md) and [regression policy](REGRESSION.md): fixture
   safety, acceptance layers and corpus comparisons.
 - [DevOps](DEVOPS.md): CI, release and website workflow triggers and gates.
-- [macOS distribution](MACOS_DISTRIBUTION.md) and [certificates](CERTIFICATE_MANAGEMENT.md).
-- [Windows development](WINDOWS.md), [MSIX packaging](WINDOWS_MSIX_TEST.md),
-  [public signing](WINDOWS_PUBLIC_SIGNING.md), and [application updates](SPARKLE_UPDATES.md).
+- [macOS distribution](MACOS_DISTRIBUTION.md), [certificates](CERTIFICATE_MANAGEMENT.md),
+  and [application updates](SPARKLE_UPDATES.md): release references.
 - [Antivirus](EMBEDDED_CLAMAV.md), [plugins](PLUGINS.md), and [data-quality tools](DATA_QUALITY_AUDIT.md).
 
 ## Understand the archive and implementation

@@ -888,13 +888,13 @@ macOS packaging retains its frozen Python builder.
 `reader_fixture.py` constructs only a newly reserved synthetic fixture, without
 enabling the POSIX archive publisher on Windows. Make targets exercise shared
 search/render/export, byte preservation, native promise bridging, and relocated
-MSIX execution. [WINDOWS.md](../WINDOWS.md) tracks actual validation
+MSIX execution. [Developing](../DEVELOPING.md#windows) tracks actual validation
 and outstanding native/signing gates; earlier Rust packaging evidence is not
 evidence for this Python payload.
 
 ## Windows development setup
 
-[WINDOWS.md](../WINDOWS.md) describes building and running the x64 Python/WebView2
+[Developing](../DEVELOPING.md#windows) describes building and running the x64 Python/WebView2
 desktop and MSIX. The retired Rust/MSVC and Dioxus notes are preserved in the retrospective. Windows now uses native writer locks and the embedded scanner; see
 [Shared Python Windows desktop](#shared-python-windows-desktop).
 

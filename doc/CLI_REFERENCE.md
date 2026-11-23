@@ -20,7 +20,7 @@ ect --version
 From a source checkout, use `uv sync --locked` once and prefix commands with
 `uv run --locked`, for example `uv run --locked ect-create collection.mailarchive`.
 All examples below use the installed commands directly. No Make installation is
-needed to run them. Build and test commands are in [Developer commands](DEVELOPER_COMMANDS.md).
+needed to run them. Build and test commands are in [Developing](DEVELOPING.md).
 
 Python 3.12 or newer is required; uv can provide it. Antivirus scanning also
 needs a native `libclamav` runtime, its one-shot updater and verified definitions;
@@ -253,6 +253,6 @@ Use `ect COMMAND --help` for each command's actual options.
 | `ect validation` | List, fetch, prepare or run explicitly selected validation corpora; cloud runs need separately provisioned credentials and authorization |
 | `ect processor` | Disposable plugin-development harness; not a canonical archive creator |
 
-[Developer commands](DEVELOPER_COMMANDS.md) covers builds, signing, tests, Rust
+[Developing](DEVELOPING.md) covers builds, signing, tests, Rust
 helpers and research scripts. [The documentation guide](README.md) locates the
 maintained user, developer and format references.

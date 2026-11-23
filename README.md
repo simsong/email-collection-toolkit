@@ -53,8 +53,9 @@ See [Command line](https://simsong.github.io/email-collection-toolkit/command-li
   importing, searching, archive care, the command line, and troubleshooting.
 - [Command-line reference](doc/CLI_REFERENCE.md): every command and option.
 - [Release notes](doc/RELEASE_NOTES.md): what changed in each version.
-- [Developer documentation](doc/README.md): building, testing, releasing, and
-  how the archive works inside.
+- [Developing](doc/DEVELOPING.md) and [Releasing](doc/RELEASING.md): building,
+  testing, and publishing. The [documentation index](doc/README.md) covers how
+  the archive works inside.
 
 ## Community
 
