@@ -75,7 +75,7 @@ def corpus(tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path_factory.mktemp("crash-corpus") / "corpus"
     # Large enough (~170 messages) that body processing spans more than one
     # 64-message commit batch, so the processing kill point is observable.
-    generate(root, 1536 * 1024, seed=7)
+    generate(root, 1536 * 1024, seed=22)  # Seed 22 includes four undated messages (dated by Received).
     return root
 
 
@@ -141,9 +141,12 @@ def test_uninterrupted_import_holds_exactly_the_corpus_and_damage_is_detected(tm
                         "WHERE address_pk != sender_address_pk) WHERE message_pk = ?", (second,))
         catalog.execute("UPDATE locations SET byte_offset = byte_offset + 1 WHERE message_pk = ?", (third,))
         catalog.execute("UPDATE messages SET sha256 = ? WHERE message_pk = ?", ("0" * 64, last))
+        # An undated message's date comes from its Received header; a changed timestamp must be caught.
+        assert catalog.execute("UPDATE messages SET date_utc = '2001-01-01T00:00:00+00:00' WHERE message_pk = "
+                               "(SELECT min(message_pk) FROM messages WHERE date_source = 'received')").rowcount == 1
     with sqlite3.connect(archive / "search.sqlite3") as search:
         search.execute("DELETE FROM message_fts WHERE rowid = (SELECT min(rowid) FROM message_fts)")
     problems = verify(archive, manifest).problems
     for expected in ("wrong subject", "wrong sender", "wrong location pointer", "not in the catalog",
-                     "not in the corpus", "missing from search"):
+                     "not in the corpus", "missing from search", "wrong date (from received)"):
         assert any(expected in problem for problem in problems), (expected, problems)

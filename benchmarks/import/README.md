@@ -45,8 +45,11 @@ the run unless all of the following hold:
   `read_message_bytes`, return exactly the expected bytes, and their SHA-256
   matches. Maildir files are stored verbatim. The `.mbox` records keep their
   `>From` quoting, because an undeclared MBOX dialect is never unquoted.
-- Subject, sender, recipients, date (or, for undated mail, its non-Date
-  source), Message-ID and attachment bytes all match what was generated.
+- Subject, sender, recipients, date, Message-ID and attachment bytes all match
+  what was generated. Undated mail must be dated from its Received header,
+  with date source `received`.
+- The verifier keeps only digests and metadata per message, not message
+  bytes, so its memory use stays small for multi-gigabyte corpora.
 - Search lists each message's attachments, and each Subject and body token
   finds exactly its own message. 50 sampled body words find their messages.
 - Each document identifier finds its message for every type an installed

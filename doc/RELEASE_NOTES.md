@@ -26,7 +26,8 @@ Rust delivery plans and historical package checks are not current acceptance.
   .pdf, .docx, .doc, .xls, .xlsx, .ppt, .pptx and .jpeg, each with a unique
   search identifier. Identifiers in types without a text extractor yet are
   reported as gaps rather than failures. The crash-recovery tests run the same
-  check.
+  check. The check holds only digests and metadata in memory, never the corpus
+  itself.
 
 ## 1.0.0a74 — faster body and attachment processing
 

@@ -85,6 +85,7 @@ class SyntheticMessage(BaseModel):
     sender: str
     recipients: list[str]
     date_utc: datetime | None
+    received_utc: datetime
     message_id: str
     words: list[str]
     attachments: list[ExpectedAttachment]
@@ -186,7 +187,7 @@ def build_message(rng: random.Random, index: int, start: datetime, prior_ids: li
     return SyntheticMessage(
         index=index, raw=("\n".join(headers) + "\n\n" + text + "\n").encode("utf-8"), subject=subject,
         subject_token=subject_token, body_token=body_token, sender=sender, recipients=[a for _n, a in recipients],
-        date_utc=when if dated else None, message_id=message_id, words=words, attachments=attachments)
+        date_utc=when if dated else None, received_utc=when, message_id=message_id, words=words, attachments=attachments)
 
 
 def corpus_messages(target_bytes: int, seed: int) -> Iterator[SyntheticMessage]:

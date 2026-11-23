@@ -23,12 +23,13 @@ import hashlib
 import random
 import sqlite3
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent))
-from perf_corpus import CorpusManifest, SyntheticMessage, corpus_messages  # noqa: E402
+from perf_corpus import CorpusManifest, ExpectedAttachment, corpus_messages  # noqa: E402
 
 from mailarchiver.layout import mbox_directory  # noqa: E402
 from mailarchiver.mailsearch import read_message_bytes  # noqa: E402
@@ -38,6 +39,21 @@ from mailarchiver.processing.registry import load_processors  # noqa: E402
 from mailarchiver.standalone_verify import verify_archive  # noqa: E402
 
 SAMPLED_WORDS = 50
+
+
+class Expected(BaseModel):
+    """What the archive must record for one corpus message, without its bytes (the corpus may exceed RAM)."""
+    subject: str
+    subject_token: str
+    body_token: str
+    sender: str
+    recipients: list[str]
+    date_utc: datetime
+    date_source: str
+    message_id: str
+    attachments: list[ExpectedAttachment]
+    record_sha256: str  # The archived bytes without trailing newlines, as an MBOX slice holds them.
+    sampled_word: str | None = None
 
 
 class Verification(BaseModel):
@@ -57,9 +73,19 @@ def verify(archive: Path, manifest: CorpusManifest, readable: set[str] | None = 
     """Return problems (failures) and gaps; ``readable`` overrides the installed processors' MIME types."""
     result = Verification()
     problems = result.problems
-    messages: dict[str, SyntheticMessage] = {}
+    rng = random.Random(manifest.seed)
+    sampled = set(rng.sample(range(manifest.message_count), min(SAMPLED_WORDS, manifest.message_count)))
+    messages: dict[str, Expected] = {}
     for message in corpus_messages(manifest.target_bytes, manifest.seed):
-        messages[hashlib.sha256(message.archived).hexdigest()] = message
+        archived = message.archived
+        messages[hashlib.sha256(archived).hexdigest()] = Expected(
+            subject=message.subject, subject_token=message.subject_token, body_token=message.body_token,
+            sender=message.sender, recipients=message.recipients,
+            date_utc=message.date_utc or message.received_utc,
+            date_source="date" if message.date_utc is not None else "received",
+            message_id=message.message_id, attachments=message.attachments,
+            record_sha256=hashlib.sha256(archived.rstrip(b"\n")).hexdigest(),
+            sampled_word=rng.choice(message.words) if message.index in sampled else None)
     if len(messages) != manifest.message_count:
         problems.append(f"corpus regenerated {len(messages)} distinct messages, manifest says {manifest.message_count}")
     if len({message.subject for message in messages.values()}) != len(messages):
@@ -95,9 +121,9 @@ def verify(archive: Path, manifest: CorpusManifest, readable: set[str] | None = 
             stored = read_message_bytes(archive, pk)  # Follows the catalog's location pointer.
         except (ValueError, OSError):
             stored = b""
-        if stored != expected.archived or hashlib.sha256(stored).hexdigest() != digest:
+        if hashlib.sha256(stored).hexdigest() != digest:
             flag("bytes or hash")
-            stored = expected.archived  # Still check the remaining metadata.
+            stored = b""  # The remaining metadata is still checked; attachments are not.
         if filename is None:
             flag("location pointer (missing)")
         else:
@@ -109,7 +135,7 @@ def verify(archive: Path, manifest: CorpusManifest, readable: set[str] | None = 
                 flag("location pointer (unreadable MBOX)")
             else:
                 envelope, _, body = record.partition(b"\n")
-                if not envelope.startswith(b"From ") or unquote(body).rstrip(b"\n") != expected.archived.rstrip(b"\n"):
+                if not envelope.startswith(b"From ") or hashlib.sha256(unquote(body).rstrip(b"\n")).hexdigest() != expected.record_sha256:
                     flag("location pointer (wrong bytes)")
         if subject != expected.subject:
             flag("subject")
@@ -119,18 +145,17 @@ def verify(archive: Path, manifest: CorpusManifest, readable: set[str] | None = 
             flag("sender")
         if recipients.get(pk, set()) != {(address, "to") for address in expected.recipients}:
             flag("recipients")
-        if expected.date_utc is not None and (date_source != "date" or date_utc != expected.date_utc.isoformat()):
-            flag("date")
-        if expected.date_utc is None and date_source == "date":
-            flag("date source of undated message")
-        parsed = email.message_from_bytes(stored, policy=email.policy.default)
-        found: dict[str | None, str] = {}
-        for part in parsed.walk():
-            if part.get_filename():
-                payload = part.get_payload(decode=True)
-                found[part.get_filename()] = hashlib.sha256(payload if isinstance(payload, bytes) else b"").hexdigest()
-        if found != {attachment.filename: attachment.sha256 for attachment in expected.attachments}:
-            flag("attachment bytes")
+        if date_source != expected.date_source or date_utc != expected.date_utc.isoformat():
+            flag(f"date (from {expected.date_source})")
+        if stored:
+            parsed = email.message_from_bytes(stored, policy=email.policy.default)
+            found: dict[str | None, str] = {}
+            for part in parsed.walk():
+                if part.get_filename():
+                    payload = part.get_payload(decode=True)
+                    found[part.get_filename()] = hashlib.sha256(payload if isinstance(payload, bytes) else b"").hexdigest()
+            if found != {attachment.filename: attachment.sha256 for attachment in expected.attachments}:
+                flag("attachment bytes")
     for field, digests in sorted(wrong.items()):
         problems.append(f"{len(digests)} messages have the wrong {field}, e.g. {_first(digests)}")
 
@@ -158,12 +183,12 @@ def verify(archive: Path, manifest: CorpusManifest, readable: set[str] | None = 
                             f"find exactly them, e.g. {_first(unsearchable)}")
         if misindexed:
             problems.append(f"{len(misindexed)} messages have wrong attachment listings in search, e.g. {_first(misindexed)}")
-        rng = random.Random(manifest.seed)
-        sample = rng.sample(sorted(messages), min(SAMPLED_WORDS, len(messages)))
-        picks = [(rng.choice(messages[digest].words), digest) for digest in sample]
+        picks = [(message.sampled_word, digest) for digest, message in messages.items() if message.sampled_word]
         missed = [f"{word} in {digest}" for word, digest in picks if digest not in _matches(search, "message_fts", word)]
+        if len(picks) < min(SAMPLED_WORDS, len(messages)):
+            problems.append(f"only {len(picks)} body words were sampled, expected {SAMPLED_WORDS}")
         if missed:
-            problems.append(f"{len(missed)} of {len(sample)} sampled body words are not indexed for their message, e.g. {missed[0]}")
+            problems.append(f"{len(missed)} of {len(picks)} sampled body words are not indexed for their message, e.g. {missed[0]}")
         for digest, message in sorted(messages.items()):
             for attachment in message.attachments:
                 if attachment.identifier is None:
