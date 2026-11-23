@@ -40,3 +40,4 @@ The first rows of `results.jsonl` come from a 4-CPU Linux cloud container
 | 056648a | baseline | 920 s | 281 s | 617 s | 5.2 |
 | this PR | grouped commits, throttled progress | 318 s | 152 s | 154 s | 15.1 |
 | dcfc5bb | + single-write objects, config cache | 247 s | 112 s | 122 s | 19.4 |
+| be32340 | + batched processing commits, warm working copies, one directory sync per commit | 210 s | 128 s | 69 s | 22.9 |
