@@ -6,6 +6,23 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a73 — faster imports
+
+- Progress refreshes no longer recount the whole processing job table and fsync
+  the status file once per message. Those costs grew with archive size, which
+  made imports quadratic. Phase changes and final states still render at once.
+- Processor checkpoints for one message, or one processing job, share a single
+  SQLite commit instead of committing several times per processor. A SIGKILL
+  during ingest or processing, followed by a restart, gives the same archive as
+  an uninterrupted import.
+- Write each message's working copy once instead of staging and copying it,
+  skip re-copying processor outputs that are already stored, and stop
+  re-parsing unchanged YAML configuration for every processor call.
+- `make benchmark-import` times a deterministic 50 MB synthetic corpus and
+  records the result in `benchmarks/import/results.jsonl`.
+- Ctrl-C is acknowledged at once on macOS even when the signal lands on a worker
+  thread; previously the main thread could sleep until that worker finished.
+
 ## 1.0.0a72 — dependency security updates
 
 - Update the PST downloader's ZIP reader to the patched 9.x line and reject

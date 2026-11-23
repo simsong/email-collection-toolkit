@@ -44,7 +44,7 @@ from .api import (
     MIME_TYPE, ProcessingResult, RAW_MESSAGE, RunReport,
 )
 from .registry import subscribers
-from .store import content_reference, enqueue, report, snapshot
+from .store import content_reference, enqueue, flush_group, grouped, report, snapshot, unit
 from .objects import collect_objects, index_outputs
 
 RANK_FAILURE = "rank failed; inspect invocations"
@@ -207,7 +207,7 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
     if previous:
         recorded = plugin.model_copy(update={"manifest": plugin.manifest.model_copy(update={"implementation_version": previous[1]})})
         return CheckpointResult(plugin=recorded, result=ProcessingResult.model_validate_json(previous[0]))
-    with database:
+    with unit(database):
         cursor = database.execute("INSERT INTO invocations(job_id,kind,version,rank,status) VALUES(?,?,?,?,'running')",
                                   (job_id, plugin.manifest.kind, plugin.manifest.implementation_version, plugin.manifest.rank))
         invocation_id = cursor.lastrowid
@@ -225,7 +225,7 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
                                     for child in response.result.promotions),
             })})
     except (KeyboardInterrupt, GeneratorExit):
-        with database:
+        with unit(database):
             database.execute("UPDATE invocations SET status='failed',elapsed=?,error='cancelled' WHERE invocation_id=?",
                              (time.monotonic() - started, invocation_id))
         raise
@@ -236,7 +236,7 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
     elapsed = time.monotonic() - started
     success = response.result is not None and response.error is None
     accepted = services.failed(item, plugin, response) if not success and services is not None else None
-    with database:
+    with unit(database):
         database.execute("UPDATE invocations SET status=?,elapsed=?,result_json=?,error=? WHERE invocation_id=?",
                          ("completed" if success else "failed", elapsed,
                           response.result.model_dump_json() if success and response.result else response.model_dump_json(),
@@ -345,7 +345,7 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
     processed = 0
     stopped = False
     failure: BaseException | None = None
-    with tempfile.TemporaryDirectory(prefix="processing-") as directory:
+    with grouped(database), tempfile.TemporaryDirectory(prefix="processing-") as directory:
         try:
             with ThreadPoolExecutor(max_workers=workers) if workers > 1 or heartbeat is not None else nullcontext() as pool:
                 def advance(job: ActiveJob, response: InvocationResponse | None = None,
@@ -448,12 +448,12 @@ def _job(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], job_id: 
             input_error = f"input unreadable: {error}"
             failures.append(error)
         if input_error:
-            with database:
+            with unit(database):
                 database.execute("UPDATE jobs SET status='failed',detail=? WHERE job_id=?", (input_error, job_id))
             ending = "failed"
             return continue_after_failure
         selected = subscribers(plugins, item)
-        with database:
+        with unit(database):
             database.execute("UPDATE jobs SET status='running' WHERE job_id=?", (job_id,))
         stop_import = False
         explicit_stop = False
@@ -474,7 +474,7 @@ def _job(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], job_id: 
                     if checkpoint.result.outcome == "fail-import":
                         break
             outcomes = [result.outcome for _, result in results]
-            with database:
+            with unit(database):
                 if failed or "fail-import" in outcomes:
                     database.execute("UPDATE jobs SET status='failed',detail=? WHERE job_id=?", (RANK_FAILURE, job_id))
                     stop_import = True
@@ -509,11 +509,12 @@ def _job(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], job_id: 
         if not aborted:
             if services is not None:
                 services.complete(item)
-            with database:
+            with unit(database):
                 database.execute("UPDATE jobs SET status='completed' WHERE job_id=?", (job_id,))
         if services is not None:
             services.release(item.message_id)
         else:
+            flush_group(database)
             collect_objects(database, item.archive.path, message_id=item.message_id)
         ending = "aborted" if aborted else "completed"
         return True

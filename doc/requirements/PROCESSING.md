@@ -78,6 +78,13 @@ using real in-process test plugins through make processor and
 make test-processors. It shall validate manifests before executing code,
 enforce rank barriers and type dependencies, preserve sibling work after a
 part abort, and persist invocations and handoffs for interruption recovery.
+Checkpoint units (job state, invocation records, rank results) shall each stay
+atomic, but may share one SQLite commit per ingested message or per dispatched
+job, so a message does not pay for dozens of rollback-journal commits. A crash
+may lose only that uncommitted group, which replays from the previous commit;
+object cleanup shall commit the group first. A SIGKILL during ingest or during
+body/attachment processing followed by a restart shall yield the same catalog
+messages as an uninterrupted import, a verifying archive and no unfinished jobs.
 Failed prerequisites must block queued downstream work across restarts.
 Python processors shall run in process. Plugins must honor cooperative deadlines
 and bound blocking I/O; timed-out results must not be committed. The Rust PST

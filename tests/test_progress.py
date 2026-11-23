@@ -7,6 +7,7 @@ from __future__ import annotations
 import queue
 import os
 import re
+import signal
 import subprocess
 import sys
 import textwrap
@@ -274,6 +275,7 @@ def test_clamav_preflight_is_repeated_before_workers_start(capsys: pytest.Captur
     """Requirement: the main status driver reports ClamAV readiness before worker activity."""
     progress = ProgressReporter(worker_count=2)
     progress.tty = False
+    progress.refresh_interval = 0.0  # the real driver refreshes over seconds of waiting
     progress.start()
 
     try:
@@ -448,6 +450,55 @@ def test_file_worker_pool_preserves_deferred_discovery_traceback() -> None:
     assert stop.is_set()
 
 
+@pytest.mark.skipif(not hasattr(signal, "pthread_kill"), reason="POSIX thread-directed signals")
+def test_interrupt_delivered_to_a_worker_thread_still_wakes_the_owner(tmp_path: Path) -> None:
+    """macOS may deliver Ctrl-C to any thread; the owner must still acknowledge it at once."""
+    release = tmp_path / "release-worker"
+    script = textwrap.dedent("""
+        import signal, sys, threading
+        from pathlib import Path
+        from mailarchiver.__main__ import ProgressReporter, run_file_workers
+
+        release = Path(sys.argv[1])
+        progress = ProgressReporter()
+        def worker(_item):
+            print('worker-ready', flush=True)
+            sys.stdin.readline()
+            signal.pthread_kill(threading.get_ident(), signal.SIGINT)
+            from mailarchiver.file_events import wait_for_path_state
+            wait_for_path_state([release], release.exists, timeout=15)
+        def acknowledged():
+            progress.announce_interrupt()
+            print('acknowledged', flush=True)
+        try:
+            run_file_workers([0], 1, worker, threading.Event(), progress.refresh, on_interrupt=acknowledged)
+        except KeyboardInterrupt:
+            print('cleanup complete', flush=True)
+            raise SystemExit(130)
+    """)
+    process = subprocess.Popen([sys.executable, "-c", script, str(release)], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        assert process.stdin is not None and process.stdout is not None
+        assert process.stdout.readline().rstrip() == b"worker-ready"
+        time.sleep(0.2)  # Let the owner reach its blocking wait before the worker is signalled.
+        started = time.monotonic()
+        process.stdin.write(b"go\n")
+        process.stdin.flush()
+        # Without a wakeup this line only arrives when the worker gives up after 15 s.
+        assert process.stdout.readline().rstrip() == b"acknowledged"
+        assert time.monotonic() - started < 5, "owner waited for the worker instead of the interrupt"
+        release.touch()
+        assert process.stdout.readline().rstrip() == b"cleanup complete"
+        _stdout, stderr = process.communicate(timeout=10)
+        assert process.returncode == 130
+        assert stderr.count(b"**Interrupted. Shutting down") == 1
+    finally:
+        release.touch()
+        process.kill()
+        process.communicate(timeout=10)
+
+
 def test_interrupt_notice_precedes_worker_shutdown(tmp_path: Path) -> None:
     """Real SIGINT acknowledges immediately, even while a worker cannot yet finish."""
     release = tmp_path / "release-worker"
@@ -546,6 +597,7 @@ def test_processor_recovery_publishes_live_activity_and_finished_jobs(tmp_path: 
     started = datetime.now(UTC)
     status_file = IngestStatusFile(archive, new_status_id(started, 1, os.getpid()))
     progress = ProgressReporter(worker_count=2, status_file=status_file, archive=archive, run_pk=1, terminal=False)
+    progress.refresh_interval = 0.0  # observe every refresh; throttling has its own test
     progress.set_phase("Processing saved mail", activity_kind="processing")
     snapshots = []
     partial_snapshots = []
@@ -622,6 +674,7 @@ def test_saved_message_backlog_deduplicates_parts_and_tracks_unfinished_work(tmp
         assert saved_messages_remaining(database) == 2
         reporter = ProgressReporter(status_file=IngestStatusFile(archive, "ingest-remaining"),
                                     archive=archive, run_pk=1, terminal=False)
+        reporter.refresh_interval = reporter.saved_count_min_interval = 0.0  # throttling has its own test
         reporter.track_saved_messages(lambda: saved_messages_remaining(database))
         reporter.set_phase("Processing saved mail", activity_kind="processing")
         assert read_ingest_history(archive).statuses[0].saved_messages_remaining == 2
@@ -752,3 +805,25 @@ def test_status_progress_without_terminal(tmp_path: Path) -> None:
     reporter.finish("completed")
     assert reporter.output is None
     assert read_ingest_history(archive).statuses[0].state == "completed"
+
+
+def test_rapid_refreshes_are_throttled_but_phase_changes_render(capsys: pytest.CaptureFixture[str]) -> None:
+    """Requirement (#202): per-message refreshes must not each re-render, rewrite the
+    status file, or recount saved work; phase changes and the final state still render."""
+    progress = ProgressReporter(worker_count=1)
+    progress.tty = False
+    counts: list[int] = []
+    progress.start()
+    progress.set_phase("Processing message bodies and attachments", activity_kind="processing")
+    progress.track_saved_messages(lambda: counts.append(1) or 7)
+    try:
+        for _ in range(500):
+            progress.refresh()
+        progress.set_phase("verifying archived messages")
+    finally:
+        progress.finish("completed")
+    lines = capsys.readouterr().err.splitlines()
+    assert len([line for line in lines if line.startswith("Processing message bodies")]) < 10
+    assert any(line.startswith("verifying archived messages") for line in lines)
+    assert any(line.startswith("completed") for line in lines)
+    assert len(counts) < 10
