@@ -1,151 +1,31 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# TEMPORARY diagnostic workflow for PR #225 (delete this branch afterwards).
 
 name: Continuous integration
 
 on:
   push:
     branches:
-      - "**"
-      - "!main"
+      - "claude/diag-**"
 
 permissions:
   contents: read
 
-env:
-  MAILARCHIVER_NATIVE_GUI_E2E: "0"
-  MAILARCHIVER_NATIVE_APPLICATION_E2E: "0"
-  MAILARCHIVER_NATIVE_HTML_FIND_E2E: "0"
-  MAILARCHIVER_NATIVE_SETUP_E2E: "0"
-
 jobs:
-  release-candidate:
-    # Explicit candidate validation is independent of the changed-file gate.
-    if: contains(github.event.head_commit.message, '[release-ci]')
-    permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/release-candidate.yml
-    secrets: inherit
-
-  ci-gate:
+  imap-ctrl-c:
     runs-on: macos-15
-    outputs:
-      run_checks: ${{ steps.check-changes.outputs.run_checks }}
+    timeout-minutes: 30
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Check for changes requiring validation
-        id: check-changes
-        env:
-          BASE_SHA: ${{ github.event.before }}
-          HEAD_SHA: ${{ github.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$BASE_SHA" =~ ^0+$ ]]; then
-            echo "run_checks=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- . ':(exclude)README.md' ':(exclude)doc/RELEASE_NOTES.md'; then
-            echo "run_checks=false" >> "$GITHUB_OUTPUT"
-          else
-            status=$?
-            if [[ "$status" -eq 1 ]]; then
-              echo "run_checks=true" >> "$GITHUB_OUTPUT"
-            else
-              exit "$status"
-            fi
-          fi
-
-  static-rust:
-    needs: ci-gate
-    if: ${{ needs.ci-gate.outputs.run_checks == 'true' }}
-    runs-on: macos-15
-    timeout-minutes: 25
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7.0.1
-      - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.12"
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v10.0.1
-      - name: Build pinned ClamAV and OpenSSL
-        uses: ./.github/actions/prepare-clamav
-      - name: Install dependencies
-        run: uv sync --locked --all-groups
-      - name: Refresh project virus definitions
-        run: make freshclam
-      - name: Static and Rust checks
-        # Hosted runners include rustup; explicitly provision the check components.
-        env:
-          RUSTUP_TOOLCHAIN: stable
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv sync --locked --all-groups
+      - name: IMAP Ctrl-C test, repeated
         run: |
-          rustup toolchain install stable --profile minimal --component rustfmt,clippy
-          make check-static
-
-  python-browser:
-    needs: ci-gate
-    if: ${{ needs.ci-gate.outputs.run_checks == 'true' }}
-    runs-on: macos-15
-    timeout-minutes: 60
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7.0.1
-      - name: Set up Python
-        uses: actions/setup-python@v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v10.0.1
-      - name: Install PDF tools
-        run: brew install poppler
-      - name: Build pinned ClamAV and OpenSSL
-        uses: ./.github/actions/prepare-clamav
-      - name: Install dependencies
-        run: uv sync --locked --all-groups
-      - name: Verify real Sparkle release signer
-        run: make test-sparkle-signing
-      - name: Refresh project virus definitions
-        run: make freshclam
-      - name: Install headless test browser
-        run: make install-test-browser PLAYWRIGHT_INSTALL_ARGS="chromium"
-      - name: Python and Chromium GUI tests
-        env:
-          RUSTUP_TOOLCHAIN: stable
-        run: |
-          rustup toolchain install stable --profile minimal
-          make check-tests
-      - name: Upload Playwright failure traces
-        if: failure()
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: playwright-traces-${{ github.run_id }}-${{ github.run_attempt }}
-          path: test-results
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Validate distributions
-        run: make distribution-check
-      - name: Install Zola
-        env:
-          ZOLA_VERSION: 0.23.4
-          ZOLA_SHA256_ARM64: 303b8e1f3251a6250e47f811eda143316f653c22201faa66777d48ac499c0ee3
-          ZOLA_SHA256_X86_64: e79edcba2e8d03d22065c9cb8fa2e3abf07b823ef17f00abdc060188dceabba7
-        run: |
-          case "$(uname -m)" in
-            arm64) zola_arch=aarch64; zola_sha256="$ZOLA_SHA256_ARM64" ;;
-            x86_64) zola_arch=x86_64; zola_sha256="$ZOLA_SHA256_X86_64" ;;
-            *) echo 'Unsupported macOS architecture'; exit 1 ;;
-          esac
-          curl --fail --location --output "$RUNNER_TEMP/zola.tar.gz" \
-            "https://github.com/getzola/zola/releases/download/v${ZOLA_VERSION}/zola-v${ZOLA_VERSION}-${zola_arch}-apple-darwin.tar.gz"
-          printf '%s  %s\n' "$zola_sha256" "$RUNNER_TEMP/zola.tar.gz" | shasum -a 256 --check -
-          mkdir "$RUNNER_TEMP/zola"
-          tar -xzf "$RUNNER_TEMP/zola.tar.gz" -C "$RUNNER_TEMP/zola"
-          echo "$RUNNER_TEMP/zola" >> "$GITHUB_PATH"
-      - name: Build website
-        run: make website-download-check website-build-check
+          for i in 1 2 3 4; do
+            uv run pytest -q -p no:cacheprovider tests/test_imap.py -k test_cli_ctrl_c_checkpoints -s > out.txt 2>&1 || true
+            grep -E "^DIAG|passed|failed" out.txt | grep -v "print(" || true
+            sed -n '/DIAGLOG-BEGIN/,/DIAGLOG-END/p' out.txt | cut -c1-400 || true
+          done

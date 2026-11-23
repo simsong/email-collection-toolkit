@@ -405,6 +405,8 @@ from tests.imap_fixture import FixtureKeyring
 from mailarchiver import imap_credentials
 from mailarchiver.imap_cli import main
 from mailarchiver.archive_config import load_archive_config
+import faulthandler, signal as _signal
+faulthandler.register(_signal.SIGUSR1, all_threads=True)
 vault = FixtureKeyring()
 if '--archive' in sys.argv:
     archive = Path(sys.argv[sys.argv.index('--archive') + 1])
@@ -1196,11 +1198,25 @@ def test_cli_ctrl_c_checkpoints_and_next_invocation_resumes(tmp_path: Path, imap
             assert 0 < totals(archive).archived < 80, (tmp_path / "interrupted.log").read_text()
             assert released, "first committed message remained cached while download continued"
             assert server.fetch_paused.wait(10), "No real body request reached the server gate"
+            import time as _time
+            sent = _time.monotonic()
             os.killpg(process.pid, signal.SIGINT)
-            wait_for_path_state([tmp_path / "interrupted.log"], lambda: "Interrupted; stopping downloads and saving progress…" in
-                                (tmp_path / "interrupted.log").read_text(), timeout=10)
+            try:
+                wait_for_path_state([tmp_path / "interrupted.log"], lambda: "Interrupted; stopping downloads and saving progress…" in
+                                    (tmp_path / "interrupted.log").read_text(), timeout=10)
+                print("DIAG notice after", round(_time.monotonic() - sent, 2), flush=True)
+            except TimeoutError:
+                print("DIAG notice missing after 10s", flush=True)
+                os.kill(process.pid, signal.SIGUSR1)
+                _time.sleep(2)
+                print("DIAGLOG-BEGIN\n" + (tmp_path / "interrupted.log").read_text() + "\nDIAGLOG-END", flush=True)
+                raise
             server.release_bodies()
-            assert process.wait(timeout=30) == 130, (tmp_path / "interrupted.log").read_text()
+            code = process.wait(timeout=30)
+            if code != 130:
+                print("DIAG exit", code, flush=True)
+                print("DIAGLOG-BEGIN\n" + (tmp_path / "interrupted.log").read_text() + "\nDIAGLOG-END", flush=True)
+            assert code == 130, (tmp_path / "interrupted.log").read_text()
         interrupted_log = (tmp_path / "interrupted.log").read_text()
         assert "Traceback" not in interrupted_log and "Exception ignored" not in interrupted_log
         assert "SpawnProcess" not in interrupted_log
