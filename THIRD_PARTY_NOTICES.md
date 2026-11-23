@@ -6,6 +6,8 @@ Email Collection Toolkit retains the notices and license terms of material that 
 covered by the repository's `COPYRIGHT` notice. A packaged application must
 include this file, `COPYRIGHT`, `LICENSE` (GPLv2), and the complete license texts collected from
 the exact runtime environment used to build that application.
+[doc/LICENSING.md](doc/LICENSING.md) explains the reasoning, maps each shipped
+package to its licenses, and tracks open compatibility issues.
 
 ## Material stored in this repository
 

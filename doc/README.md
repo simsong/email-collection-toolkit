@@ -26,6 +26,7 @@ Plans and dated investigations are separate from instructions to run today.
   safety, acceptance layers and corpus comparisons.
 - [DevOps](DEVOPS.md): CI, release and website workflow triggers and gates.
 - [macOS distribution](MACOS_DISTRIBUTION.md) and [certificates](CERTIFICATE_MANAGEMENT.md).
+- [Licensing](LICENSING.md): project licenses, bundled components, and the license of each shipped package.
 - [Windows development](WINDOWS.md), [MSIX packaging](WINDOWS_MSIX_TEST.md),
   [public signing](WINDOWS_PUBLIC_SIGNING.md), and [application updates](SPARKLE_UPDATES.md).
 - [Antivirus](EMBEDDED_CLAMAV.md), [plugins](PLUGINS.md), and [data-quality tools](DATA_QUALITY_AUDIT.md).

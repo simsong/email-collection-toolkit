@@ -277,4 +277,6 @@ Additional licenses are available from the copyright holder.
 
 Original project material is covered by [COPYRIGHT](COPYRIGHT). Vendored and
 separately licensed components are identified in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). [doc/LICENSING.md](doc/LICENSING.md)
+explains the licensing choices, lists every bundled component, and gives the
+license of each shipped package.
