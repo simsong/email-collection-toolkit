@@ -164,8 +164,11 @@ def test_shared_derived_input_survives_other_message_completion(tmp_path: Path) 
     with connect(archive, create=True) as database:
         submit(database, archive, MESSAGE, fingerprint(plugins))
         submit(database, archive, second, fingerprint(plugins))
-        assert run(database, plugins, max_jobs=2).pending == 2
-        shared = archive / "objects" / hashlib.sha256(b"shared").hexdigest()
+        # One run per emit job: within a run the dispatcher prefers a finished
+        # message's children, so a single max_jobs=2 run would consume instead.
+        assert run(database, plugins, max_jobs=1).pending == 2
+        assert run(database, plugins, max_jobs=1).pending == 2
+        shared =archive / "objects" / hashlib.sha256(b"shared").hexdigest()
         assert run(database, plugins, max_jobs=1).pending == 1
         assert shared.read_bytes() == b"shared"
         assert run(database, plugins).pending == 0
