@@ -32,10 +32,11 @@ the main cost on slow or networked disks, run the importer under
 
 ## Recorded results
 
-The first two rows of `results.jsonl` come from a 4-CPU Linux cloud container
+The first rows of `results.jsonl` come from a 4-CPU Linux cloud container
 (4,804 messages):
 
 | Commit | Change | Wall time | Ingest | Body/attachment processing | Messages/s |
 | --- | --- | --- | --- | --- | --- |
 | 056648a | baseline | 920 s | 281 s | 617 s | 5.2 |
 | this PR | grouped commits, throttled progress | 318 s | 152 s | 154 s | 15.1 |
+| dcfc5bb | + single-write objects, config cache | 247 s | 112 s | 122 s | 19.4 |
