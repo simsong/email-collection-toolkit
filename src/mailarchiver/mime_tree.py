@@ -232,7 +232,7 @@ class OriginalMimeParts(BaseModel):
     default_type: str = "text/plain"
     budget: MimeReaderBudget = Field(default_factory=MimeReaderBudget)
     _parsed: tuple[Message, int] | None = PrivateAttr(default=None)
-    _children: list[OriginalMimeParts] = PrivateAttr(default_factory=list)
+    _children: list[OriginalMimeParts] = PrivateAttr(default=[])  # copied per instance; see plugin_configuration
     _iterator: Iterator[tuple[int, int]] | None = PrivateAttr(default=None)
     _decoded: bytes | None = PrivateAttr(default=None)
 

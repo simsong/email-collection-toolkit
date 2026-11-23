@@ -6,6 +6,16 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a74 — faster body and attachment processing
+
+- Body/attachment processing commits once per batch of up to 64 messages (or
+  one second) instead of once per job. Search rows always commit before the
+  processing commit that marks their job done, so a crash only repeats work.
+- Run a message's remaining parts right after its previous part, so its working
+  copy is reused instead of being deleted and restored from MBOX between jobs.
+- Compile each processor once per source text, reuse empty processor
+  workspaces, and avoid a slow pydantic default on two hot models.
+
 ## 1.0.0a73 — faster imports
 
 - Progress refreshes no longer recount the whole processing job table and fsync

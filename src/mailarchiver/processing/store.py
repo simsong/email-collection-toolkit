@@ -134,6 +134,7 @@ USER_CANCELLED = "Cancelled by user"
 # Connections whose checkpoint units currently share one SQLite transaction.
 # Each unit is still all-or-nothing (a savepoint); only durability is grouped.
 _GROUPED: set[int] = set()
+_COMMIT_FIRST: dict[int, list[sqlite3.Connection]] = {}
 
 
 @contextmanager
@@ -156,14 +157,38 @@ def grouped(database: sqlite3.Connection) -> Iterator[None]:
         yield
     finally:
         _GROUPED.discard(key)
-        if database.in_transaction:
-            database.commit()
+        _commit(database)
 
 
 def flush_group(database: sqlite3.Connection) -> None:
     """Commit the open group early, e.g. before object cleanup requires it."""
+    _commit(database)
+
+
+def _commit(database: sqlite3.Connection) -> None:
+    for dependent in _COMMIT_FIRST.get(id(database), ()):
+        if dependent.in_transaction:
+            dependent.commit()
     if database.in_transaction:
         database.commit()
+
+
+@contextmanager
+def commit_first(database: sqlite3.Connection, dependent: sqlite3.Connection) -> Iterator[None]:
+    """Commit ``dependent`` before every grouped commit of ``database``.
+
+    Derived databases (search) written inside a processing group must become
+    durable before the processing commit marks those jobs completed; a crash
+    between the two commits then only repeats idempotent derived writes.
+    """
+    hooks = _COMMIT_FIRST.setdefault(id(database), [])
+    hooks.append(dependent)
+    try:
+        yield
+    finally:
+        hooks.remove(dependent)
+        if not hooks:
+            _COMMIT_FIRST.pop(id(database), None)
 
 
 @contextmanager

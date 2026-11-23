@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -47,9 +48,16 @@ from .contracts import AddressEvidence, ContentMetadata, Filing, HeaderMetadata,
 from .objects import collect_objects
 from .registry import fingerprint, load_processors
 from .runtime import RANK_FAILURE, ProcessingProgress, dispatch, prepare_run, run
-from .store import DATABASE, USER_CANCELLED, connect, enqueue, flush_group, grouped, report, snapshot, snapshot_bytes, unit
+from .store import (DATABASE, USER_CANCELLED, commit_first, connect, enqueue, flush_group, grouped, report, snapshot,
+                    snapshot_bytes, unit)
 
 Publisher = Callable[[MailObject, ParsedMessage, MailboxReference, int], int]
+# Finished messages are committed and their working objects collected in
+# batches: each commit costs several fsyncs, and collecting a raw copy that the
+# message's next job needs forces a restore from MBOX. A crash loses at most
+# one batch of completed jobs, which then replay from durable inputs.
+RELEASE_BATCH_MESSAGES = 64
+RELEASE_BATCH_SECONDS = 1.0
 
 
 class IngestedMessage(BaseModel):
@@ -74,6 +82,8 @@ class ProductionPipeline:
         self.heartbeat = heartbeat
         self.signals = signals
         self._ingesting = False
+        self._released: set[str] = set()
+        self._release_due = time.monotonic() + RELEASE_BATCH_SECONDS
         self.plugins = load_processors((builtin_plugin_directory(), *plugin_dirs))
         self.registry_hash = fingerprint(self.plugins)
         self.database = connect(self.archive, create=not (self.archive / DATABASE).exists(), production=True)
@@ -105,10 +115,19 @@ class ProductionPipeline:
     def release(self, message_id: str) -> None:
         if self._ingesting:
             return
+        self._released.add(message_id)
+        if len(self._released) >= RELEASE_BATCH_MESSAGES or time.monotonic() >= self._release_due:
+            self.collect_released()
+
+    def collect_released(self) -> None:
+        """Commit finished work, then collect objects of the released messages."""
         flush_group(self.database)
         if self.catalog.in_transaction:
             raise ValueError("object cleanup requires committed catalog records")
-        collect_objects(self.database, self.archive, self._canonical_bytes, message_id=message_id)
+        released, self._released = sorted(self._released), set()
+        self._release_due = time.monotonic() + RELEASE_BATCH_SECONDS
+        for message_id in released:
+            collect_objects(self.database, self.archive, self._canonical_bytes, message_id=message_id)
 
     def _canonical_bytes(self, digest: str) -> bytes:
         row = self.catalog.execute(
@@ -217,6 +236,7 @@ class ProductionPipeline:
             archived = self.catalog.execute("SELECT 1 FROM messages WHERE sha256=?", (str(row[0]),)).fetchone() is not None
             self._finish_ingest_message(str(row[0]), progress=progress, fail_on_error=not archived)
             self.release(str(row[0]))
+        self.collect_released()
 
     def _finish_ingest_message(self, message_id: str, *, progress: ProcessingProgress | None = None,
                                fail_on_error: bool = True) -> None:
@@ -239,9 +259,12 @@ class ProductionPipeline:
     def resume(self, pipelines: tuple[Pipeline, ...], *, max_jobs: int | None = None, message_id: str | None = None,
                fail_on_error: bool = True, progress: ProcessingProgress | None = None, workers: int = 1) -> RunReport:
         failures: list[Exception] = []
-        result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,
-                     installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
-                     message_id=message_id, continue_after_failure=True, progress=progress, workers=workers, heartbeat=self.heartbeat, signals=self.signals)
+        # Search rows written by complete() commit just before each processing commit.
+        with grouped(self.search), commit_first(self.database, self.search):
+            result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,
+                         installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
+                         message_id=message_id, continue_after_failure=True, progress=progress, workers=workers, heartbeat=self.heartbeat, signals=self.signals)
+        self.collect_released()
         if fail_on_error:
             self._raise_failures(pipelines, failures, message_id=message_id)
         return result
@@ -420,7 +443,7 @@ class ProductionPipeline:
         parts.sort(key=lambda part: json.loads(part[0]))
         body = "\n".join(part[2] for part in parts if part[1] == "body")
         attachments = "\n".join(part[2] for part in parts if part[1] == "attachment") if self.policy.index_attachments else ""
-        with self.search:
+        with unit(self.search):
             write_prepared_search_message(self.search, PreparedSearchMessage(sha256=item.message_id,
                 content=headers.search_headers + "\n" + body, attachment_content=attachments,
                 attachments=list(inventory.attachments), suggestions=list(headers.suggestions),

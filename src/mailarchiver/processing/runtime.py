@@ -15,6 +15,7 @@ Fundamental dependents:
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 from importlib.abc import MetaPathFinder
 from importlib.machinery import PathFinder, SourceFileLoader
@@ -81,11 +82,27 @@ class ProcessorServices(Protocol):
     def failed(self, item: ProcessingObject, plugin: PluginSpec, response: InvocationResponse) -> ProcessingResult | None: ...
 
 
+_COMPILED: dict[tuple[str, bytes], CodeType] = {}
+_COMPILED_LOCK = threading.Lock()
+
+
 class CurrentSourceLoader(SourceFileLoader):
     def get_code(self, fullname: str) -> CodeType:
-        # Explicit replay must load edited helpers rather than stale cached bytecode.
+        # Explicit replay must load edited helpers rather than stale cached bytecode,
+        # so the cache is keyed on the exact source bytes read now, never on mtimes.
+        # Plugins are re-executed per invocation; only compilation is reused.
         path = self.get_filename(fullname)
-        return compile(self.get_data(path), path, "exec", dont_inherit=True)
+        source = self.get_data(path)
+        key = (path, hashlib.sha256(source).digest())
+        with _COMPILED_LOCK:
+            code = _COMPILED.get(key)
+        if code is None:
+            code = compile(source, path, "exec", dont_inherit=True)
+            with _COMPILED_LOCK:
+                if len(_COMPILED) >= 256:
+                    _COMPILED.clear()
+                _COMPILED[key] = code
+        return code
 
 
 class PluginImports(MetaPathFinder):
@@ -342,6 +359,13 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
         cancelled = ActivityCallback(cancelled, (*signals, invocation_changed))
     failures = failures if failures is not None else []
     active: list[ActiveJob] = []
+    # Empty workspaces are indistinguishable from fresh ones; reusing them saves
+    # a directory create and remove per invocation.
+    spare: list[Path] = []
+    # Messages whose job just finished. Running a message's runnable children
+    # next keeps its working objects warm instead of collecting and restoring
+    # them between jobs; any order of runnable jobs is equally correct.
+    recent: list[str] = []
     processed = 0
     stopped = False
     failure: BaseException | None = None
@@ -359,6 +383,9 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
                     except StopIteration as done:
                         stopped |= not done.value
                         active.remove(job)
+                        if job.message_id not in recent:
+                            recent.append(job.message_id)
+                            del recent[:-workers]
                         return
                     except BaseException as caught:
                         failure = failure or caught
@@ -367,13 +394,16 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
                         return
                     finally:
                         if job.workspace is not None:
-                            shutil.rmtree(job.workspace)
+                            if any(job.workspace.iterdir()):
+                                shutil.rmtree(job.workspace)
+                            else:
+                                spare.append(job.workspace)
                             job.workspace = None
                     if stopped:
                         job.steps.close()
                         active.remove(job)
                         return
-                    job.workspace = Path(tempfile.mkdtemp(dir=directory))
+                    job.workspace = spare.pop() if spare else Path(tempfile.mkdtemp(dir=directory))
                     if pool is not None:
                         job.future = pool.submit(invoke, request, job.workspace, cancelled)
                     else:
@@ -385,15 +415,17 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
 
                 while True:
                     while not stopped and len(active) < workers and (max_jobs is None or processed < max_jobs):
-                        placeholders = ",".join("?" for _ in pipelines)
-                        message_filter = "" if message_id is None else "AND json_extract(item_json,'$.message_id')=? "
-                        busy_filter = ("AND json_extract(item_json,'$.message_id') NOT IN ("
-                                       + ",".join("?" for _ in active) + ") ") if active else ""
-                        row = database.execute("SELECT job_id,item_json,registry_hash FROM jobs WHERE status='pending' "
-                            f"AND json_extract(item_json,'$.pipeline') IN ({placeholders}) {message_filter}{busy_filter}"
-                            "AND (parent_job_id IS NULL OR EXISTS (SELECT 1 FROM jobs parent "
-                            "WHERE parent.job_id=jobs.parent_job_id AND parent.status='completed')) ORDER BY job_id LIMIT 1",
-                            (*pipelines, *((message_id,) if message_id is not None else ()), *(job.message_id for job in active))).fetchone()
+                        row = None
+                        if message_id is None:
+                            for candidate in reversed(tuple(recent)):
+                                if any(job.message_id == candidate for job in active):
+                                    continue
+                                row = _next_job(database, pipelines, candidate, active)
+                                if row is not None:
+                                    break
+                                recent.remove(candidate)
+                        if row is None:
+                            row = _next_job(database, pipelines, message_id, active)
                         if row is None:
                             break
                         worker = next(number for number in range(1, workers + 1) if all(job.worker != number for job in active))
@@ -427,6 +459,20 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
                 job.steps.close()
         if failure is not None:
             raise failure
+
+
+def _next_job(database: sqlite3.Connection, pipelines: tuple[Pipeline, ...], message_id: str | None,
+              active: list[ActiveJob]) -> tuple[int, str, str] | None:
+    """The oldest runnable pending job, optionally of one message, never of a busy message."""
+    placeholders = ",".join("?" for _ in pipelines)
+    message_filter = "" if message_id is None else "AND json_extract(item_json,'$.message_id')=? "
+    busy_filter = ("AND json_extract(item_json,'$.message_id') NOT IN ("
+                   + ",".join("?" for _ in active) + ") ") if active else ""
+    return database.execute("SELECT job_id,item_json,registry_hash FROM jobs WHERE status='pending' "
+        f"AND json_extract(item_json,'$.pipeline') IN ({placeholders}) {message_filter}{busy_filter}"
+        "AND (parent_job_id IS NULL OR EXISTS (SELECT 1 FROM jobs parent "
+        "WHERE parent.job_id=jobs.parent_job_id AND parent.status='completed')) ORDER BY job_id LIMIT 1",
+        (*pipelines, *((message_id,) if message_id is not None else ()), *(job.message_id for job in active))).fetchone()
 
 
 def _job(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], job_id: int, payload: str, *,
