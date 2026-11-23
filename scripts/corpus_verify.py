@@ -101,12 +101,16 @@ def verify(archive: Path, manifest: CorpusManifest, readable: set[str] | None = 
         if filename is None:
             flag("location pointer (missing)")
         else:
-            with (mbox_directory(archive) / filename).open("rb") as mbox:
-                mbox.seek(offset)
-                record = mbox.read(length)
-            envelope, _, body = record.partition(b"\n")
-            if not envelope.startswith(b"From ") or unquote(body).rstrip(b"\n") != expected.archived.rstrip(b"\n"):
-                flag("location pointer (wrong bytes)")
+            try:
+                with (mbox_directory(archive) / filename).open("rb") as mbox:
+                    mbox.seek(offset)
+                    record = mbox.read(length)
+            except OSError:
+                flag("location pointer (unreadable MBOX)")
+            else:
+                envelope, _, body = record.partition(b"\n")
+                if not envelope.startswith(b"From ") or unquote(body).rstrip(b"\n") != expected.archived.rstrip(b"\n"):
+                    flag("location pointer (wrong bytes)")
         if subject != expected.subject:
             flag("subject")
         if message_id != expected.message_id.strip("<>"):

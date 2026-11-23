@@ -32,7 +32,7 @@ from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent))
 from corpus_verify import Verification, verify  # noqa: E402
-from perf_corpus import OWNER_MARKER, CorpusManifest, generate  # noqa: E402
+from perf_corpus import CORPUS_VERSION, OWNER_MARKER, CorpusManifest, generate  # noqa: E402
 
 ROOT = Path(__file__).parents[1]
 DEFAULT_RESULTS = ROOT / "benchmarks" / "import" / "results.jsonl"
@@ -76,7 +76,8 @@ def _corpus(directory: Path, megabytes: float, seed: int) -> CorpusManifest:
         manifest_path = directory / "MANIFEST.json"
         if manifest_path.exists():
             manifest = CorpusManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
-            if manifest.seed == seed and manifest.target_bytes == int(megabytes * 1024 * 1024):
+            if (manifest.corpus_version == CORPUS_VERSION and manifest.seed == seed
+                    and manifest.target_bytes == int(megabytes * 1024 * 1024)):
                 return manifest
         shutil.rmtree(directory)
     return generate(directory, int(megabytes * 1024 * 1024), seed)

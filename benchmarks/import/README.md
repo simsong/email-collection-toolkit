@@ -19,7 +19,7 @@ includes non-ASCII headers, threads, duplicate Message-IDs with different
 content, missing Date headers and lines that need mboxrd quoting. Every Subject
 ends with a unique token (`subjectz000123z`), and every body with another
 (`bodyz000123z`). All addresses use `.test` domains. The corpus is cached under
-`.tmp/perf-corpus/` and regenerated if the seed or size changes.
+`.tmp/perf-corpus/` and regenerated if the corpus version, seed or size changes.
 
 Eighteen messages also carry real documents from `attachments/`: two each of
 `.txt`, `.pdf`, `.docx`, `.doc`, `.xls`, `.xlsx`, `.ppt`, `.pptx` and `.jpeg`
