@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from mailarchiver.processing.store import commit_first, flush_group, grouped, unit
+from mailarchiver.processing import store
+from mailarchiver.processing.store import commit_first, flush_group, grouped, snapshot_bytes, unit
 
 
 def _database(path: Path, log: list[str], name: str) -> sqlite3.Connection:
@@ -61,4 +62,25 @@ def test_failed_unit_rolls_back_alone_and_group_still_commits(tmp_path: Path) ->
             processing.execute("INSERT INTO rows VALUES('dropped')")
             raise RuntimeError("processor failed")
     assert _visible(tmp_path / "processing.sqlite3") == ["kept"]
+    assert log == ["processing"]
+
+
+def test_object_directory_is_synced_before_the_commit_that_references_it(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Objects written inside a group share one directory sync, issued before the commit."""
+    log: list[str] = []
+    processing = _database(tmp_path / "processing.sqlite3", log, "processing")
+    monkeypatch.setattr(store, "sync_directory", lambda path: log.append(f"sync {path.name}"))
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    with grouped(processing):
+        for payload in (b"one", b"two"):
+            reference = snapshot_bytes(archive, payload)
+            with unit(processing):
+                processing.execute("INSERT INTO rows VALUES(?)", (reference.sha256,))
+        assert not log
+    assert log == ["sync objects", "processing"]
+    log.clear()
+    with unit(processing):  # outside a group: the old per-object sync, then commit
+        processing.execute("INSERT INTO rows VALUES(?)", (snapshot_bytes(archive, b"three").sha256,))
     assert log == ["processing"]

@@ -29,7 +29,7 @@ from .objects import OBJECT_NAME, ensure_object_index, index_inputs
 from .api import ArchiveContext, ContentReference, PluginStatistics, ProcessingObject, RAW_MESSAGE, RunReport
 from ..catalog import PROCESSING_DATABASE as DATABASE
 from ..catalog import require_processing_schema
-from ..storage_sync import replace_file
+from ..storage_sync import replace_file, sync_directory
 
 SCHEMA_RESOURCE = "V2__processing.sql"
 
@@ -100,7 +100,14 @@ def _store_object(destination: Path, chunks: Iterable[bytes]) -> ContentReferenc
             temporary.unlink(missing_ok=True)
             raise
     final = destination / digest.hexdigest()
-    replace_file(temporary, final)  # also fsyncs the objects directory on POSIX
+    if _GROUPED and os.name != "nt":
+        # The file itself is already fsynced. Its directory entry only has to be
+        # durable before a commit can refer to it, so one directory sync per
+        # group commit (see ``_commit``) replaces one per object.
+        temporary.replace(final)
+        _UNSYNCED_DIRECTORIES.add(destination)
+    else:
+        replace_file(temporary, final)  # also fsyncs the objects directory on POSIX
     return ContentReference(path=final.resolve(), sha256=digest.hexdigest())
 
 
@@ -135,6 +142,8 @@ USER_CANCELLED = "Cancelled by user"
 # Each unit is still all-or-nothing (a savepoint); only durability is grouped.
 _GROUPED: set[int] = set()
 _COMMIT_FIRST: dict[int, list[sqlite3.Connection]] = {}
+# Object directories renamed into while a group was open, synced before any commit.
+_UNSYNCED_DIRECTORIES: set[Path] = set()
 
 
 @contextmanager
@@ -165,7 +174,13 @@ def flush_group(database: sqlite3.Connection) -> None:
     _commit(database)
 
 
+def _sync_object_directories() -> None:
+    while _UNSYNCED_DIRECTORIES:
+        sync_directory(_UNSYNCED_DIRECTORIES.pop())
+
+
 def _commit(database: sqlite3.Connection) -> None:
+    _sync_object_directories()
     for dependent in _COMMIT_FIRST.get(id(database), ()):
         if dependent.in_transaction:
             dependent.commit()
@@ -197,6 +212,7 @@ def unit(database: sqlite3.Connection) -> Iterator[None]:
     if id(database) not in _GROUPED:
         with database:
             yield
+            _sync_object_directories()
         return
     if not database.in_transaction:
         database.execute("BEGIN")

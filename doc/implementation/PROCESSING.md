@@ -75,6 +75,10 @@ invocation workspaces are reused within a dispatch, plugin code is compiled
 once per exact source text (`CurrentSourceLoader` keys on the SHA-256 of the
 bytes it just read, so edited helpers still load), and two models avoid
 pydantic 2.13's per-instance signature inspection of `PrivateAttr(default_factory=list)`.
+While any group is open, `_store_object` still fsyncs each object file but
+renames it without syncing `objects/`; `store._commit` (every grouped commit)
+and a non-grouped `unit` sync the recorded directories before committing, so
+no committed row can name an object whose directory entry is not durable.
 
 The source worker releases each message's cached raw bytes after MBOX publication
 and catalog/processing commits, under the publication lock and writer lease.

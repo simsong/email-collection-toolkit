@@ -15,6 +15,8 @@ Rust delivery plans and historical package checks are not current acceptance.
   copy is reused instead of being deleted and restored from MBOX between jobs.
 - Compile each processor once per source text, reuse empty processor
   workspaces, and avoid a slow pydantic default on two hot models.
+- Sync the `objects/` directory once per commit instead of once per stored
+  object; every object is still durable before any commit refers to it.
 
 ## 1.0.0a73 — faster imports
 
