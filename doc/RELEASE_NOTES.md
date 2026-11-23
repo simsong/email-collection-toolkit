@@ -32,6 +32,8 @@ Rust delivery plans and historical package checks are not current acceptance.
   re-parsing unchanged YAML configuration for every processor call.
 - `make benchmark-import` times a deterministic 50 MB synthetic corpus and
   records the result in `benchmarks/import/results.jsonl`.
+- Ctrl-C is acknowledged at once on macOS even when the signal lands on a worker
+  thread; previously the main thread could sleep until that worker finished.
 
 ## 1.0.0a72 — dependency security updates
 
