@@ -28,7 +28,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent))
-from perf_corpus import CorpusManifest, generate  # noqa: E402
+from perf_corpus import OWNER_MARKER, CorpusManifest, generate  # noqa: E402
 
 ROOT = Path(__file__).parents[1]
 DEFAULT_RESULTS = ROOT / "benchmarks" / "import" / "results.jsonl"
@@ -60,17 +60,16 @@ def _git(*arguments: str) -> str:
 
 
 def _corpus(directory: Path, megabytes: float, seed: int) -> CorpusManifest:
-    manifest_path = directory / "MANIFEST.json"
-    if manifest_path.exists():
-        manifest = CorpusManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
-        if manifest.seed == seed and manifest.target_bytes == int(megabytes * 1024 * 1024):
-            return manifest
-        shutil.rmtree(directory)
-    elif directory.exists():
-        # An interrupted generation leaves no manifest. Remove only what
-        # generate() creates, never an unrelated directory passed as --corpus.
-        if {entry.name for entry in directory.iterdir()} - {"maildir", "mbox"}:
+    if directory.exists():
+        # generate() writes this marker first, so it is present even after an
+        # interrupted run. Never reuse or replace a directory without it.
+        if not (directory / OWNER_MARKER).is_file():
             raise FileExistsError(f"not a generated corpus, refusing to replace: {directory}")
+        manifest_path = directory / "MANIFEST.json"
+        if manifest_path.exists():
+            manifest = CorpusManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+            if manifest.seed == seed and manifest.target_bytes == int(megabytes * 1024 * 1024):
+                return manifest
         shutil.rmtree(directory)
     return generate(directory, int(megabytes * 1024 * 1024), seed)
 
