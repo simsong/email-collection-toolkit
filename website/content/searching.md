@@ -75,7 +75,8 @@ source where it was found. **Save Message…** saves an exact `.eml` copy.
 
 ## Attachment text
 
-Turn on **Search attachments** to include plain-text attachments. The archive
+Turn on **Search attachments** to include plain-text, HTML, and RTF
+attachments. The archive
 must be indexed with attachment support first:
 
 ```sh

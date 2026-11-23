@@ -12,9 +12,11 @@ authorization. Use the synthetic fixtures or a copied subset.
 
 ## Get started
 
-You need Git, [uv](https://docs.astral.sh/uv/), GNU Make, and ClamAV's
-`libclamav` (for example `brew install clamav` on macOS). uv provides Python
-3.12 or newer.
+You need Git, [uv](https://docs.astral.sh/uv/), GNU Make, ClamAV's `libclamav`
+(for example `brew install clamav` on macOS), and Rust through
+[rustup](https://rustup.rs/), which installs the pinned compiler with rustfmt and
+Clippy from `rust-toolchain.toml`. uv provides Python 3.12 or newer. The
+browser tests need Chromium, which `make install-test-browser` installs.
 
 ```console
 git clone https://github.com/simsong/email-collection-toolkit.git
@@ -22,6 +24,7 @@ cd email-collection-toolkit
 uv sync --locked
 make freshclam        # seed local virus definitions in etc/clamdb
 make gui              # run the desktop application from the checkout
+make install-test-browser
 make check            # lint, type checks, and all tests
 ```
 
@@ -186,7 +189,7 @@ validates an existing set. See [Embedded antivirus](EMBEDDED_CLAMAV.md).
 
 ## Attachment text extraction
 
-Only plain-text attachments are indexed today. The agreed plan (issues #159,
+Plain-text, HTML, and RTF attachments are indexed today. The agreed plan (issues #159,
 #163 and #19) extracts words from PDF and Office files with per-format Python
 libraries and command-line tools, uses OCRmyPDF and Tesseract for scans and
 images, and runs each extractor in a sandboxed worker with timeouts. It does
