@@ -22,7 +22,8 @@ import pytest
 from mailarchiver.standalone_verify import verify_archive
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from perf_corpus import generate  # noqa: E402
+from benchmark_import import verify  # noqa: E402
+from perf_corpus import CorpusManifest, generate  # noqa: E402
 
 BIN = Path(sys.executable).parent  # the environment's installed ect-* entry points
 
@@ -109,3 +110,26 @@ def test_sigkill_mid_import_then_restart_matches_uninterrupted_import(
     assert not verify_archive(archive, quiet=True)
     assert _messages(archive) == reference
     assert _unfinished_jobs(archive) == 0
+    assert verify(archive, _manifest(corpus)) == []
+
+
+def _manifest(corpus: Path) -> CorpusManifest:
+    return CorpusManifest.model_validate_json((corpus / "MANIFEST.json").read_text(encoding="utf-8"))
+
+
+def test_uninterrupted_import_holds_exactly_the_corpus_and_damage_is_detected(tmp_path: Path, corpus: Path) -> None:
+    """End to end: every generated message is cataloged byte-exact, searchable and processed."""
+    archive = tmp_path / "complete.mailarchive"
+    _create(archive)
+    _import(archive, corpus)
+    manifest = _manifest(corpus)
+    assert verify(archive, manifest) == []
+    with sqlite3.connect(archive / "search.sqlite3") as search:
+        search.execute("DELETE FROM message_metadata WHERE rowid = (SELECT min(rowid) FROM message_metadata)")
+    with sqlite3.connect(archive / "archive.sqlite3") as catalog:
+        catalog.execute("PRAGMA foreign_keys=OFF")
+        catalog.execute("UPDATE messages SET sha256 = ? WHERE message_pk = (SELECT max(message_pk) FROM messages)", ("0" * 64,))
+    problems = verify(archive, manifest)
+    assert any("not searchable" in problem for problem in problems), problems
+    assert any("not in the catalog" in problem for problem in problems), problems
+    assert any("not in the corpus" in problem for problem in problems), problems

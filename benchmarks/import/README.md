@@ -26,6 +26,16 @@ phase, then appends one JSON row to `results.jsonl` with the commit, machine,
 per-phase seconds and messages per second. ClamAV is skipped so the numbers
 measure the archive pipeline, not virus definitions.
 
+After timing stops, the benchmark checks the archive end to end against the
+corpus, which it regenerates from the seed. Every generated message must be
+in the catalog exactly once and read back with exactly the expected bytes.
+Maildir files are stored verbatim. The `.mbox` files keep their `>From`
+quoting, because an undeclared MBOX dialect is never unquoted. Every message
+must also be searchable, with no processing job left unfinished, and the
+archive must pass its standalone verifier. The row records `verified` and any
+`verification_errors`, and the command exits non-zero if verification fails.
+`tests/test_import_crash_recovery.py` runs the same check after crash recovery.
+
 Only compare rows from the same machine. To count fsyncs per message, which is
 the main cost on slow or networked disks, run the importer under
 `strace -f -c -e trace=fsync,fdatasync` on Linux.

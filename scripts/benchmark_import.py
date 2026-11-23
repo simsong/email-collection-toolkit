@@ -6,18 +6,24 @@ Purpose: a repeatable import-throughput measurement that can be compared across
 commits and machines, so performance regressions and gains are visible.
 How it works: generate (or reuse) the seeded corpus from ``perf_corpus.py``,
 create a fresh scratch archive, run ``ect-import --no-scan`` as a subprocess,
-timestamp each status line to attribute wall time to import phases, and append
-one JSON result line (commit, machine, phases, messages/s) to a results file.
+timestamp each status line to attribute wall time to import phases, then
+verify the archive end to end against the corpus (every generated message is
+cataloged with its exact bytes, indexed for search and fully processed, and
+the archive passes its standalone verifier). Append one JSON result line
+(commit, machine, phases, messages/s, verification) to a results file.
 System role: backs ``make benchmark-import``; never touches a real archive.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import hashlib
 import os
 import platform
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -28,7 +34,10 @@ from pathlib import Path
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent))
-from perf_corpus import OWNER_MARKER, CorpusManifest, generate  # noqa: E402
+from perf_corpus import OWNER_MARKER, CorpusManifest, archived_messages, generate  # noqa: E402
+
+from mailarchiver.mailsearch import read_message_bytes  # noqa: E402
+from mailarchiver.standalone_verify import verify_archive  # noqa: E402
 
 ROOT = Path(__file__).parents[1]
 DEFAULT_RESULTS = ROOT / "benchmarks" / "import" / "results.jsonl"
@@ -53,6 +62,8 @@ class BenchmarkResult(BaseModel):
     phase_seconds: dict[str, float]
     messages_per_second: float
     exit_code: int
+    verified: bool = False
+    verification_errors: list[str] = []
 
 
 def _git(*arguments: str) -> str:
@@ -72,6 +83,38 @@ def _corpus(directory: Path, megabytes: float, seed: int) -> CorpusManifest:
                 return manifest
         shutil.rmtree(directory)
     return generate(directory, int(megabytes * 1024 * 1024), seed)
+
+
+def verify(archive: Path, manifest: CorpusManifest) -> list[str]:
+    """Compare the archive with the corpus regenerated from its seed; return the problems found."""
+    expected = {hashlib.sha256(raw).hexdigest(): raw
+                for raw in archived_messages(manifest.target_bytes, manifest.seed)}
+    problems: list[str] = []
+    if len(expected) != manifest.message_count:
+        problems.append(f"corpus regenerated {len(expected)} distinct messages, manifest says {manifest.message_count}")
+    with contextlib.closing(sqlite3.connect(archive / "archive.sqlite3")) as catalog:
+        cataloged = dict(catalog.execute("SELECT sha256, message_pk FROM messages").fetchall())
+    missing, extra = expected.keys() - cataloged.keys(), cataloged.keys() - expected.keys()
+    if missing:
+        problems.append(f"{len(missing)} corpus messages are not in the catalog, e.g. {min(missing)}")
+    if extra:
+        problems.append(f"{len(extra)} catalog messages are not in the corpus, e.g. {min(extra)}")
+    damaged = [digest for digest, pk in cataloged.items()
+               if digest in expected and read_message_bytes(archive, pk) != expected[digest]]
+    if damaged:
+        problems.append(f"{len(damaged)} archived messages differ from the corpus bytes, e.g. {min(damaged)}")
+    with contextlib.closing(sqlite3.connect(archive / "search.sqlite3")) as search:
+        indexed = {row[0] for row in search.execute(
+            "SELECT metadata.sha256 FROM message_metadata metadata JOIN message_fts fts "
+            "ON fts.rowid = metadata.message_fts_rowid AND fts.sha256 = metadata.sha256 WHERE fts.content != ''")}
+    if unindexed := expected.keys() - indexed:
+        problems.append(f"{len(unindexed)} corpus messages are not searchable, e.g. {min(unindexed)}")
+    with contextlib.closing(sqlite3.connect(archive / "processing.sqlite3")) as processing:
+        unfinished = processing.execute("SELECT status, count(*) FROM jobs WHERE status != 'completed' GROUP BY status").fetchall()
+    if unfinished:
+        problems.append("processing jobs not completed: " + ", ".join(f"{status}={count}" for status, count in unfinished))
+    problems.extend(f"archive verification: {failure}" for failure in verify_archive(archive, quiet=True))
+    return problems
 
 
 def run(corpus: Path, megabytes: float, seed: int, workers: str | None, label: str, keep: Path | None) -> BenchmarkResult:
@@ -110,6 +153,8 @@ def run(corpus: Path, megabytes: float, seed: int, workers: str | None, label: s
         finished = time.monotonic()
         phases[current] = phases.get(current, 0.0) + finished - last
         wall = finished - started
+        # Verification runs after timing stops; it never counts toward wall time.
+        problems = verify(archive, manifest) if exit_code == 0 else [f"ect-import exited {exit_code}"]
     finally:
         # Removes a partial scratch archive after a failure or Ctrl-C too.
         shutil.rmtree(scratch, ignore_errors=True)
@@ -130,6 +175,8 @@ def run(corpus: Path, megabytes: float, seed: int, workers: str | None, label: s
         phase_seconds={name: round(value, 2) for name, value in phases.items() if value >= 0.05},
         messages_per_second=round(manifest.message_count / wall, 2) if wall else 0.0,
         exit_code=exit_code,
+        verified=not problems,
+        verification_errors=problems,
     )
 
 
@@ -154,6 +201,9 @@ def main() -> None:
             output.write(line + "\n")
     if result.exit_code:
         raise SystemExit(result.exit_code)
+    if not result.verified:
+        print("\n".join(["Import verification FAILED:", *result.verification_errors]), file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ import base64
 import hashlib
 import json
 import random
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -111,6 +112,38 @@ def build_message(rng: random.Random, index: int, start: datetime, prior_ids: li
     return ("\n".join(headers) + "\n\n" + text + "\n").encode("utf-8")
 
 
+def corpus_messages(target_bytes: int, seed: int) -> Iterator[bytes]:
+    """Yield the corpus's messages in order; ``generate`` writes exactly these bytes."""
+    rng = random.Random(seed)
+    start = datetime(2015, 1, 1, tzinfo=UTC)
+    prior: list[str] = []
+    total = count = 0
+    while total < target_bytes:
+        raw = build_message(rng, count, start, prior)
+        yield raw
+        total += len(raw)
+        count += 1
+
+
+def mbox_quoted(raw: bytes) -> bytes:
+    """The record body as written to the corpus's ``.mbox`` files (mboxrd-style quoting)."""
+    return b"\n".join(b">" + line if line.lstrip(b">").startswith(b"From ") else line for line in raw.split(b"\n"))
+
+
+def archived_messages(target_bytes: int, seed: int) -> Iterator[bytes]:
+    """Yield the bytes an import must archive for each corpus message, in order.
+
+    Maildir files are archived verbatim. The MBOX files use the undeclared
+    ``.mbox`` suffix, whose quoting variant is unknown, so the archive keeps
+    each record body exactly as stored, including its ``>From`` quoting.
+    """
+    total = 0
+    mbox_budget = target_bytes // 5
+    for raw in corpus_messages(target_bytes, seed):
+        yield mbox_quoted(raw) if total < mbox_budget else raw
+        total += len(raw)
+
+
 def generate(output: Path, target_bytes: int, seed: int) -> CorpusManifest:
     """Write the corpus under ``output`` (must not exist) and return its manifest."""
     output.mkdir(parents=True)
@@ -122,16 +155,12 @@ def generate(output: Path, target_bytes: int, seed: int) -> CorpusManifest:
     (output / "maildir" / "tmp").mkdir()
     mbox_dir = output / "mbox"
     mbox_dir.mkdir()
-    rng = random.Random(seed)
-    start = datetime(2015, 1, 1, tzinfo=UTC)
-    prior: list[str] = []
     digest = hashlib.sha256()
     total = count = maildir_files = 0
     mbox_budget = target_bytes // 5  # 20% of bytes go to MBOX files, rest to Maildir
     mbox_index, mbox_bytes = 0, 0
     mbox_handle = None
-    while total < target_bytes:
-        raw = build_message(rng, count, start, prior)
+    for raw in corpus_messages(target_bytes, seed):
         digest.update(raw)
         if total < mbox_budget:
             if mbox_handle is None or mbox_bytes > 4 * 1024 * 1024:
@@ -140,10 +169,7 @@ def generate(output: Path, target_bytes: int, seed: int) -> CorpusManifest:
                 mbox_index += 1
                 mbox_handle = (mbox_dir / f"part{mbox_index:02d}.mbox").open("wb")
                 mbox_bytes = 0
-            quoted = b"\n".join(
-                b">" + line if line.lstrip(b">").startswith(b"From ") else line for line in raw.split(b"\n")
-            )
-            record = b"From MAILER-DAEMON Thu Jan  1 00:00:00 2015\n" + quoted + b"\n"
+            record = b"From MAILER-DAEMON Thu Jan  1 00:00:00 2015\n" + mbox_quoted(raw) + b"\n"
             mbox_handle.write(record)
             mbox_bytes += len(record)
         else:
