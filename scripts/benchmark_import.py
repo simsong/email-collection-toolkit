@@ -83,34 +83,37 @@ def run(corpus: Path, megabytes: float, seed: int, workers: str | None, label: s
         # Never delete an archive the caller pointed at; it may hold real mail.
         shutil.rmtree(scratch, ignore_errors=True)
         raise FileExistsError(f"archive already exists: {archive}")
-    environment = {**os.environ, "MAIL_ARCHIVE_DIR": ""}
-    subprocess.run(["ect-create", str(archive), "--owner", "owner@example.test"],
-                   check=True, capture_output=True, env=environment)
-    command = ["ect-import", "--archive", str(archive), "--no-scan"]
-    if workers:
-        command += ["--workers", workers]
-    command += [str(corpus / "maildir"), str(corpus / "mbox")]
-    phases: dict[str, float] = {}
-    archived = 0
-    started = last = time.monotonic()
-    current = "startup"
-    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                          env=environment, bufsize=1) as process:
-        assert process.stdout is not None
-        for line in process.stdout:
-            now = time.monotonic()
-            phases[current] = phases.get(current, 0.0) + now - last
-            last = now
-            match = PHASE.match(line)
-            if match:
-                current = match.group(1).strip().lower()
-            if found := ARCHIVED.search(line):
-                archived = int(found.group(1))
-        exit_code = process.wait()
-    finished = time.monotonic()
-    phases[current] = phases.get(current, 0.0) + finished - last
-    wall = finished - started
-    shutil.rmtree(scratch, ignore_errors=True)
+    try:
+        environment = {**os.environ, "MAIL_ARCHIVE_DIR": ""}
+        subprocess.run(["ect-create", str(archive), "--owner", "owner@example.test"],
+                       check=True, capture_output=True, env=environment)
+        command = ["ect-import", "--archive", str(archive), "--no-scan"]
+        if workers:
+            command += ["--workers", workers]
+        command += [str(corpus / "maildir"), str(corpus / "mbox")]
+        phases: dict[str, float] = {}
+        archived = 0
+        started = last = time.monotonic()
+        current = "startup"
+        with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                              env=environment, bufsize=1) as process:
+            assert process.stdout is not None
+            for line in process.stdout:
+                now = time.monotonic()
+                phases[current] = phases.get(current, 0.0) + now - last
+                last = now
+                match = PHASE.match(line)
+                if match:
+                    current = match.group(1).strip().lower()
+                if found := ARCHIVED.search(line):
+                    archived = int(found.group(1))
+            exit_code = process.wait()
+        finished = time.monotonic()
+        phases[current] = phases.get(current, 0.0) + finished - last
+        wall = finished - started
+    finally:
+        # Removes a partial scratch archive after a failure or Ctrl-C too.
+        shutil.rmtree(scratch, ignore_errors=True)
     return BenchmarkResult(
         recorded_at=datetime.now(UTC).isoformat(timespec="seconds"),
         git_commit=_git("rev-parse", "--short", "HEAD"),
