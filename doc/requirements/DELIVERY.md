@@ -166,7 +166,7 @@ Python, native extension libraries, GUI assets, packaged schemas,
 plug-in manifests, and the standalone verifier source travel inside the app.
 The macOS app must bundle ClamAV, baseline definitions, the PST helper,
 `mcti-scan` and the separate OST converter. Missing required scanner resources
-must fail packaging. Tika/Java, general PDF OCR and Apple Intelligence are
+must fail packaging. General PDF OCR and Apple Intelligence are
 outside the supported local-mail GUI runtime. A JVM is needed only if a Java
 importer is deliberately added later.
 When both `APPLE_CERTIFICATE_P12_BASE64` and `APPLE_CERTIFICATE_PASSWORD`

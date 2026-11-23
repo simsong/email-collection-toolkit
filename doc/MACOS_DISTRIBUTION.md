@@ -26,15 +26,14 @@ SQL/YAML resources, plug-in manifests, and verifier source. Python supplies the 
 The bundle also contains Sparkle and notices for bundled importer dependencies. Users
 need no Python, `uv`, Homebrew, or source checkout for the supported local-mail
 GUI. The ClamAV engine, FreshClam and baseline definitions are bundled, and
-the builder fails without them. Experimental PDF extraction/OCR, Tika/Java and the
+the builder fails without them. Experimental PDF extraction/OCR and the
 Apple Intelligence command are not included in this desktop workflow.
 
 The [ingest executables](PST_IMPORTER.md#platform-packaging-and-qualification)
 include the Rust PST adapter and separate libpff OST converter in the macOS
 bundle. Delivery requires nested signing, dependency audits,
 notarization/stapling and installed-fixture tests on each supported architecture.
-A JVM would be needed only if a Java importer is later bundled; Tika remains
-outside the supported desktop runtime.
+The desktop runtime needs no JVM.
 
 Schema management requires no Java runtime or external migration tool. SQL files
 use Flyway naming conventions only (`V<version>__<description>.sql`); Flyway is

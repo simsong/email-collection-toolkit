@@ -190,9 +190,7 @@ Only plain-text attachments are indexed today. The agreed plan (issues #159,
 #163 and #19) extracts words from PDF and Office files with per-format Python
 libraries and command-line tools, uses OCRmyPDF and Tesseract for scans and
 images, and runs each extractor in a sandboxed worker with timeouts. It does
-not use Apache Tika or Java. The `install-tika`, `install-mac`, and
-`install-linux` Make targets are leftovers from an earlier plan and are not
-needed.
+not use Apache Tika or Java.
 
 ## Desktop internals
 
@@ -271,7 +269,6 @@ environment variables. Legacy `MAILARCHIVER_CLAMD*` variables are unused.
 | `ARGS`, `ARCHIVE`, `IMAP_ARGS` | Makefile command arguments and archive selection; never password channels |
 | `RELEASE_TAG`, `APPCAST`, `WINDOWS_ARCHIVE`, `WINDOWS_RELEASE_URL` | Candidate release tag, feed path, and Windows signing inputs |
 | `MSIX_PACKAGE`, `MSIX_EVIDENCE`, `MSIX_PAYLOADS` | Windows package, relocation-test evidence, and bundle inputs |
-| `TIKA_VERSION` | Optional Tika distribution version |
 | `LICENSE_OUTPUT` | Destination for a generated runtime license bundle |
 | `NAME_RESEARCH_ENV`, `EVIDENCE`, `OUTPUT`, `DATABASE`, `LABELS` | Research environment, observations, private outputs, frozen experiment, and owner-review labels |
 
@@ -292,7 +289,6 @@ environment variables. Legacy `MAILARCHIVER_CLAMD*` variables are unused.
 | `website-check`, `website-build-check`, `website-download-check`, `website-preview` | Website checks and preview |
 | `website-release-data`, `website-screenshots`, `website-preview-screenshots`, `website-icons`, `website-gmail-illustrations` | Website data and images |
 | `install-test-browser` | Install the pinned test browser |
-| `install-mac`, `install-linux`, `install-tika` | Unused Tika download (see [above](#attachment-text-extraction)) |
 | `ocr-inventory`, `ocr-profile`, `ocr-analyze`, `ocr-run`, `ocr-experiment` | Experimental OCR fixture pipeline; see [PDF/OCR plan](plans/PDF_OCR.md) |
 | `check`, `check-static`, `check-tests` | Ordered full, static, and test verification |
 | `ruff`, `pylint`, `ty`, `pyright`, `lint`, `types`, `syntax-check` | Individual static checks |

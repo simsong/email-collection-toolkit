@@ -775,8 +775,8 @@ query for that new asset; the two deployment paths are serialized.
 Search windows reserve footer space for ordered plain-text archive notices,
 rendered with `textContent`, beside the existing ingest-history and link status.
 The banner is hidden without an archive, in standalone readers, and in print.
-The initial notice states that only text attachments are indexed. Tika extraction
-and its indexing action/progress remain planned; no fabricated progress is shown.
+The initial notice states that only text attachments are indexed. PDF/Office
+extraction and its indexing action/progress remain planned; no fabricated progress is shown.
 
 ## Identity picker navigation
 
