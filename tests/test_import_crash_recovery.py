@@ -72,7 +72,9 @@ def _unfinished_jobs(archive: Path) -> int:
 @pytest.fixture(scope="module")
 def corpus(tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path_factory.mktemp("crash-corpus") / "corpus"
-    generate(root, 400 * 1024, seed=7)
+    # Large enough (~170 messages) that body processing spans more than one
+    # 64-message commit batch, so the processing kill point is observable.
+    generate(root, 1536 * 1024, seed=7)
     return root
 
 
