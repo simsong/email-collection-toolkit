@@ -15,6 +15,9 @@ Rust delivery plans and historical package checks are not current acceptance.
   SQLite commit instead of committing several times per processor. A SIGKILL
   during ingest or processing, followed by a restart, gives the same archive as
   an uninterrupted import.
+- Write each message's working copy once instead of staging and copying it,
+  skip re-copying processor outputs that are already stored, and stop
+  re-parsing unchanged YAML configuration for every processor call.
 - `make benchmark-import` times a deterministic 50 MB synthetic corpus and
   records the result in `benchmarks/import/results.jsonl`.
 

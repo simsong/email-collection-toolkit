@@ -51,6 +51,12 @@ since closed units are complete). `ProductionPipeline.release` and the harness
 collector call `flush_group` before `collect_objects`, which still refuses an
 open transaction. Filing remains idempotent against the catalog, so replaying a
 lost group after a crash does not republish a message already in MBOX.
+`store.snapshot` hashes while it copies. It verifies, rather than copies, a
+file that is already this archive's `objects/<sha256>` (re-queued checkpoint
+outputs). Ingest writes raw bytes straight to `objects/` with `snapshot_bytes`,
+with no staging file. Durability is unchanged: the object is fsynced and its
+directory synced before any database row refers to it. Processor configuration
+reads reuse parsed YAML for identical file text (`archive_config.parse_yaml_cached`).
 `tests/test_import_crash_recovery.py` SIGKILLs real imports in both phases. It
 checks logical crash consistency (process death), not power loss.
 

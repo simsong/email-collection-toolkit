@@ -47,7 +47,7 @@ from .contracts import AddressEvidence, ContentMetadata, Filing, HeaderMetadata,
 from .objects import collect_objects
 from .registry import fingerprint, load_processors
 from .runtime import RANK_FAILURE, ProcessingProgress, dispatch, prepare_run, run
-from .store import DATABASE, USER_CANCELLED, connect, enqueue, flush_group, grouped, report, snapshot, unit
+from .store import DATABASE, USER_CANCELLED, connect, enqueue, flush_group, grouped, report, snapshot, snapshot_bytes, unit
 
 Publisher = Callable[[MailObject, ParsedMessage, MailboxReference, int], int]
 
@@ -178,11 +178,7 @@ class ProductionPipeline:
         return item
 
     def ingest(self, source: MailObject, metadata: SourceMetadata) -> IngestedMessage:
-        with tempfile.NamedTemporaryFile(dir=self.archive, prefix=".processing-input-", delete_on_close=False) as temporary:
-            temporary.write(source.raw)
-            temporary.flush()
-            temporary.close()
-            reference = snapshot(self.archive, Path(temporary.name))
+        reference = snapshot_bytes(self.archive, source.raw)
         existing = self.catalog.execute("SELECT message_pk FROM messages WHERE sha256=?", (reference.sha256,)).fetchone()
         with grouped(self.database):
             return self._ingest_grouped(reference, metadata, existing is not None)
