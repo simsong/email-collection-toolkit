@@ -119,6 +119,20 @@ class ProductionPipeline:
         if len(self._released) >= RELEASE_BATCH_MESSAGES or time.monotonic() >= self._release_due:
             self.collect_released()
 
+    def collect_released_when_due(self) -> float | None:
+        """Before an idle wait: collect a due batch, else return how long it may wait.
+
+        A batch must not outlive a stall in its sources (a paused download, a
+        slow server), so an idle coordinator bounds its wait by this deadline.
+        """
+        if not self._released:
+            return None
+        remaining = self._release_due - time.monotonic()
+        if remaining > 0:
+            return remaining
+        self.collect_released()
+        return None
+
     def collect_released(self) -> None:
         """Commit finished work, then collect objects of the released messages."""
         flush_group(self.database)

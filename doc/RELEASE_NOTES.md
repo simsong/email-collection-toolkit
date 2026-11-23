@@ -21,6 +21,8 @@ Rust delivery plans and historical package checks are not current acceptance.
   watcher opened and closed the catalog database file, which on macOS silently
   drops the importer's own SQLite locks. It now watches the archive directory,
   and file watches refuse SQLite files outright.
+- A batch of finished messages is committed within about a second even when
+  downloads stall, instead of waiting for the next message to arrive.
 
 ## 1.0.0a73 — faster imports
 

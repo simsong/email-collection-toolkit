@@ -63,8 +63,10 @@ checks logical crash consistency (process death), not power loss.
 During body/attachment processing (`ProductionPipeline.resume`) the group spans
 many jobs. `release` only records the finished message; `collect_released`
 commits and collects objects once per `RELEASE_BATCH_MESSAGES` (64) messages
-or `RELEASE_BATCH_SECONDS` (1 s), and again when `resume` or `resume_ingest`
-returns. `complete` writes search rows through `unit(self.search)` inside
+or `RELEASE_BATCH_SECONDS` (1 s), and again when `resume`, `resume_ingest` or
+source ingest returns. While sources stall (a paused IMAP download), the
+ingest coordinator's idle hook `collect_released_when_due` bounds its wait by
+the batch deadline, so a held batch never waits for the next message. `complete` writes search rows through `unit(self.search)` inside
 `grouped(self.search)`, and `store.commit_first` makes every processing commit
 commit search first, so a crash between the two repeats only the idempotent
 search write (`write_prepared_search_message` deletes before inserting).

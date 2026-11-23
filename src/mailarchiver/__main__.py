@@ -1145,8 +1145,13 @@ def run_file_workers[WorkerItem](
     on_interrupt: Callable[[], None] | None = None,
     coordinator: FutureCoordinator | None = None,
     signals: tuple[ChangeSignal, ...] = (),
+    idle: Callable[[], float | None] | None = None,
 ) -> None:
-    """Run framework workers with optional source-declared per-key concurrency limits."""
+    """Run framework workers with optional source-declared per-key concurrency limits.
+
+    ``idle`` runs on this thread before each wait and may bound it, so batched
+    owner-thread work (released working objects) is finished while sources stall.
+    """
     console = console_signal()
     if console is not None:
         signals = (*signals, console)
@@ -1213,6 +1218,7 @@ def run_file_workers[WorkerItem](
             status_driver()
             completed, _unfinished = wait(
                 (*pending, *changed, *((coordinator.ready,) if coordinator is not None else ())),
+                timeout=idle() if idle is not None else None,
                 return_when=FIRST_COMPLETED,
             )
             if coordinator is not None:
@@ -2325,7 +2331,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 ),
                 on_interrupt=progress.announce_interrupt,
                 coordinator=coordinator, signals=progress_signals,
+                idle=pipeline.collect_released_when_due,
             )
+        pipeline.collect_released()
         check_interrupted()
         if request.continue_content:
             progress.set_phase("Processing message bodies and attachments", activity_kind="processing")
