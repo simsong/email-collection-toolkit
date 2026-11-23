@@ -161,6 +161,17 @@ def invoke(request: InvocationRequest, workspace: Path,
         validate_result(plugin, item, result)
         return InvocationResponse(result=result.model_copy(update={"config_writes": configuration.pending_writes()}))
     except Exception as error:
+        if not isinstance(error, TimeoutError):
+            # The deadline alarm can fire inside library code (e.g. a lock
+            # release in Condition.wait) and surface as an unrelated error.
+            # Past the deadline, report the timeout that caused it.
+            try:
+                item.check_cancelled()
+            except TimeoutError as timeout:
+                timeout.__cause__ = error
+                error = timeout
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass  # Cancellation keeps the original failure.
         response = InvocationResponse.failure(error)
         if isinstance(result, ProcessingResult) and result.scan is not None:
             response = response.model_copy(update={"result": ProcessingResult(scan=result.scan)})

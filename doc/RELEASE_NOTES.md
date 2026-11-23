@@ -23,6 +23,9 @@ Rust delivery plans and historical package checks are not current acceptance.
   and file watches refuse SQLite files outright.
 - A batch of finished messages is committed within about a second even when
   downloads stall, instead of waiting for the next message to arrive.
+- A processor that runs past its time limit is always recorded as a timeout,
+  even when the time-limit signal surfaces inside library code as a different
+  error.
 
 ## 1.0.0a73 — faster imports
 
