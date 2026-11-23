@@ -66,6 +66,12 @@ def _corpus(directory: Path, megabytes: float, seed: int) -> CorpusManifest:
         if manifest.seed == seed and manifest.target_bytes == int(megabytes * 1024 * 1024):
             return manifest
         shutil.rmtree(directory)
+    elif directory.exists():
+        # An interrupted generation leaves no manifest. Remove only what
+        # generate() creates, never an unrelated directory passed as --corpus.
+        if {entry.name for entry in directory.iterdir()} - {"maildir", "mbox"}:
+            raise FileExistsError(f"not a generated corpus, refusing to replace: {directory}")
+        shutil.rmtree(directory)
     return generate(directory, int(megabytes * 1024 * 1024), seed)
 
 
@@ -74,7 +80,9 @@ def run(corpus: Path, megabytes: float, seed: int, workers: str | None, label: s
     scratch = Path(tempfile.mkdtemp(prefix="ect-bench-"))
     archive = (keep or scratch) / "bench.mailarchive"
     if archive.exists():
-        shutil.rmtree(archive)
+        # Never delete an archive the caller pointed at; it may hold real mail.
+        shutil.rmtree(scratch, ignore_errors=True)
+        raise FileExistsError(f"archive already exists: {archive}")
     environment = {**os.environ, "MAIL_ARCHIVE_DIR": ""}
     subprocess.run(["ect-create", str(archive), "--owner", "owner@example.test"],
                    check=True, capture_output=True, env=environment)
