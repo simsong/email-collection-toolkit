@@ -17,6 +17,10 @@ Rust delivery plans and historical package checks are not current acceptance.
   workspaces, and avoid a slow pydantic default on two hot models.
 - Sync the `objects/` directory once per commit instead of once per stored
   object; every object is still durable before any commit refers to it.
+- Fix intermittent "disk I/O error" during `ect-imap` on macOS. Its progress
+  watcher opened and closed the catalog database file, which on macOS silently
+  drops the importer's own SQLite locks. It now watches the archive directory,
+  and file watches refuse SQLite files outright.
 
 ## 1.0.0a73 — faster imports
 
