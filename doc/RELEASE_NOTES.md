@@ -50,7 +50,8 @@ Rust delivery plans and historical package checks are not current acceptance.
 - If the `objects/` directory sync or the search commit fails, the processing
   batch is rolled back, so no job is recorded as done without its stored
   objects and search rows. A failed directory sync is retried before the next
-  commit, and concurrent imports in the GUI wait for each other's syncs.
+  commit. Concurrent imports in the GUI sync only their own archive, so one
+  archive's disk failure cannot block another.
 - A processor that runs past its time limit is always recorded as a timeout,
   even when the time-limit signal surfaces inside library code as a different
   error.

@@ -73,8 +73,7 @@ def test_object_directory_is_synced_before_the_commit_that_references_it(
     log: list[str] = []
     processing = _database(tmp_path / "processing.sqlite3", log, "processing")
     monkeypatch.setattr(store, "sync_directory", lambda path: log.append(f"sync {path.name}"))
-    archive = tmp_path / "archive"
-    archive.mkdir()
+    archive = tmp_path  # The databases live in the archive directory.
     with grouped(processing):
         for payload in (b"one", b"two"):
             reference = snapshot_bytes(archive, payload)
@@ -116,8 +115,7 @@ def test_failed_dependent_commit_rolls_back_the_processing_group(tmp_path: Path)
 def test_failed_directory_sync_stays_pending_and_rolls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     log: list[str] = []
     processing = _database(tmp_path / "processing.sqlite3", log, "processing")
-    archive = tmp_path / "archive"
-    archive.mkdir()
+    archive = tmp_path  # The databases live in the archive directory.
     def failing(_path: Path) -> None:
         raise OSError("sync failed")
     monkeypatch.setattr(store, "sync_directory", failing)
@@ -133,3 +131,31 @@ def test_failed_directory_sync_stays_pending_and_rolls_back(tmp_path: Path, monk
         processing.execute("INSERT INTO rows VALUES('later')")
     assert log == ["sync objects", "processing"]
     assert not store._UNSYNCED_DIRECTORIES  # pylint: disable=protected-access
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows replaces objects write-through, with no deferred sync")
+def test_one_archives_failed_sync_does_not_block_another_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The GUI can import into two archives at once; pending syncs belong to their archive."""
+    log: list[str] = []
+    broken, healthy = tmp_path / "broken", tmp_path / "healthy"
+    broken.mkdir()
+    healthy.mkdir()
+    first = _database(broken / "processing.sqlite3", log, "broken")
+    second = _database(healthy / "processing.sqlite3", log, "healthy")
+    def sync(path: Path) -> None:
+        if path.parent == broken:
+            raise OSError("sync failed")
+        log.append(f"sync {path.parent.name}")
+    monkeypatch.setattr(store, "sync_directory", sync)
+    with pytest.raises(OSError, match="sync failed"):
+        with grouped(first):
+            reference = snapshot_bytes(broken, b"object")
+            with unit(first):
+                first.execute("INSERT INTO rows VALUES(?)", (reference.sha256,))
+    with grouped(second):
+        reference = snapshot_bytes(healthy, b"object")
+        with unit(second):
+            second.execute("INSERT INTO rows VALUES(?)", (reference.sha256,))
+    assert log == ["sync healthy", "healthy"]
+    assert _visible(healthy / "processing.sqlite3") == [reference.sha256]
+    store._UNSYNCED_DIRECTORIES.clear()  # pylint: disable=protected-access
