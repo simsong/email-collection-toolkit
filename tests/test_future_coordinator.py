@@ -153,3 +153,22 @@ def test_closing_stream_waits_for_worker_publication_before_source_driver_exits(
             coordinator.ready.result(timeout=5)
             coordinator.drain()
         future.result(timeout=5)
+
+
+def test_idle_hook_bounds_the_owner_wait_while_workers_stall() -> None:
+    """A batch held by the owner thread is finished while a source stalls, not after it resumes."""
+    calls: list[int] = []
+    flushed = Event()
+
+    def idle() -> float | None:
+        calls.append(1)
+        if len(calls) == 1:
+            return 0.01  # A pending batch is due shortly.
+        flushed.set()  # The due batch is collected on the owner thread.
+        return None
+
+    def process(_item: int) -> None:
+        assert flushed.wait(5), "owner waited on the stalled worker instead of flushing"
+
+    run_file_workers([0], 1, process, Event(), lambda: None, idle=idle)
+    assert len(calls) >= 2

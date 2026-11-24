@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import os
 import sqlite3
+import threading
 import tempfile
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -29,7 +30,7 @@ from .objects import OBJECT_NAME, ensure_object_index, index_inputs
 from .api import ArchiveContext, ContentReference, PluginStatistics, ProcessingObject, RAW_MESSAGE, RunReport
 from ..catalog import PROCESSING_DATABASE as DATABASE
 from ..catalog import require_processing_schema
-from ..storage_sync import replace_file
+from ..storage_sync import replace_file, sync_directory
 
 SCHEMA_RESOURCE = "V2__processing.sql"
 
@@ -100,7 +101,15 @@ def _store_object(destination: Path, chunks: Iterable[bytes]) -> ContentReferenc
             temporary.unlink(missing_ok=True)
             raise
     final = destination / digest.hexdigest()
-    replace_file(temporary, final)  # also fsyncs the objects directory on POSIX
+    if _GROUPED and os.name != "nt":
+        # The file itself is already fsynced. Its directory entry only has to be
+        # durable before a commit can refer to it, so one directory sync per
+        # group commit (see ``_commit``) replaces one per object.
+        temporary.replace(final)
+        with _DIRECTORY_SYNC:
+            _UNSYNCED_DIRECTORIES.add(destination)
+    else:
+        replace_file(temporary, final)  # also fsyncs the objects directory on POSIX
     return ContentReference(path=final.resolve(), sha256=digest.hexdigest())
 
 
@@ -134,6 +143,12 @@ USER_CANCELLED = "Cancelled by user"
 # Connections whose checkpoint units currently share one SQLite transaction.
 # Each unit is still all-or-nothing (a savepoint); only durability is grouped.
 _GROUPED: set[int] = set()
+_COMMIT_FIRST: dict[int, list[sqlite3.Connection]] = {}
+# Object directories renamed into while a group was open, synced before any commit.
+# Shared by every owner thread (the GUI can import into several archives), so
+# the lock makes a commit wait for a sync another owner already started.
+_UNSYNCED_DIRECTORIES: set[Path] = set()
+_DIRECTORY_SYNC = threading.Lock()
 
 
 @contextmanager
@@ -156,14 +171,73 @@ def grouped(database: sqlite3.Connection) -> Iterator[None]:
         yield
     finally:
         _GROUPED.discard(key)
-        if database.in_transaction:
-            database.commit()
+        _commit(database)
 
 
 def flush_group(database: sqlite3.Connection) -> None:
     """Commit the open group early, e.g. before object cleanup requires it."""
+    _commit(database)
+
+
+def _archive_of(database: sqlite3.Connection) -> Path | None:
+    """The archive directory holding ``database``, or None for an in-memory database."""
+    for _sequence, name, filename in database.execute("PRAGMA database_list"):
+        if name == "main" and filename:
+            return Path(filename).resolve().parent
+    return None
+
+
+def _sync_object_directories(database: sqlite3.Connection) -> None:
+    """Sync the pending directories of ``database``'s archive; each stays pending until synced.
+
+    Only this archive's directories are synced, so one archive's filesystem
+    failure cannot block or roll back another archive's import.
+    """
+    archive = _archive_of(database)
+    with _DIRECTORY_SYNC:
+        for directory in sorted(_UNSYNCED_DIRECTORIES):
+            if archive is not None and directory.resolve().parent != archive:
+                continue
+            sync_directory(directory)
+            _UNSYNCED_DIRECTORIES.discard(directory)
+
+
+def _commit(database: sqlite3.Connection) -> None:
+    """Sync objects, commit dependents, then commit ``database``.
+
+    If a barrier before the final commit fails, ``database`` is rolled back so
+    no later commit (such as saving the policy at close) can mark jobs
+    completed whose objects or derived rows are not durable. Those jobs rerun.
+    """
+    try:
+        _sync_object_directories(database)
+        for dependent in _COMMIT_FIRST.get(id(database), ()):
+            if dependent.in_transaction:
+                dependent.commit()
+    except BaseException:
+        if database.in_transaction:
+            database.rollback()
+        raise
     if database.in_transaction:
         database.commit()
+
+
+@contextmanager
+def commit_first(database: sqlite3.Connection, dependent: sqlite3.Connection) -> Iterator[None]:
+    """Commit ``dependent`` before every grouped commit of ``database``.
+
+    Derived databases (search) written inside a processing group must become
+    durable before the processing commit marks those jobs completed; a crash
+    between the two commits then only repeats idempotent derived writes.
+    """
+    hooks = _COMMIT_FIRST.setdefault(id(database), [])
+    hooks.append(dependent)
+    try:
+        yield
+    finally:
+        hooks.remove(dependent)
+        if not hooks:
+            _COMMIT_FIRST.pop(id(database), None)
 
 
 @contextmanager
@@ -172,6 +246,7 @@ def unit(database: sqlite3.Connection) -> Iterator[None]:
     if id(database) not in _GROUPED:
         with database:
             yield
+            _sync_object_directories(database)
         return
     if not database.in_transaction:
         database.execute("BEGIN")

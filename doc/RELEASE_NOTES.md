@@ -6,6 +6,33 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a74 — faster body and attachment processing
+
+- Body/attachment processing commits once per batch of up to 64 messages (or
+  one second) instead of once per job. Search rows always commit before the
+  processing commit that marks their job done, so a crash only repeats work.
+- Run a message's remaining parts right after its previous part, so its working
+  copy is reused instead of being deleted and restored from MBOX between jobs.
+- Compile each processor once per source text, reuse empty processor
+  workspaces, and avoid a slow pydantic default on two hot models.
+- Sync the `objects/` directory once per commit instead of once per stored
+  object; every object is still durable before any commit refers to it.
+- Fix intermittent "disk I/O error" during `ect-imap` on macOS. Its progress
+  watcher opened and closed the catalog database file, which on macOS silently
+  drops the importer's own SQLite locks. It now watches the archive directory,
+  and file watches refuse SQLite files outright.
+- A batch of finished messages is committed within about a second even when
+  downloads stall or one processor runs long, instead of waiting for the next
+  message or job to finish.
+- If the `objects/` directory sync or the search commit fails, the processing
+  batch is rolled back, so no job is recorded as done without its stored
+  objects and search rows. A failed directory sync is retried before the next
+  commit. Concurrent imports in the GUI sync only their own archive, so one
+  archive's disk failure cannot block another.
+- A processor that runs past its time limit is always recorded as a timeout,
+  even when the time-limit signal surfaces inside library code as a different
+  error.
+
 ## 1.0.0a73 — faster imports
 
 - Progress refreshes no longer recount the whole processing job table and fsync

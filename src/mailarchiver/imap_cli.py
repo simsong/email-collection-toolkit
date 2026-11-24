@@ -126,8 +126,9 @@ class SyncReporter:
 
     def start(self) -> None:
         self.display("starting")
-        self.observer = PathObserver([self.archive / "status", self.archive / "archive.sqlite3",
-                                      self.archive / "archive.sqlite3-wal"], self._changed)
+        # Each catalog commit creates and deletes archive.sqlite3-journal in the
+        # archive directory; never open the database itself (see file_events).
+        self.observer = PathObserver([self.archive / "status", self.archive], self._changed)
 
     def finish(self, status: str) -> None:
         self.finished.set()

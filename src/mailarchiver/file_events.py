@@ -6,6 +6,10 @@
 # Notification means recheck state; only the predicate establishes completion.
 # Deadlines raise errors and are never periodic polling or scheduling ticks.
 # Application observers and portable regression fixtures share this boundary.
+# SQLite files are never watched directly: on BSD/macOS closing any descriptor
+# for a file drops every POSIX lock this process holds on it, so a kqueue
+# resubscription would silently unlock a live database. Watch its directory;
+# rollback-journal commits create and delete an entry there.
 """Owned, cancellable filesystem notifications without polling timers."""
 from __future__ import annotations
 
@@ -26,6 +30,8 @@ import subprocess
 from weakref import ref
 
 from .change_signal import ChangeEvent
+
+SQLITE_SUFFIXES = (".sqlite3", ".sqlite3-journal", ".sqlite3-wal", ".sqlite3-shm")
 
 
 def _existing_parent(path: Path) -> Path:
@@ -51,6 +57,8 @@ class PathChanges(AbstractContextManager["PathChanges"]):
     def __init__(self, paths: Sequence[Path]) -> None:
         if not paths:
             raise ValueError("At least one path is required")
+        if locked := [path for path in paths if path.name.endswith(SQLITE_SUFFIXES) and not path.is_dir()]:
+            raise ValueError(f"Watch the directory, not SQLite file {locked[0]}")
         self.paths = tuple(path.absolute() for path in paths)
         self.cancelled = Event()
         self._wait_lock = Lock()

@@ -60,6 +60,28 @@ reads reuse parsed YAML for identical file text (`archive_config.parse_yaml_cach
 `tests/test_import_crash_recovery.py` SIGKILLs real imports in both phases. It
 checks logical crash consistency (process death), not power loss.
 
+During body/attachment processing (`ProductionPipeline.resume`) the group spans
+many jobs. `release` only records the finished message; `collect_released`
+commits and collects objects once per `RELEASE_BATCH_MESSAGES` (64) messages
+or `RELEASE_BATCH_SECONDS` (1 s), and again when `resume`, `resume_ingest` or
+source ingest returns. While sources stall (a paused IMAP download), the
+ingest coordinator's idle hook `collect_released_when_due` bounds its wait by
+the batch deadline, so a held batch never waits for the next message. `complete` writes search rows through `unit(self.search)` inside
+`grouped(self.search)`, and `store.commit_first` makes every processing commit
+commit search first, so a crash between the two repeats only the idempotent
+search write (`write_prepared_search_message` deletes before inserting).
+`dispatch` runs a just-finished message's runnable children next (`recent`),
+so its raw working copy is still present instead of being collected and
+restored from MBOX between jobs; any order of runnable jobs is valid. Empty
+invocation workspaces are reused within a dispatch, plugin code is compiled
+once per exact source text (`CurrentSourceLoader` keys on the SHA-256 of the
+bytes it just read, so edited helpers still load), and two models avoid
+pydantic 2.13's per-instance signature inspection of `PrivateAttr(default_factory=list)`.
+While any group is open, `_store_object` still fsyncs each object file but
+renames it without syncing `objects/`; `store._commit` (every grouped commit)
+and a non-grouped `unit` sync the recorded directories before committing, so
+no committed row can name an object whose directory entry is not durable.
+
 The source worker releases each message's cached raw bytes after MBOX publication
 and catalog/processing commits, under the publication lock and writer lease.
 Dispatcher completion also releases unused objects after job commits. Ingest
