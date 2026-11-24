@@ -2725,7 +2725,7 @@ def add_ingest_arguments(parser: argparse.ArgumentParser, *, require_scan: bool 
         default=[],
         help="trusted plug-in root to load (repeatable; Python code in this directory will execute)",
     )
-    parser.add_argument("--index-attachments", action="store_true", help="index text attachments; non-text attachments require the planned Tika extractor")
+    parser.add_argument("--index-attachments", action="store_true", help="index text attachments; PDF and Office extraction is planned")
     parser.add_argument("--defer-content", action="store_true", help="file messages and extract headers; leave content jobs pending")
     parser.add_argument("--installation-config", type=Path, help="installation plugin settings override")
     parser.add_argument("roots", nargs="+" if require_roots else "*", metavar="SOURCE")
@@ -2775,7 +2775,7 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     contacts_parser.add_argument("--format", choices=("table", "tsv", "json"), default="table")
     contacts_parser.set_defaults(function=contact_list)
     refresh_parser = commands.add_parser("refresh-index")
-    refresh_parser.add_argument("--index-attachments", action="store_true", help="include text attachments; non-text attachments require the planned Tika extractor")
+    refresh_parser.add_argument("--index-attachments", action="store_true", help="include text attachments; PDF and Office extraction is planned")
     refresh_parser.add_argument(
         "--workers",
         type=worker_argument,

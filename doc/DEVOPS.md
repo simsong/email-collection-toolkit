@@ -57,7 +57,7 @@ The supported Windows download is an x64 MSIX bundle with private CPython,
 ClamAV and WinSparkle. Builds published so far are test-signed, and their trust
 ZIP supplies the persistent public certificate and installation instructions.
 Release and candidate workflows now require
-[Microsoft public signing](WINDOWS_PUBLIC_SIGNING.md) instead. WebView2 remains an external
+[Microsoft public signing](RELEASING.md#microsoft-public-signing) instead. WebView2 remains an external
 prerequisite. ARM64 package construction is not part of the current workflow.
 
 Keep the macOS native GUI test. Windows release validation should cover install,
@@ -194,8 +194,8 @@ for the tag command, packaging steps, and secret boundaries.
 
 ## Platform packaging
 
-[WINDOWS_MSIX_TEST.md](WINDOWS_MSIX_TEST.md) owns current x64 Python package
-structure and installed acceptance; [WINDOWS_PUBLIC_SIGNING.md](WINDOWS_PUBLIC_SIGNING.md)
+[MSIX packaging](RELEASING.md#msix-packaging) owns current x64 Python package
+structure and installed acceptance; [public signing](RELEASING.md#microsoft-public-signing)
 owns public-signing setup. [MACOS_DISTRIBUTION.md](MACOS_DISTRIBUTION.md) covers
 the supported Python DMG. Historical package experiments are in
 [RUST_GUI_EXPERIMENTS.md](RUST_GUI_EXPERIMENTS.md).

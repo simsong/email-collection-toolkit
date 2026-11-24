@@ -32,7 +32,7 @@ map. They retain their existing result-collection patterns.
 | `gui_app.NativeSmoke` watchdogs, `self_test` timer | Deadline enforcement must run even if workers are blocked |
 | GUI Setup Cancel and `winsparkle` Quit dispatch | Shutdown admission must work with a saturated command pool |
 | GUI Quit watchdog, waiter, export cleanup and shutdown display | Each must progress independently of command workers and blocked UI callbacks; display already collects per-window futures |
-| `scanner` owner watcher and result reader | Parent-death enforcement and continuous IPC consumption cannot wait behind scans |
+| `scanner` owner watcher and startup/result readers | Parent-death enforcement and continuous IPC consumption cannot wait behind scans. Readers wait on the pipe and the worker's exit sentinel; teardown reaps the worker, joins the readers, and only then closes the pipe, because closing a descriptor another thread is polling can strand that thread |
 | `owned_command`, `windows_scanner` owner watchers | Independent process supervision, including terminating blocked native work |
 | `loopback`, `windows_update_feed` HTTP servers | A server owns its request loop and its shutdown lifecycle |
 | Cocoa main-queue dispatch | Native UI thread affinity requires main-queue execution |

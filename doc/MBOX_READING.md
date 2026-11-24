@@ -68,7 +68,7 @@ validates the generated provenance block and withholds a failed producer's final
 records, LF/CRLF, final-newline variants, malformed bytes, declared sources,
 derived exports, and the installed standalone verifier. Native Windows ingest
 remains unqualified: Python's platform newline conversion, locking and directory
-fsync require the Windows work described in `WINDOWS.md`; these macOS tests do
+fsync require the Windows work described in `DEVELOPING.md`; these macOS tests do
 not establish byte preservation on Windows.
 
 ## Reading double-processed legacy MBOX records

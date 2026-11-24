@@ -12,7 +12,7 @@ single-backend selection and development sequence below.
 
 This is a historical format/backend research inventory, including candidate
 components and test-data sources. For current supported formats, use the
-[README](../README.md#current-status), [user manual](USER_MANUAL.md), and
+[README](../README.md#what-it-reads), [Importing guide](https://simsong.github.io/email-collection-toolkit/importing/), and
 [PST/OST reader limits](PST_IMPORTER.md). The requirements and implementation
 references own current contracts; the research below is not an installation guide.
 
