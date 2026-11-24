@@ -179,10 +179,25 @@ def flush_group(database: sqlite3.Connection) -> None:
     _commit(database)
 
 
-def _sync_object_directories() -> None:
-    """Sync every pending directory; each stays pending until its sync succeeds."""
+def _archive_of(database: sqlite3.Connection) -> Path | None:
+    """The archive directory holding ``database``, or None for an in-memory database."""
+    for _sequence, name, filename in database.execute("PRAGMA database_list"):
+        if name == "main" and filename:
+            return Path(filename).resolve().parent
+    return None
+
+
+def _sync_object_directories(database: sqlite3.Connection) -> None:
+    """Sync the pending directories of ``database``'s archive; each stays pending until synced.
+
+    Only this archive's directories are synced, so one archive's filesystem
+    failure cannot block or roll back another archive's import.
+    """
+    archive = _archive_of(database)
     with _DIRECTORY_SYNC:
         for directory in sorted(_UNSYNCED_DIRECTORIES):
+            if archive is not None and directory.resolve().parent != archive:
+                continue
             sync_directory(directory)
             _UNSYNCED_DIRECTORIES.discard(directory)
 
@@ -195,7 +210,7 @@ def _commit(database: sqlite3.Connection) -> None:
     completed whose objects or derived rows are not durable. Those jobs rerun.
     """
     try:
-        _sync_object_directories()
+        _sync_object_directories(database)
         for dependent in _COMMIT_FIRST.get(id(database), ()):
             if dependent.in_transaction:
                 dependent.commit()
@@ -231,7 +246,7 @@ def unit(database: sqlite3.Connection) -> Iterator[None]:
     if id(database) not in _GROUPED:
         with database:
             yield
-            _sync_object_directories()
+            _sync_object_directories(database)
         return
     if not database.in_transaction:
         database.execute("BEGIN")
