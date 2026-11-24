@@ -18,7 +18,7 @@ are retained.
 
 On a logged-in Mac with this checkout's development environment and `uv`:
 
-See [CLI_REFERENCE.md](DEVELOPER_COMMANDS.md#build-the-python-dmg) for this recipe.
+See [Releasing](RELEASING.md#build-the-python-dmg) for this recipe.
 
 The target installs only project-local packaging dependencies, then uses
 PyInstaller to bundle the private Python runtime, Python extension libraries,
@@ -26,15 +26,14 @@ SQL/YAML resources, plug-in manifests, and verifier source. Python supplies the 
 The bundle also contains Sparkle and notices for bundled importer dependencies. Users
 need no Python, `uv`, Homebrew, or source checkout for the supported local-mail
 GUI. The ClamAV engine, FreshClam and baseline definitions are bundled, and
-the builder fails without them. Experimental PDF extraction/OCR, Tika/Java and the
+the builder fails without them. Experimental PDF extraction/OCR and the
 Apple Intelligence command are not included in this desktop workflow.
 
 The [ingest executables](PST_IMPORTER.md#platform-packaging-and-qualification)
 include the Rust PST adapter and separate libpff OST converter in the macOS
 bundle. Delivery requires nested signing, dependency audits,
 notarization/stapling and installed-fixture tests on each supported architecture.
-A JVM would be needed only if a Java importer is later bundled; Tika remains
-outside the supported desktop runtime.
+The desktop runtime needs no JVM.
 
 Schema management requires no Java runtime or external migration tool. SQL files
 use Flyway naming conventions only (`V<version>__<description>.sql`); Flyway is
@@ -104,7 +103,7 @@ The shipped executable also accepts `--self-test`, `--self-test-gui`, and
 `--report /absolute/path/report.json`. Advanced users can access the bundled
 archive CLI with `--cli`, without a separately installed Python:
 
-See [CLI_REFERENCE.md](DEVELOPER_COMMANDS.md#check-the-installed-macos-executable) for this recipe.
+See [Releasing](RELEASING.md#check-the-installed-macos-executable) for this recipe.
 
 ## Bundled antivirus
 
@@ -140,7 +139,7 @@ scanned by a later ordinary import; a rescan command remains future work.
 
 For local signing with a certificate and private key already in your Keychain:
 
-See [CLI_REFERENCE.md](DEVELOPER_COMMANDS.md#select-a-developer-id-identity) for this recipe.
+See [Releasing](RELEASING.md#select-a-developer-id-identity) for this recipe.
 
 `dmg-signed` defaults to the first valid **Developer ID Application** identity
 listed by macOS. It fails before building if none is available. To select a
@@ -201,7 +200,7 @@ The mounted local tests do not establish downloaded-file Gatekeeper acceptance.
    Developer ID Installer is for `.pkg` installers, not this drag-install DMG.
 3. Build with the default Developer ID Application identity from your Keychain:
 
-   See [CLI_REFERENCE.md](DEVELOPER_COMMANDS.md#select-a-developer-id-identity) for this recipe.
+   See [Releasing](RELEASING.md#select-a-developer-id-identity) for this recipe.
 
 4. For a tagged release, GitHub Actions submits the DMG with `notarytool`,
    staples the accepted ticket, validates it, and requires Gatekeeper
@@ -216,7 +215,7 @@ After the intended version change is merged into `main`, use a clean checkout
 and replace the example tag with `v` plus the exact `pyproject.toml` version.
 Do not move or reuse an already published tag.
 
-See [CLI_REFERENCE.md](DEVELOPER_COMMANDS.md#publish-a-matching-annotated-tag) for this recipe.
+See [Releasing](RELEASING.md#publish-a-matching-annotated-tag) for this recipe.
 
 The tag push is the only trigger for [the release workflow](../.github/workflows/release.yml)
 for tags beginning with `v`. It checks that the tag is annotated, points to a

@@ -121,8 +121,8 @@ test-release-files: ruff
 	uv run --locked ty check scripts/release_files.py tests/test_release_files.py --error-on-warning
 	uv run --locked pyright scripts/release_files.py tests/test_release_files.py --warnings
 	uv run --locked pytest -q tests/test_release_files.py
-.PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run search summary-smoke test test-bagit test-data-quality
-.PHONY: test-application test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-refresh-index test-tika test-website validation-aws-start validation-aws-start-all
+.PHONY: install-test-browser ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run search summary-smoke test test-bagit test-data-quality
+.PHONY: test-application test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-refresh-index test-website validation-aws-start validation-aws-start-all
 
 .PHONY: test-apple-mail-compare
 .PHONY: validation-fetch validation-list validation-prepare validation-run validation-run-all validation-sam-build validation-sam-deploy validation-sam-validate validation-test verify
@@ -158,7 +158,6 @@ runtime-license-bundle:
 	@test -n "$(LICENSE_OUTPUT)" || { echo 'usage: make runtime-license-bundle LICENSE_OUTPUT=/path/to/licenses'; exit 2; }
 	uv run python scripts/check_runtime_licenses.py --output "$(LICENSE_OUTPUT)"
 
-TIKA_VERSION ?= 4.0.0
 # CARGO selects Cargo; RUST_TARGET_DIR keeps compiled artifacts in this checkout.
 # RUSTUP_TOOLCHAIN explicitly overrides the compiler selected by rust-toolchain.toml.
 CARGO ?= cargo
@@ -248,12 +247,6 @@ name-matcher-observations:
 h3-ambiguous-review:
 	uv run ect h3-review $(ARGS)
 
-TIKA_DIR ?= $(CURDIR)/.tools/tika/$(TIKA_VERSION)
-TIKA_JAR := $(TIKA_DIR)/tika-app-$(TIKA_VERSION).jar
-TIKA_DOWNLOAD_DIR ?= $(CURDIR)/.tools/tika/downloads
-TIKA_ARCHIVE := $(TIKA_DOWNLOAD_DIR)/tika-app-$(TIKA_VERSION).zip
-TIKA_SHA512 := $(TIKA_ARCHIVE).sha512
-TIKA_URL := https://downloads.apache.org/tika/$(TIKA_VERSION)/tika-app-$(TIKA_VERSION).zip
 SPARKLE_VERSION ?= 2.10.0
 SPARKLE_DIR ?= $(CURDIR)/.tools/sparkle/$(SPARKLE_VERSION)
 SPARKLE_DOWNLOAD_DIR ?= $(CURDIR)/.tools/sparkle/downloads
@@ -754,8 +747,6 @@ test-ingest-progress: test-ingest-progress-service
 test-interrupt:
 	uv run --locked pytest -q tests/test_progress.py tests/test_end_to_end.py::test_interrupt_stops_cleanly
 
-test-tika:
-	uv run pytest -q tests/test_tika.py
 
 test-website:
 	uv run pytest -q tests/test_website_scripts.py
@@ -817,25 +808,9 @@ validation-aws-start-all:
 	@echo "Launching one independent self-terminating EC2 worker for every enabled validation dataset"
 	uv run ect validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" aws-start-all --stack "$(STACK)"
 
-install-mac:
-	@test "$$(uname -s)" = Darwin || { echo "install-mac must run on macOS"; exit 1; }
-	@$(MAKE) install-tika
-
-install-linux:
-	@test "$$(uname -s)" = Linux || { echo "install-linux must run on Linux"; exit 1; }
-	@$(MAKE) install-tika
-
 install-test-browser:
 	uv run playwright install $(PLAYWRIGHT_INSTALL_ARGS)
 
-install-tika:
-	@command -v java >/dev/null || { echo "Apache Tika needs a Java runtime (Java 17 or newer)."; exit 1; }
-	@test ! -e "$(TIKA_DIR)" || { echo "Tika is already installed at $(TIKA_DIR)"; exit 1; }
-	@mkdir -p "$(TIKA_DOWNLOAD_DIR)"
-	curl --fail --location --output "$(TIKA_ARCHIVE)" "$(TIKA_URL)"
-	curl --fail --location --output "$(TIKA_SHA512)" "$(TIKA_URL).sha512"
-	uv run python -m mailarchiver.tika --archive "$(TIKA_ARCHIVE)" --checksum "$(TIKA_SHA512)" --destination "$(TIKA_DIR)" --version "$(TIKA_VERSION)"
-	@echo "Installed and verified $(TIKA_JAR)"
 
 ocr-inventory:
 	@test -n "$(ARCHIVE)" || { echo 'usage: make ocr-inventory ARCHIVE=/path/to/mailbag'; exit 2; }

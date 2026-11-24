@@ -17,8 +17,8 @@ from.
   [homepage](@/_index.md) and open it. Windows also needs the Microsoft Edge
   WebView2 Runtime, which most Windows 10 and 11 computers already have.
 
-That is all. Python and the antivirus scanner are included, so there is nothing
-else to install.
+Python and the antivirus scanner are included, so there is nothing else to
+install.
 
 ## 2. Import your mail
 
@@ -74,6 +74,8 @@ ect verify collection.mailarchive
 ```
 
 The command line scans for viruses with ClamAV, which you install separately
-(for example `brew install clamav` on macOS). To try the tools without it, add
-`--no-scan` to `ect-import`; messages are then recorded as not scanned. See
+(for example `brew install clamav` on macOS) before running
+`ect update-definitions` once to download virus definitions. To try the tools
+without it, add `--no-scan` to `ect-import`; messages are then recorded as not
+scanned. See
 [Command line](@/command-line.md) for more.

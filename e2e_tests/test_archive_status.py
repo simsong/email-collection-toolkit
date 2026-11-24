@@ -4,7 +4,7 @@
 # Additional notices enter the renderer as data, without replacing services.
 # Browser geometry verifies that multiple lines reserve workspace height.
 # Lifecycle checks keep empty and standalone windows free of archive banners.
-# This validates the banner only; the separate Tika indexer remains planned.
+# This validates the banner only; PDF/Office extraction remains planned.
 """Requirements: multiline archive status, safe text, and unobscured search panes."""
 
 from pathlib import Path

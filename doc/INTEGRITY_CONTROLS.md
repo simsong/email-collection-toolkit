@@ -603,7 +603,7 @@ integrity verification. H1/h2/h3 definitions above remain authoritative.
 | `local-file-prefix-sha256-v1` | First previously checkpointed byte count of the current file, compared with the old full-file hash | Allows append resume only with the other source/offset checks; a file can still change during a run |
 | `source_raw_sha256` | Exact extracted payload before explicit MBOX framing normalization | Allows verification of reconstructed pre-normalization bytes; distinct from post-normalization h2 |
 | PDF/attachment evidence | Full PDF bytes (`pdf_sha256`); transfer-decoded attachment bytes for OCR extraction hashes | Derived attachment fixity does not replace h2's encoded MIME coverage |
-| Acquisition/build checks | Full downloaded validation artifact and result ZIP, source-manifest file; Tika distribution ZIP uses SHA-512 compared with its downloaded checksum | A checksum from the same origin is not an independent authenticity root |
+| Acquisition/build checks | Full downloaded validation artifact and result ZIP, source-manifest file | A checksum from the same origin is not an independent authenticity root |
 | Cargo registry package checksums | Registry package archive checksums pinned in Cargo.lock and checked by Cargo during dependency acquisition | Build-input fixity, not message h4 or independent publisher authentication |
 | Derived report/export digests | Full exported files; ePADD exporter hashes its input catalog and output; review tools hash exact recovered RFC bytes with h2 or canonicalized bytes with h3 | Reproducibility/change detection, not promotion of derivatives to canonical mail |
 | Research text/prompt digests | UTF-8 extracted block text and UTF-8 AI request prompt | Binds evidence to exact derived text; cannot prove interpretation accuracy |
@@ -619,7 +619,7 @@ not substitutes for acquired-file or archive-message fixity.
 
 The relevant implementations are `standalone_verify.py`, `bagit.py`,
 `source_integrity.py`, `archive_integrity.py`, `mbox_framing.py`, `validation.py`,
-`pdf_mail.py`, `tika.py`, `sources.py`, `application.py`, `plugin_loader.py`,
+`pdf_mail.py`, `sources.py`, `application.py`, `plugin_loader.py`,
 `auth.py`, `document_options.py`, `aisummarize.py`, the data-quality/name-matcher
 and OCR scripts, and `dev/addressbook-exporter.py`. Message/search/diagnostic
 code reuses h2; Apple Mail comparison and h3 review reuse the h3 profile.

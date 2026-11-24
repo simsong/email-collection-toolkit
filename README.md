@@ -29,7 +29,9 @@ without an app password, and redacted copies are planned.
 
 Download the signed installer for macOS (Apple Silicon) or Windows (x64 or ARM)
 from the [project website](https://simsong.github.io/email-collection-toolkit/).
-Everything it needs is included. Then follow the
+Python and the virus scanner are included; Windows also needs the Microsoft
+Edge WebView2 Runtime, which most Windows 10 and 11 computers already have.
+Then follow the
 [Quick start](https://simsong.github.io/email-collection-toolkit/quick-start/).
 
 To use the command line instead, install
@@ -44,7 +46,8 @@ ect verify collection.mailarchive
 ```
 
 The command line uses ClamAV for virus scanning, which you install separately
-(for example `brew install clamav`). Add `--no-scan` to try it without ClamAV.
+(for example `brew install clamav`), then run `ect update-definitions` once.
+Add `--no-scan` to try it without ClamAV.
 See [Command line](https://simsong.github.io/email-collection-toolkit/command-line/).
 
 ## Documentation
@@ -53,8 +56,9 @@ See [Command line](https://simsong.github.io/email-collection-toolkit/command-li
   importing, searching, archive care, the command line, and troubleshooting.
 - [Command-line reference](doc/CLI_REFERENCE.md): every command and option.
 - [Release notes](doc/RELEASE_NOTES.md): what changed in each version.
-- [Developer documentation](doc/README.md): building, testing, releasing, and
-  how the archive works inside.
+- [Developing](doc/DEVELOPING.md) and [Releasing](doc/RELEASING.md): building,
+  testing, and publishing. The [documentation index](doc/README.md) covers how
+  the archive works inside.
 
 ## Community
 
