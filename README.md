@@ -70,7 +70,10 @@ and report bugs in the
 ## Copyright and licenses
 
 Email Collection Toolkit is distributed under the [GNU GPL version 2 only](LICENSE).
-Additional licenses are available from the copyright holder. Original project
-material is covered by [COPYRIGHT](COPYRIGHT). Bundled components keep their
-own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
-[doc/LICENSING.md](doc/LICENSING.md).
+Additional licenses are available from the copyright holder.
+
+Original project material is covered by [COPYRIGHT](COPYRIGHT). Vendored and
+separately licensed components are identified in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). [doc/LICENSING.md](doc/LICENSING.md)
+explains the licensing choices, lists every bundled component, and gives the
+license of each shipped package.

@@ -9,8 +9,9 @@ description = "Copyright, software licensing, and ownership of archived material
 
 Copyright Simson Garfinkel.
 
-The current software is being distributed under the GNU General Public License
-(GPL).
+The current software is being distributed under the GNU General Public License,
+version 2 only (GPLv2). The separate PST/OST converter is distributed under
+GPL version 3 only.
 
 The non-GPL versions may be available. Contact
 [Simson Garfinkel](https://simson.net/page/Contact_Simson) for information.
