@@ -50,7 +50,7 @@ Mailbag package directly.
 
 Current releases read local MBOX, EML, Maildir, Emacs RMAIL Babyl, and complete
 Apple Mail `.emlx` messages. The macOS and Windows applications also read Outlook PST and
-OST files, with best-effort extraction documented in the user manual. A Gmail or
+OST files, with [best-effort extraction](@/importing.md#outlook-and-microsoft-365). A Gmail or
 Microsoft 365 export can be read if it uses one of these formats.
 
 Read-only IMAP supports Gmail accounts that permit app-password access. Direct
@@ -69,6 +69,5 @@ Email Collection Toolkit uses the same process for personal and institutional co
 - the archive uses MBOX, BagIt 1.0, Mailbag 1.0, and SHA-256.
 
 Email Collection Toolkit is not an email client or a hosted service. See the
-[User Manual](@/manual.md) for operating guides and the
-[README](https://github.com/simsong/email-collection-toolkit/blob/main/README.md)
-for installation instructions.
+[Quick start](@/quick-start.md) to install it and the [User Manual](@/manual.md)
+for the full guide.

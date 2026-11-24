@@ -4,6 +4,14 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+## 2026-11-23
+
+- Make the website the user guide. Add Quick start, Archive care, Command line
+  and Troubleshooting pages, and shorten Importing and Searching. The Advanced
+  page is split among them; its old address redirects to Archive care.
+- Explain that PDF, Office and scanned-document text search is planned, not
+  available.
+
 ## 2026-11-08
 
 - Replace Make-based user examples with installable `ect` commands for creation,

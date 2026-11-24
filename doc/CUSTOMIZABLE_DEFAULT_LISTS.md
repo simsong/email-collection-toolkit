@@ -76,7 +76,14 @@ exclude: ['alice@lists.example.org']
 
 Closing the editor defers setup; import confirmation still presents owner rules.
 Explicit archive rules take precedence over personal defaults. See the
-[user manual](USER_MANUAL.md#identify-the-archive-owner) for owner glob semantics.
+[Importing guide](https://simsong.github.io/email-collection-toolkit/importing/#your-own-addresses) for owner glob semantics.
+
+Versioned policies that affect derived results, such as `contact_filters.yaml`,
+can also be copied in full to the archive root. The archive copy then takes
+precedence over the packaged default, so the archive keeps the policy that
+produced its results. `mode: replace` supplies a complete policy; `mode: extend`
+adds rule lists to the packaged one. Invalid policies fail rather than silently
+falling back.
 
 ## Reply-address recognition
 

@@ -659,7 +659,7 @@ Native initialization has a 120-second deadline; production scans retain a
 reaped. Owned extraction/message temporaries are removed. Scan threads persist
 typed evidence directly, and processor invocation history retains it too.
 
-The h3 review prototype (see [CLI limitations](../DEVELOPER_COMMANDS.md#research-and-diagnostic-commands))
+The h3 review prototype (see [CLI limitations](../DEVELOPING.md#research-and-diagnostic-commands))
 writes hash-verified ambiguous classes to a new private directory outside both
 source stores. Refresh validates manifest paths and hashes; it does not import
 or deduplicate. Its writable SQLite comparison index enables URI handling and

@@ -20,6 +20,7 @@ from collections.abc import Generator
 from concurrent.futures import Future
 import sqlite3
 import tempfile
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -49,9 +50,16 @@ from .contracts import AddressEvidence, ContentMetadata, Filing, HeaderMetadata,
 from .objects import collect_objects
 from .registry import fingerprint, load_processors
 from .runtime import RANK_FAILURE, ProcessingProgress, dispatch, dispatch_steps, prepare_run, run
-from .store import DATABASE, USER_CANCELLED, connect, enqueue, report, snapshot
+from .store import (DATABASE, USER_CANCELLED, commit_first, connect, enqueue, flush_group, grouped, report, snapshot,
+                    snapshot_bytes, unit)
 
 Publisher = Callable[[MailObject, ParsedMessage, MailboxReference, int], int]
+# Finished messages are committed and their working objects collected in
+# batches: each commit costs several fsyncs, and collecting a raw copy that the
+# message's next job needs forces a restore from MBOX. A crash loses at most
+# one batch of completed jobs, which then replay from durable inputs.
+RELEASE_BATCH_MESSAGES = 64
+RELEASE_BATCH_SECONDS = 1.0
 
 
 class IngestedMessage(BaseModel):
@@ -76,6 +84,8 @@ class ProductionPipeline:
         self.heartbeat = heartbeat
         self.signals = signals
         self._ingesting = False
+        self._released: set[str] = set()
+        self._release_due = time.monotonic() + RELEASE_BATCH_SECONDS
         self.plugins = load_processors((builtin_plugin_directory(), *plugin_dirs))
         self.registry_hash = fingerprint(self.plugins)
         self.database = connect(self.archive, create=not (self.archive / DATABASE).exists(), production=True)
@@ -107,9 +117,33 @@ class ProductionPipeline:
     def release(self, message_id: str) -> None:
         if self._ingesting:
             return
+        self._released.add(message_id)
+        if len(self._released) >= RELEASE_BATCH_MESSAGES or time.monotonic() >= self._release_due:
+            self.collect_released()
+
+    def collect_released_when_due(self) -> float | None:
+        """Before an idle wait: collect a due batch, else return how long it may wait.
+
+        A batch must not outlive a stall in its sources (a paused download, a
+        slow server), so an idle coordinator bounds its wait by this deadline.
+        """
+        if not self._released:
+            return None
+        remaining = self._release_due - time.monotonic()
+        if remaining > 0:
+            return remaining
+        self.collect_released()
+        return None
+
+    def collect_released(self) -> None:
+        """Commit finished work, then collect objects of the released messages."""
+        flush_group(self.database)
         if self.catalog.in_transaction:
             raise ValueError("object cleanup requires committed catalog records")
-        collect_objects(self.database, self.archive, self._canonical_bytes, message_id=message_id)
+        released, self._released = sorted(self._released), set()
+        self._release_due = time.monotonic() + RELEASE_BATCH_SECONDS
+        for message_id in released:
+            collect_objects(self.database, self.archive, self._canonical_bytes, message_id=message_id)
 
     def _canonical_bytes(self, digest: str) -> bytes:
         row = self.catalog.execute(
@@ -179,13 +213,21 @@ class ProductionPipeline:
         return item
 
     def ingest(self, source: MailObject, metadata: SourceMetadata, *, defer_existing_jobs: bool = False) -> IngestedMessage:
-        with tempfile.NamedTemporaryFile(dir=self.archive, prefix=".processing-input-", delete_on_close=False) as temporary:
-            temporary.write(source.raw)
-            temporary.flush()
-            temporary.close()
-            reference = snapshot(self.archive, Path(temporary.name))
+        reference = snapshot_bytes(self.archive, source.raw)
         existing = self.catalog.execute("SELECT message_pk FROM messages WHERE sha256=?", (reference.sha256,)).fetchone()
-        with self.database:
+        try:
+            with grouped(self.database):
+                return self._ingest_grouped(reference, metadata, existing is not None, defer_existing_jobs=defer_existing_jobs)
+        finally:
+            # Concurrent content processing can hold an outer group open, which
+            # this group joins. Commit the message now anyway, as a standalone
+            # ingest would, so source acquisition never runs ahead of it.
+            flush_group(self.database)
+
+    def _ingest_grouped(self, reference: ContentReference, metadata: SourceMetadata, duplicate: bool, *,
+                        defer_existing_jobs: bool = False) -> IngestedMessage:
+        # One commit per message instead of one per processor checkpoint.
+        with unit(self.database):
             item = self._admit(reference, metadata)
             # Retry only unpublished ingest roots. Cancelled derived jobs may
             # have lost their temporary inputs and require explicit reprocessing.
@@ -200,12 +242,12 @@ class ProductionPipeline:
                 enqueue(self.database, item, self.registry_hash)
         # A duplicate's saved ranks belong to the shared dispatcher. Starting a
         # nested dispatch could claim a sibling job while that digest is active.
-        if not (defer_existing_jobs and existing is not None and not needs_filing):
+        if not (defer_existing_jobs and duplicate and not needs_filing):
             self._finish_ingest_message(item.message_id)
         row = self.database.execute("SELECT parsed_json,catalog_message_pk,excluded FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()
         if row is None or row[0] is None:
             raise RuntimeError("ingest processor tree ended without a filing decision")
-        return IngestedMessage(parsed=ParsedMessage.model_validate_json(row[0]), message_pk=row[1], duplicate=existing is not None, excluded=bool(row[2]))
+        return IngestedMessage(parsed=ParsedMessage.model_validate_json(row[0]), message_pk=row[1], duplicate=duplicate, excluded=bool(row[2]))
 
     def resume_ingest(self, *, progress: ProcessingProgress | None = None, mandatory_only: bool = False) -> None:
         """Replay durable ingest work with cooperative stops between messages."""
@@ -224,6 +266,7 @@ class ProductionPipeline:
             archived = self.catalog.execute("SELECT 1 FROM messages WHERE sha256=?", (str(row[0]),)).fetchone() is not None
             self._finish_ingest_message(str(row[0]), progress=progress, fail_on_error=not archived)
             self.release(str(row[0]))
+        self.collect_released()
 
     def _finish_ingest_message(self, message_id: str, *, progress: ProcessingProgress | None = None,
                                fail_on_error: bool = True) -> None:
@@ -246,9 +289,13 @@ class ProductionPipeline:
     def resume(self, pipelines: tuple[Pipeline, ...], *, max_jobs: int | None = None, message_id: str | None = None,
                fail_on_error: bool = True, progress: ProcessingProgress | None = None, workers: int = 1) -> RunReport:
         failures: list[Exception] = []
-        result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,
-                     installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
-                     message_id=message_id, continue_after_failure=True, progress=progress, workers=workers, heartbeat=self.heartbeat, signals=self.signals)
+        # Search rows written by complete() commit just before each processing commit.
+        with grouped(self.search), commit_first(self.database, self.search):
+            result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,
+                         installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
+                         message_id=message_id, continue_after_failure=True, progress=progress, workers=workers, heartbeat=self.heartbeat, signals=self.signals,
+                         idle=self.collect_released_when_due)
+        self.collect_released()
         if fail_on_error:
             self._raise_failures(pipelines, failures, message_id=message_id)
         return result
@@ -287,7 +334,7 @@ class ProductionPipeline:
             self.database.execute("DETACH DATABASE derived_search")
 
     def _invalidate(self, generation: str) -> None:
-        with self.database:
+        with unit(self.database):
             self.database.execute("UPDATE jobs SET status='aborted',detail='explicit reprocessing' WHERE status IN ('pending','running','failed')")
             self.database.execute("DELETE FROM content_parts")
             self.database.execute("DELETE FROM evidence")
@@ -438,7 +485,7 @@ class ProductionPipeline:
         parts.sort(key=lambda part: json.loads(part[0]))
         body = "\n".join(part[2] for part in parts if part[1] == "body")
         attachments = "\n".join(part[2] for part in parts if part[1] == "attachment") if self.policy.index_attachments else ""
-        with self.search:
+        with unit(self.search):
             write_prepared_search_message(self.search, PreparedSearchMessage(sha256=item.message_id,
                 content=headers.search_headers + "\n" + body, attachment_content=attachments,
                 attachments=list(inventory.attachments), suggestions=list(headers.suggestions),

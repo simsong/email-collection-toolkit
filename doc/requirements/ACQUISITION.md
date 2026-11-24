@@ -69,7 +69,8 @@ Temporary server capacity/rate-limit refusals during session initialization shal
 keep imports running and retry after 1, 2, 4, 8 seconds, capping the delay at 60 seconds
 until accepted or cancelled. Show the sanitized reason and backoff as progress,
 close each refused connection before waiting, and wake immediately on Suspend/Quit
-or console Ctrl-C, including main-thread discovery on Windows Python3.12.
+or console Ctrl-C, including main-thread discovery on Windows Python3.12, and on
+POSIX when the signal is delivered to a worker thread rather than the main thread.
 Both public IMAP CLI paths must show changed retry phases, including the sanitized
 reason and next delay, even while download totals remain unchanged.
 Classify the original response before redacting or truncating diagnostics; a

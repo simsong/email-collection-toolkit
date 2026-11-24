@@ -15,6 +15,7 @@ Fundamental dependents:
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 from importlib.abc import MetaPathFinder
 from importlib.machinery import PathFinder, SourceFileLoader
@@ -45,7 +46,7 @@ from .api import (
     MIME_TYPE, ProcessingResult, RAW_MESSAGE, RunReport,
 )
 from .registry import subscribers
-from .store import content_reference, enqueue, report, snapshot
+from .store import content_reference, enqueue, flush_group, grouped, report, snapshot, unit
 from .objects import collect_objects, index_outputs
 
 RANK_FAILURE = "rank failed; inspect invocations"
@@ -86,11 +87,27 @@ class ProcessorServices(Protocol):
     def failed(self, item: ProcessingObject, plugin: PluginSpec, response: InvocationResponse) -> ProcessingResult | None: ...
 
 
+_COMPILED: dict[tuple[str, bytes], CodeType] = {}
+_COMPILED_LOCK = threading.Lock()
+
+
 class CurrentSourceLoader(SourceFileLoader):
     def get_code(self, fullname: str) -> CodeType:
-        # Explicit replay must load edited helpers rather than stale cached bytecode.
+        # Explicit replay must load edited helpers rather than stale cached bytecode,
+        # so the cache is keyed on the exact source bytes read now, never on mtimes.
+        # Plugins are re-executed per invocation; only compilation is reused.
         path = self.get_filename(fullname)
-        return compile(self.get_data(path), path, "exec", dont_inherit=True)
+        source = self.get_data(path)
+        key = (path, hashlib.sha256(source).digest())
+        with _COMPILED_LOCK:
+            code = _COMPILED.get(key)
+        if code is None:
+            code = compile(source, path, "exec", dont_inherit=True)
+            with _COMPILED_LOCK:
+                if len(_COMPILED) >= 256:
+                    _COMPILED.clear()
+                _COMPILED[key] = code
+        return code
 
 
 class PluginImports(MetaPathFinder):
@@ -149,6 +166,17 @@ def invoke(request: InvocationRequest, workspace: Path,
         validate_result(plugin, item, result)
         return InvocationResponse(result=result.model_copy(update={"config_writes": configuration.pending_writes()}))
     except Exception as error:
+        if not isinstance(error, TimeoutError):
+            # The deadline alarm can fire inside library code (e.g. a lock
+            # release in Condition.wait) and surface as an unrelated error.
+            # Past the deadline, report the timeout that caused it.
+            try:
+                item.check_cancelled()
+            except TimeoutError as timeout:
+                timeout.__cause__ = error
+                error = timeout
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass  # Cancellation keeps the original failure.
         response = InvocationResponse.failure(error)
         if isinstance(result, ProcessingResult) and result.scan is not None:
             response = response.model_copy(update={"result": ProcessingResult(scan=result.scan)})
@@ -212,7 +240,7 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
     if previous:
         recorded = plugin.model_copy(update={"manifest": plugin.manifest.model_copy(update={"implementation_version": previous[1]})})
         return CheckpointResult(plugin=recorded, result=ProcessingResult.model_validate_json(previous[0]))
-    with database:
+    with unit(database):
         cursor = database.execute("INSERT INTO invocations(job_id,kind,version,rank,status) VALUES(?,?,?,?,'running')",
                                   (job_id, plugin.manifest.kind, plugin.manifest.implementation_version, plugin.manifest.rank))
         invocation_id = cursor.lastrowid
@@ -230,7 +258,7 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
                                     for child in response.result.promotions),
             })})
     except (KeyboardInterrupt, GeneratorExit):
-        with database:
+        with unit(database):
             database.execute("UPDATE invocations SET status='failed',elapsed=?,error='cancelled' WHERE invocation_id=?",
                              (time.monotonic() - started, invocation_id))
         raise
@@ -241,7 +269,7 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
     elapsed = time.monotonic() - started
     success = response.result is not None and response.error is None
     accepted = services.failed(item, plugin, response) if not success and services is not None else None
-    with database:
+    with unit(database):
         database.execute("UPDATE invocations SET status=?,elapsed=?,result_json=?,error=? WHERE invocation_id=?",
                          ("completed" if success else "failed", elapsed,
                           response.result.model_dump_json() if success and response.result else response.model_dump_json(),
@@ -292,7 +320,8 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
         failures: list[Exception] | None = None, message_id: str | None = None,
         continue_after_failure: bool = False, progress: ProcessingProgress | None = None, workers: int = 1,
-        heartbeat: Callable[[], None] | None = None, signals: tuple[ChangeSignal, ...] = ()) -> RunReport:
+        heartbeat: Callable[[], None] | None = None, signals: tuple[ChangeSignal, ...] = (),
+        idle: Callable[[], float | None] | None = None) -> RunReport:
     """Caller holds the archive writer lease. Atomic output release follows each barrier."""
     if workers < 1:
         raise ValueError("processing workers must be positive")
@@ -300,7 +329,8 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
     try:
         dispatch(database, plugins, max_jobs=max_jobs, installation_config=installation_config,
                  pipelines=pipelines, services=services, cancelled=cancelled, failures=failures, message_id=message_id,
-                 continue_after_failure=continue_after_failure, progress=progress, workers=workers, heartbeat=heartbeat, signals=signals)
+                 continue_after_failure=continue_after_failure, progress=progress, workers=workers, heartbeat=heartbeat, signals=signals,
+                 idle=idle)
     finally:
         if services is None:
             # Production owns cleanup after canonical publication/checkpointing;
@@ -325,13 +355,16 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
         failures: list[Exception] | None = None, message_id: str | None = None,
         continue_after_failure: bool = False, progress: ProcessingProgress | None = None, workers: int = 1,
-        heartbeat: Callable[[], None] | None = None, signals: tuple[ChangeSignal, ...] = ()) -> None:
+        heartbeat: Callable[[], None] | None = None, signals: tuple[ChangeSignal, ...] = (),
+        idle: Callable[[], float | None] | None = None) -> None:
     """Drive the cooperative dispatcher to completion for standalone callers."""
     for pending in dispatch_steps(database, plugins, max_jobs=max_jobs, installation_config=installation_config,
             pipelines=pipelines, services=services, cancelled=cancelled, failures=failures, message_id=message_id,
             continue_after_failure=continue_after_failure, progress=progress, workers=workers,
             heartbeat=heartbeat, signals=signals):
-        wait(pending, return_when=FIRST_COMPLETED)
+        # ``idle`` commits a due batch and bounds the wait, so a slow
+        # processor cannot hold finished work past its deadline.
+        wait(pending, timeout=idle() if idle is not None else None, return_when=FIRST_COMPLETED)
 
 
 def dispatch_steps(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
@@ -364,10 +397,17 @@ def dispatch_steps(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...]
         cancelled = ActivityCallback(cancelled, (*signals, invocation_changed))
     failures = failures if failures is not None else []
     active: list[ActiveJob] = []
+    # Empty workspaces are indistinguishable from fresh ones; reusing them saves
+    # a directory create and remove per invocation.
+    spare: list[Path] = []
+    # Messages whose job just finished. Running a message's runnable children
+    # next keeps its working objects warm instead of collecting and restoring
+    # them between jobs; any order of runnable jobs is equally correct.
+    recent: list[str] = []
     processed = 0
     stopped = False
     failure: BaseException | None = None
-    with tempfile.TemporaryDirectory(prefix="processing-") as directory:
+    with grouped(database), tempfile.TemporaryDirectory(prefix="processing-") as directory:
         try:
             with ThreadPoolExecutor(max_workers=workers) if workers > 1 or heartbeat is not None or cooperative else nullcontext() as pool:
                 def advance(job: ActiveJob, response: InvocationResponse | None = None,
@@ -383,6 +423,9 @@ def dispatch_steps(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...]
                     except StopIteration as done:
                         stopped |= not done.value
                         active.remove(job)
+                        if job.message_id not in recent:
+                            recent.append(job.message_id)
+                            del recent[:-workers]
                         return
                     except BaseException as caught:
                         failure = failure or caught
@@ -395,14 +438,17 @@ def dispatch_steps(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...]
                         WORKER_NUMBER.reset(token)
                         PROCESSING_WORKER.reset(pool_token)
                         if job.workspace is not None:
-                            shutil.rmtree(job.workspace)
+                            if any(job.workspace.iterdir()):
+                                shutil.rmtree(job.workspace)
+                            else:
+                                spare.append(job.workspace)
                             job.workspace = None
                     stopped |= stop_claiming()
                     if stopped:
                         job.steps.close()
                         active.remove(job)
                         return
-                    job.workspace = Path(tempfile.mkdtemp(dir=directory))
+                    job.workspace = spare.pop() if spare else Path(tempfile.mkdtemp(dir=directory))
                     if pool is not None:
                         job.future = pool.submit(invoke, request, job.workspace, cancelled)
                     else:
@@ -415,15 +461,17 @@ def dispatch_steps(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...]
                 while True:
                     stopped |= stop_claiming()
                     while not stopped and not stop_claiming() and len(active) < workers and (max_jobs is None or processed < max_jobs):
-                        placeholders = ",".join("?" for _ in pipelines)
-                        message_filter = "" if message_id is None else "AND json_extract(item_json,'$.message_id')=? "
-                        busy_filter = ("AND json_extract(item_json,'$.message_id') NOT IN ("
-                                       + ",".join("?" for _ in active) + ") ") if active else ""
-                        row = database.execute("SELECT job_id,item_json,registry_hash FROM jobs WHERE status='pending' "
-                            f"AND json_extract(item_json,'$.pipeline') IN ({placeholders}) {message_filter}{busy_filter}"
-                            "AND (parent_job_id IS NULL OR EXISTS (SELECT 1 FROM jobs parent "
-                            "WHERE parent.job_id=jobs.parent_job_id AND parent.status='completed')) ORDER BY job_id LIMIT 1",
-                            (*pipelines, *((message_id,) if message_id is not None else ()), *(job.message_id for job in active))).fetchone()
+                        row = None
+                        if message_id is None:
+                            for candidate in reversed(tuple(recent)):
+                                if any(job.message_id == candidate for job in active):
+                                    continue
+                                row = _next_job(database, pipelines, candidate, active)
+                                if row is not None:
+                                    break
+                                recent.remove(candidate)
+                        if row is None:
+                            row = _next_job(database, pipelines, message_id, active)
                         if row is None:
                             break
                         worker = next(number for number in range(1, workers + 1) if all(job.worker != number for job in active))
@@ -458,6 +506,20 @@ def dispatch_steps(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...]
             raise failure
 
 
+def _next_job(database: sqlite3.Connection, pipelines: tuple[Pipeline, ...], message_id: str | None,
+              active: list[ActiveJob]) -> tuple[int, str, str] | None:
+    """The oldest runnable pending job, optionally of one message, never of a busy message."""
+    placeholders = ",".join("?" for _ in pipelines)
+    message_filter = "" if message_id is None else "AND json_extract(item_json,'$.message_id')=? "
+    busy_filter = ("AND json_extract(item_json,'$.message_id') NOT IN ("
+                   + ",".join("?" for _ in active) + ") ") if active else ""
+    return database.execute("SELECT job_id,item_json,registry_hash FROM jobs WHERE status='pending' "
+        f"AND json_extract(item_json,'$.pipeline') IN ({placeholders}) {message_filter}{busy_filter}"
+        "AND (parent_job_id IS NULL OR EXISTS (SELECT 1 FROM jobs parent "
+        "WHERE parent.job_id=jobs.parent_job_id AND parent.status='completed')) ORDER BY job_id LIMIT 1",
+        (*pipelines, *((message_id,) if message_id is not None else ()), *(job.message_id for job in active))).fetchone()
+
+
 def _job(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], job_id: int, payload: str, *,
          installation_config: Path | None, services: ProcessorServices | None, failures: list[Exception],
          continue_after_failure: bool, progress: ProcessingProgress | None, worker: int,
@@ -477,12 +539,12 @@ def _job(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], job_id: 
             input_error = f"input unreadable: {error}"
             failures.append(error)
         if input_error:
-            with database:
+            with unit(database):
                 database.execute("UPDATE jobs SET status='failed',detail=? WHERE job_id=?", (input_error, job_id))
             ending = "failed"
             return continue_after_failure
         selected = subscribers(plugins, item)
-        with database:
+        with unit(database):
             database.execute("UPDATE jobs SET status='running' WHERE job_id=?", (job_id,))
         stop_import = False
         explicit_stop = False
@@ -503,7 +565,7 @@ def _job(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], job_id: 
                     if checkpoint.result.outcome == "fail-import":
                         break
             outcomes = [result.outcome for _, result in results]
-            with database:
+            with unit(database):
                 if failed or "fail-import" in outcomes:
                     database.execute("UPDATE jobs SET status='failed',detail=? WHERE job_id=?", (RANK_FAILURE, job_id))
                     stop_import = True
@@ -538,11 +600,12 @@ def _job(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], job_id: 
         if not aborted:
             if services is not None:
                 services.complete(item)
-            with database:
+            with unit(database):
                 database.execute("UPDATE jobs SET status='completed' WHERE job_id=?", (job_id,))
         if services is not None:
             services.release(item.message_id)
         else:
+            flush_group(database)
             collect_objects(database, item.archive.path, message_id=item.message_id)
         ending = "aborted" if aborted else "completed"
         return True

@@ -5,13 +5,16 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import selectors
 import signal
+import socket
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import get_context
 from multiprocessing.synchronize import Event as ProcessEvent
-from threading import Event
+from threading import Event, current_thread
+from time import monotonic, sleep
 import tempfile
 from pathlib import Path
 from tests.process_output import assert_process_exited
@@ -154,6 +157,46 @@ def test_startup_deadline_reaps_worker() -> None:
     with pytest.raises(ClamScannerStartupError, match="startup timed out"):
         instance.__enter__()
     assert instance.process is None and instance.connection is None
+
+
+def test_cancelled_startup_never_closes_pipe_under_startup_reader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cancellation teardown joins the startup reader before closing the pipe it polls.
+
+    Reproduces the CI flake "ClamAV startup result reader did not stop": the reader is
+    descheduled between registering its descriptor and polling it, teardown closes the
+    descriptor, and an unrelated socket takes that number, so the reader polls a socket
+    that never becomes readable.
+    """
+    if sys.platform == "win32":
+        pytest.skip("POSIX descriptor reuse; Windows waits on handles")
+    held: list[tuple[socket.socket, socket.socket]] = []
+    select = selectors.PollSelector.select
+
+    def descheduled(self: selectors.PollSelector, timeout: float | None = None) -> list[tuple[selectors.SelectorKey, int]]:
+        if current_thread().name == "clamav-startup-result" and not held:
+            sleep(0.5)  # Outlast teardown's worker reap, as a starved thread on a loaded runner does.
+            held.append(socket.socketpair())  # Any concurrent socket reuses a freed descriptor.
+        return select(self, timeout)
+
+    monkeypatch.setattr(selectors.PollSelector, "select", descheduled)
+
+    def cancel() -> None:
+        raise KeyboardInterrupt("cancel startup")
+
+    scanner = ClamScanner(cancel, scan_temporary_directory=tmp_path)
+    try:
+        started = monotonic()
+        with pytest.raises(KeyboardInterrupt, match="cancel startup"):
+            scanner.__enter__()
+        assert monotonic() - started < 5
+        assert held, "startup reader never polled"
+        assert scanner.startup_reader is None and scanner.connection is None and scanner.runtime is None
+        assert list(tmp_path.iterdir()) == []
+    finally:
+        for pair in held:
+            for end in pair:
+                end.close()
+        scanner.__exit__()
 
 
 def test_scan_deadline_reaps_worker_and_removes_plaintext(tmp_path: Path) -> None:

@@ -75,8 +75,8 @@ than a second change log. Platform acceptance is stated alongside its evidence.
 
 ## Documentation and evidence
 
-[The user manual](USER_MANUAL.md) explains workflows; [the command-line guide](CLI_REFERENCE.md)
-owns installed command syntax. [Developer commands](DEVELOPER_COMMANDS.md) covers
+[The user manual](https://simsong.github.io/email-collection-toolkit/manual/) explains workflows; [the command-line guide](CLI_REFERENCE.md)
+owns installed command syntax. [Developing](DEVELOPING.md) covers
 builds, tests and release recipes. Unimplemented work belongs to [plans](plans/README.md);
 dated investigations belong to [history](history/README.md).
 

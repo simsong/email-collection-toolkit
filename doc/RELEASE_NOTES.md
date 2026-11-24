@@ -3,10 +3,20 @@
 # Release notes
 
 Entries describe their recorded revisions. For current behavior use the
-[user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
+[user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
-## 1.0.0a93 — share desktop power and network recovery
+## 1.0.0a96 — integrate import speedups with IMAP recovery
+
+- Combine the faster import and processing work of 1.0.0a73–a74 with the IMAP
+  recovery, desktop lifecycle and concurrent processing work of 1.0.0a75–a95.
+  Concurrent saved-message processing keeps batched commits and working-copy
+  reuse; each newly ingested message is still committed before acquisition continues.
+- Use the 1.0.0a74 ClamAV teardown, which wakes the startup reader when the
+  worker exits, in place of a separate cancellation pipe.
+- Renumber the IMAP recovery entries below by two to follow 1.0.0a74.
+
+## 1.0.0a95 — share desktop power and network recovery
 
 - Route Windows and macOS sleep, wake and network events through common handlers.
   Native adapters supply only OS subscriptions, path queries and cleanup.
@@ -14,14 +24,14 @@ Rust delivery plans and historical package checks are not current acceptance.
   the same 150-second retries and immediate event-triggered retests as macOS.
   Explicit Suspend and Quit remain authoritative.
 
-## 1.0.0a92 — wait for IMAP connectivity and captive portal sign-in
+## 1.0.0a94 — wait for IMAP connectivity and captive portal sign-in
 
 - Keep active macOS imports waiting through DNS failures and blocked connections.
   Retest every 150 seconds and resume the existing UID plan when connectivity returns.
 - Show a network sign-in hint. Wake, network changes, Suspend and Quit can interrupt
   the reconnect wait.
 
-## 1.0.0a91 — recover after macOS sleep and network changes
+## 1.0.0a93 — recover after macOS sleep and network changes
 
 - Refresh Ingests after wake or a network configuration change. Clear recovered
   status errors after a successful read.
@@ -29,81 +39,81 @@ Rust delivery plans and historical package checks are not current acceptance.
   network configuration changes. Keep explicit Suspend and Resume controls.
 - Wake the ClamAV startup reply reader when startup is cancelled.
 
-## 1.0.0a90 — open IMAP credential recovery from the error
+## 1.0.0a92 — open IMAP credential recovery from the error
 
 - Add **Update IMAP Credentials** alongside **Collapse messages** and
   **Dismiss messages** in the IMAP authentication error popup.
 - Open the Ingests password dialog with the rejected account selected.
 
-## 1.0.0a89 — accept complete IMAP literals with inaccurate size metadata
+## 1.0.0a91 — accept complete IMAP literals with inaccurate size metadata
 
 - Continue importing when RFC822.SIZE disagrees with a complete BODY[] literal.
   Log the discrepancy and verify the literal's UID and declared byte count.
 
-## 1.0.0a88 — diagnose IMAP body-size failures
+## 1.0.0a90 — diagnose IMAP body-size failures
 
 - Report the failing UID, RFC822.SIZE, declared literal length and received byte
   count in ingest failures when RFC822.SIZE is missing or disagrees with the
   received byte count.
 
-## 1.0.0a87 — compact Ingests history and year coverage
+## 1.0.0a89 — compact Ingests history and year coverage
 
 - Show the producing version in parentheses after the run timestamp.
 - Size the Year and Messages columns to their contents.
 
-## 1.0.0a86 — count completed IMAP transfers before scanning
+## 1.0.0a88 — count completed IMAP transfers before scanning
 
 - Include received IMAP bodies in the run's download coverage even when scanning
   or archiving is still pending. Show the source count as unavailable for older
   IMAP runs without recorded download coverage.
 
-## 1.0.0a85 — separate source counts from saved attachment processing
+## 1.0.0a87 — separate source counts from saved attachment processing
 
 - Count promoted attached emails as archival work. Source message totals and
   dates describe the messages acquired from the selected sources in this run.
 
-## 1.0.0a84 — preserve damaged working objects and correct mixed-source status
+## 1.0.0a86 — preserve damaged working objects and correct mixed-source status
 
 - Retain corrupt working files for diagnosis, including after a failed import.
 - Refresh the saved-message count at the last source checkpoint and show ETA
   unavailable while a source of unknown size remains unfinished.
 
-## 1.0.0a83 — reuse active inputs and coalesce saved-work status queries
+## 1.0.0a85 — reuse active inputs and coalesce saved-work status queries
 
 - Verify and reuse a duplicate's existing input file while another worker reads it.
 - Coalesce backlog counts during combined work, retain the exact final count, and
   suppress live overlap messages for stale runs.
 
-## 1.0.0a82 — preserve recovery and stop boundaries during overlap
+## 1.0.0a84 — preserve recovery and stop boundaries during overlap
 
 - Complete previously filed ingest roots, keep duplicate metadata jobs in the
   shared scheduler, and stop new downloads immediately on an explicit processor stop.
 - Retain returned processor results through cancellation and show overlap only
   while both groups have active work.
 
-## 1.0.0a81 — overlap downloads and saved-message processing
+## 1.0.0a83 — overlap downloads and saved-message processing
 
 - Download new mail while processing saved messages through separate worker groups.
   Canonical writes still have one owner, and suspension retains resumable checkpoints.
   Unpublished ingest recovery and explicit deferred/limited processing keep their safeguards.
 
-## 1.0.0a80 — deliver GUI replies without redundant native waits
+## 1.0.0a82 — deliver GUI replies without redundant native waits
 
 - Deliver API replies asynchronously to Cocoa/WebView2 instead of waiting for a
   second native acknowledgement. Ingests reports a lost status/control reply
   without repeating Suspend/Resume or marking the import failed.
 
-## 1.0.0a79 — bind scratch evidence to its import
+## 1.0.0a81 — bind scratch evidence to its import
 
 - Require fresh status evidence returned by the current import worker. A missing
   status write cannot reuse a previous successful run in the evaluation summary.
 
-## 1.0.0a78 — require acquisition progress in scratch evaluation
+## 1.0.0a80 — require acquisition progress in scratch evaluation
 
 - Report metadata-only completion as an unsuccessful download evaluation.
 - Verify recovery after a successful body without fetching that body twice.
 
-## 1.0.0a77 — safe transport recovery
+## 1.0.0a79 — safe transport recovery
 
 - Reconnect interrupted IMAP sessions with bounded, cancellable backoff and
   epoch validation. Retain delivered UID state and pause safely if recovery fails.
@@ -111,30 +121,74 @@ Rust delivery plans and historical package checks are not current acceptance.
   and saved processing, using IMAP INTERNALDATE for date/year coverage.
 - Contain scratch workers on owner death and bound integrity verification.
 
-## 1.0.0a76 — IMAP run coverage
+## 1.0.0a78 — IMAP run coverage
 
 - Show run-specific message dates and yearly counts. Unknown-size downloads
   report ETA unavailable instead of claiming finalization. Keep narrow worker
   tables scrollable within their section.
 
-## 1.0.0a75 — accurate search progress
+## 1.0.0a77 — accurate search progress
 
 - Leave the cleared results pane blank while the status line says **Searching…**.
   Remove the premature **No messages.** placeholder; completed empty searches
   still report **0 messages** in the status line.
 
-## 1.0.0a74 — stable worker columns
+## 1.0.0a76 — stable worker columns
 
 - Keep Thread, Operation, Download / import progress and Processing tasks finished
   at fixed widths while worker activity changes. Current task / source uses the
   remaining width and expands with the window; long source names wrap.
 
-## 1.0.0a73 — record the version behind each import result
+## 1.0.0a75 — record the version behind each import result
 
 - Save the producer's launch application version with every ingest snapshot and
   display it in the history entry and run details, including failures.
 - Keep saved versions stable after an application update. Older history without
   recorded version evidence displays **Version unavailable** and remains unchanged.
+## 1.0.0a74 — faster body and attachment processing
+
+- Body/attachment processing commits once per batch of up to 64 messages (or
+  one second) instead of once per job. Search rows always commit before the
+  processing commit that marks their job done, so a crash only repeats work.
+- Run a message's remaining parts right after its previous part, so its working
+  copy is reused instead of being deleted and restored from MBOX between jobs.
+- Compile each processor once per source text, reuse empty processor
+  workspaces, and avoid a slow pydantic default on two hot models.
+- Sync the `objects/` directory once per commit instead of once per stored
+  object; every object is still durable before any commit refers to it.
+- Fix intermittent "disk I/O error" during `ect-imap` on macOS. Its progress
+  watcher opened and closed the catalog database file, which on macOS silently
+  drops the importer's own SQLite locks. It now watches the archive directory,
+  and file watches refuse SQLite files outright.
+- A batch of finished messages is committed within about a second even when
+  downloads stall or one processor runs long, instead of waiting for the next
+  message or job to finish.
+- If the `objects/` directory sync or the search commit fails, the processing
+  batch is rolled back, so no job is recorded as done without its stored
+  objects and search rows. A failed directory sync is retried before the next
+  commit. Concurrent imports in the GUI sync only their own archive, so one
+  archive's disk failure cannot block another.
+- A processor that runs past its time limit is always recorded as a timeout,
+  even when the time-limit signal surfaces inside library code as a different
+  error.
+
+## 1.0.0a73 — faster imports
+
+- Progress refreshes no longer recount the whole processing job table and fsync
+  the status file once per message. Those costs grew with archive size, which
+  made imports quadratic. Phase changes and final states still render at once.
+- Processor checkpoints for one message, or one processing job, share a single
+  SQLite commit instead of committing several times per processor. A SIGKILL
+  during ingest or processing, followed by a restart, gives the same archive as
+  an uninterrupted import.
+- Write each message's working copy once instead of staging and copying it,
+  skip re-copying processor outputs that are already stored, and stop
+  re-parsing unchanged YAML configuration for every processor call.
+- `make benchmark-import` times a deterministic 50 MB synthetic corpus and
+  records the result in `benchmarks/import/results.jsonl`.
+- Ctrl-C is acknowledged at once on macOS even when the signal lands on a worker
+  thread; previously the main thread could sleep until that worker finished.
+
 
 ## 1.0.0a72 — dependency security updates
 
@@ -330,7 +384,7 @@ worker, progress, Preferences and window-lifecycle fixes apply to both desktops.
 Windows acceptance now exercises those shared regressions, native OLE transfer,
 and relocated Outlook import with source integrity and retry checks. Package
 builds alone do not establish installed behavior; see the
-[Windows checklist](WINDOWS_RELEASE_TESTING.md) for remaining acceptance gates.
+[Windows checklist](RELEASING.md#windows-installer-checklist) for remaining acceptance gates.
 
 ## Quiet timeout status and visible screenshot version
 
@@ -1768,6 +1822,6 @@ consolidation added x64 private CPython, ClamAV, WinSparkle, standard Open,
 Windows writer/publication fixes and native Close/Quit acceptance.
 The earlier ARM64 package, Rust updater and frozen-executable recipes are
 superseded. [RUST_GUI_EXPERIMENTS.md](RUST_GUI_EXPERIMENTS.md) retains the
-historical revision/run evidence; [WINDOWS_MSIX_TEST.md](WINDOWS_MSIX_TEST.md)
+historical revision/run evidence; [MSIX packaging](RELEASING.md#msix-packaging)
 owns the current package and acceptance contract. Public signing preparation is
 recorded above; neither these notes nor local tests establish hosted trust.

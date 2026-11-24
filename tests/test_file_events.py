@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
 import os
+import sqlite3
 import sys
 import subprocess
 import textwrap
@@ -171,4 +172,20 @@ def test_file_created_during_parent_registration_remains_watched(tmp_path: Path,
         assert target.exists()
         with target.open("ab") as output:
             output.write(b" next committed frame")
+        assert changes.wait(5)
+
+
+def test_sqlite_files_are_refused_and_their_directory_sees_commits(tmp_path: Path) -> None:
+    """VALIDATION: watchers never hold descriptors on a live database (macOS closes drop POSIX locks)."""
+    database = tmp_path / "archive.sqlite3"
+    for name in ("archive.sqlite3", "archive.sqlite3-wal", "archive.sqlite3-journal"):
+        with pytest.raises(ValueError, match="SQLite"):
+            PathChanges([tmp_path / name])
+    (tmp_path / "named.sqlite3").mkdir()  # A directory with that suffix holds no SQLite locks.
+    PathChanges([tmp_path / "named.sqlite3"]).close()
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE rows(value)")
+    with PathChanges([tmp_path]) as changes, sqlite3.connect(database) as connection:
+        connection.execute("INSERT INTO rows VALUES(1)")
+        connection.commit()  # DELETE journal mode: the journal entry appears and is removed
         assert changes.wait(5)

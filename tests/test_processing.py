@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -140,6 +141,17 @@ def test_message_and_import_aborts(tmp_path: Path, outcome: str) -> None:
             assert result.statistics[0].errors == 1 and result.statistics[0].timeouts == 0
         else:
             assert result.aborted == 2 and result.pending == 0
+
+
+def test_error_raised_by_the_deadline_alarm_is_recorded_as_timeout(tmp_path: Path) -> None:
+    """The alarm can surface inside library code as another error (e.g. "release unlocked lock")."""
+    plugin(tmp_path, "slow", 'try:\n    __import__("threading").Event().wait(1)\nexcept TimeoutError:\n'
+           '    raise RuntimeError("release unlocked lock")\nreturn ProcessingResult()', timeout=0.2)
+    plugins = load_processors((tmp_path,))
+    with connect(tmp_path / "archive", create=True) as database:
+        submit(database, tmp_path / "archive", MESSAGE, fingerprint(plugins))
+        assert run(database, plugins).failed == 1
+        assert "timeout" in database.execute("SELECT error FROM invocations WHERE kind='slow'").fetchone()[0]
 
 
 def test_timeout_rejects_result_and_retry_reuses_checkpoint(tmp_path: Path) -> None:
@@ -660,3 +672,21 @@ def test_parallel_import_stop_preserves_inflight_checkpoints_and_blocks_remainin
         assert result.completed == 1 and result.failed == 1 and result.pending == 0
         assert len(list(archive.glob("later-*"))) == 1
         assert next(stat for stat in result.statistics if stat.kind == "gate").invocations == 2
+
+
+def test_idle_hook_bounds_the_dispatcher_wait_during_a_slow_processor(tmp_path: Path) -> None:
+    """PROCESSING (#202): a due release batch is committed while a slow processor runs, not after it."""
+    plugin(tmp_path, "slow", 'import time\ntime.sleep(0.6)\nreturn ProcessingResult()', timeout=5)
+    plugins = load_processors((tmp_path,))
+    archive = tmp_path / "archive"
+    calls: list[float] = []
+    def idle() -> float:
+        calls.append(time.monotonic())
+        return 0.05
+    with connect(archive, create=True) as database:
+        source = tmp_path / "message.eml"
+        source.write_bytes(b"Subject: slow\n\nbody")
+        submit(database, archive, source, fingerprint(plugins))
+        result = run(database, plugins, workers=2, idle=idle)  # A worker pool; one worker runs inline.
+    assert result.completed == 1
+    assert len(calls) >= 4, calls

@@ -25,9 +25,10 @@ the same sequence; the release mapper controls their channels and build numbers.
 
 Source files created by Codex, including tests and scripts, start after any
 shebang and license header with a 5–10 line comment explaining purpose,
-operation, and system role. Document project environment-variable names and
-purposes in `README.md` and briefly beside the relevant Makefile targets; never
-document secret values. Use Makefile targets to run code and tests in every
+operation, and system role. Document user-facing environment variables on the
+website's Command line page (`website/content/command-line.md`) and build, test,
+signing and research variables in `doc/DEVELOPING.md`, and briefly beside the
+relevant Makefile targets; never document secret values. Use Makefile targets to run code and tests in every
 language. Test DynamoDB with DynamoDB Local and S3 with MinIO through those
 targets.
 

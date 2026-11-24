@@ -147,6 +147,10 @@ REFRESH_INDEX_MAX_IN_FLIGHT_BYTES = 256 * 1024 * 1024
 CLAMAV_START_PHASE = "waiting for ClamAV startup"
 DISCOVERY_PHASE = "discovering sources"
 TOP_LINE_STYLE = "\x1b[37;44m"
+# Unlabelled progress refreshes render at most this often (phase changes and
+# final states always render); see ProgressReporter.display.
+REFRESH_INTERVAL_SECONDS = 0.25
+SAVED_COUNT_MIN_INTERVAL_SECONDS = 2.0
 ANSI_RESET = "\x1b[0m"
 WorkerItem = TypeVar("WorkerItem")
 
@@ -584,6 +588,25 @@ class ProgressReporter:
         self.activity_kind: Literal["source", "processing"] = "source"
         self.saved_message_counter: Callable[[], int] | None = None
         self.saved_count_sample: tuple[float, tuple[int, int, int]] | None = None
+        # Unlabelled refreshes arrive many times per message. Rendering each one
+        # re-printed the status line, rewrote and fsynced the status file, and
+        # (while processing) ran a jobs-table count that grows with the archive,
+        # making imports quadratic. Phase changes and final states always render.
+        self.refresh_interval = REFRESH_INTERVAL_SECONDS
+        self.last_rendered_monotonic: float | None = None
+        self.saved_count_min_interval = SAVED_COUNT_MIN_INTERVAL_SECONDS
+        self.saved_count_due_monotonic = 0.0
+        self.trailing_render: threading.Timer | None = None
+
+    def _schedule_trailing_render(self, delay: float) -> None:
+        """Wake the status driver once the interval ends, so the last state of a
+        burst (for example an IMAP backoff notice) is shown even if no later
+        event arrives. The driver waits on ``self.changed``."""
+        if self.trailing_render is not None and self.trailing_render.is_alive():
+            return
+        self.trailing_render = threading.Timer(max(delay, 0.0), self.changed.notify)
+        self.trailing_render.daemon = True
+        self.trailing_render.start()
 
     def _queue_update(self, update: ProgressUpdate) -> None:
         if self.state.concurrent_processing and PROCESSING_WORKER.get():
@@ -747,6 +770,7 @@ class ProgressReporter:
         self._assert_driver_thread()
         self.state.concurrent_processing = True
         self.saved_count_sample = None
+        self.saved_count_due_monotonic = 0.0
         self.state.saved_workers = [WorkerProgress(worker=worker.worker, processing_jobs_completed=0)
                                     for worker in self.state.workers]
 
@@ -762,6 +786,7 @@ class ProgressReporter:
         self._assert_driver_thread()
         self.saved_message_counter = counter
         self.saved_count_sample = None
+        self.saved_count_due_monotonic = 0.0
 
     def _sample_saved_count(self, now: float, *, force: bool = False) -> None:
         if self.saved_message_counter is None:
@@ -774,8 +799,14 @@ class ProgressReporter:
             sources_finished = previous_revision[2] < revision[2] == self.state.source_files_total
             if revision == previous_revision or (now - sampled_at < 1 and not sources_finished):
                 return
+        elif not force and not self.state.concurrent_processing and now < self.saved_count_due_monotonic:
+            return
         self.state.saved_messages_remaining = self.saved_message_counter()
         self.saved_count_sample = (now, revision)
+        # The count scans the job table; keep it under ~5% of wall time.
+        counted = time.monotonic()
+        self.saved_count_due_monotonic = (counted + max(self.saved_count_min_interval, 20 * (counted - now))
+                                          if self.saved_count_min_interval else counted)
 
     def _send(
         self,
@@ -1016,9 +1047,18 @@ class ProgressReporter:
     ) -> None:
         self._drain_updates()
         now = time.monotonic()
+        display_label = label or self._worker_phase()
+        if (label is None and ingest_state == "running" and display_label == self.phase
+                and self.last_rendered_monotonic is not None
+                and now - self.last_rendered_monotonic < self.refresh_interval):
+            self._schedule_trailing_render(self.last_rendered_monotonic + self.refresh_interval - now)
+            return
+        self.last_rendered_monotonic = now
+        if self.trailing_render is not None:
+            self.trailing_render.cancel()
+            self.trailing_render = None
         if self.activity_kind == "processing" or self.state.concurrent_processing:
             self._sample_saved_count(now, force=ingest_state != "running")
-        display_label = label or self._worker_phase()
         if display_label != self.phase:
             self.phase = display_label
             self.phase_started_monotonic = now
@@ -1180,8 +1220,13 @@ def run_file_workers[WorkerItem](
     coordinator: FutureCoordinator | None = None,
     signals: tuple[ChangeSignal, ...] = (),
     background: Callable[[Callable[[BaseException], None]], Generator[tuple[Future[object], ...], None, None]] | None = None,
+    idle: Callable[[], float | None] | None = None,
 ) -> None:
-    """Run framework workers with optional source-declared per-key concurrency limits."""
+    """Run framework workers with optional source-declared per-key concurrency limits.
+
+    ``idle`` runs on this thread before each wait and may bound it, so batched
+    owner-thread work (released working objects) is finished while sources stall.
+    """
     console = console_signal()
     if console is not None:
         signals = (*signals, console)
@@ -1299,9 +1344,17 @@ def run_file_workers[WorkerItem](
             changed = tuple(signal.ready for signal in signals)
             drive(status_driver)
             publication = (coordinator.ready,) if coordinator is not None and primary_error is None else ()
+            idle_timeout: float | None = None
+            if idle is not None and primary_error is None:
+                try:
+                    idle_timeout = idle()
+                except BaseException as error:  # pylint: disable=broad-exception-caught
+                    fail(error)
+                    continue
             try:
                 completed, _unfinished = wait(
                     (*pending, *changed, *background_waiting, *publication),
+                    timeout=idle_timeout,
                     return_when=FIRST_COMPLETED,
                 )
             except KeyboardInterrupt as error:
@@ -2452,10 +2505,12 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     on_interrupt=progress.announce_interrupt,
                     coordinator=coordinator, signals=progress_signals,
                     background=background_content if concurrent_content else None,
+                    idle=pipeline.collect_released_when_due,
                 )
         finally:
             if concurrent_content:
                 progress.finish_concurrent_processing()
+        pipeline.collect_released()
         check_interrupted()
         if request.continue_content:
             progress.set_phase("Processing message bodies and attachments", activity_kind="processing")
@@ -2856,7 +2911,7 @@ def add_ingest_arguments(parser: argparse.ArgumentParser, *, require_scan: bool 
         default=[],
         help="trusted plug-in root to load (repeatable; Python code in this directory will execute)",
     )
-    parser.add_argument("--index-attachments", action="store_true", help="index text attachments; non-text attachments require the planned Tika extractor")
+    parser.add_argument("--index-attachments", action="store_true", help="index text attachments; PDF and Office extraction is planned")
     parser.add_argument("--defer-content", action="store_true", help="file messages and extract headers; leave content jobs pending")
     parser.add_argument("--installation-config", type=Path, help="installation plugin settings override")
     parser.add_argument("roots", nargs="+" if require_roots else "*", metavar="SOURCE")
@@ -2906,7 +2961,7 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     contacts_parser.add_argument("--format", choices=("table", "tsv", "json"), default="table")
     contacts_parser.set_defaults(function=contact_list)
     refresh_parser = commands.add_parser("refresh-index")
-    refresh_parser.add_argument("--index-attachments", action="store_true", help="include text attachments; non-text attachments require the planned Tika extractor")
+    refresh_parser.add_argument("--index-attachments", action="store_true", help="include text attachments; PDF and Office extraction is planned")
     refresh_parser.add_argument(
         "--workers",
         type=worker_argument,

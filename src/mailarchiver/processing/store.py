@@ -17,14 +17,16 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shutil
 import sqlite3
+import threading
 import tempfile
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
-from .objects import ensure_object_index, index_inputs
+from .objects import OBJECT_NAME, ensure_object_index, index_inputs
 from .api import ArchiveContext, ContentReference, PluginStatistics, ProcessingObject, RAW_MESSAGE, RunReport
 from ..catalog import PROCESSING_DATABASE as DATABASE
 from ..catalog import require_processing_schema
@@ -82,42 +84,197 @@ def content_reference(path: Path) -> ContentReference:
     return ContentReference(path=path.resolve(), sha256=digest)
 
 
-def snapshot(archive: Path, path: Path) -> ContentReference:
-    """Copy once into content-addressed storage before committing a DB reference."""
-    destination = archive / "objects"
+def _store_object(destination: Path, chunks: Iterable[bytes]) -> ContentReference:
+    """Write, hash and fsync in one pass, then publish under the SHA-256 name."""
     if destination.is_symlink():
         raise ValueError("processor objects directory must not be a symlink")
     destination.mkdir(exist_ok=True)
+    digest = hashlib.sha256()
     with tempfile.NamedTemporaryFile(dir=destination, prefix=".object-", delete=False) as target:
         temporary = Path(target.name)
         try:
-            with path.open("rb") as source:
-                shutil.copyfileobj(source, target)
+            for chunk in chunks:
+                digest.update(chunk)
+                target.write(chunk)
             target.flush()
             os.fsync(target.fileno())
         except BaseException:
             target.close()
             temporary.unlink(missing_ok=True)
             raise
+    final = destination / digest.hexdigest()
     try:
-        reference = content_reference(temporary)
-        final = destination / reference.sha256
         if final.is_symlink():
             raise ValueError("processor object must not be a symlink")
         if final.exists():
-            if not final.is_file() or content_reference(final).sha256 != reference.sha256:
+            if not final.is_file() or content_reference(final).sha256 != digest.hexdigest():
                 raise ValueError("existing processor object failed SHA-256 verification")
             # A saved processor can hold this immutable input open. Replacing
             # identical bytes is unnecessary and fails with Windows delete sharing.
-        else:
-            replace_file(temporary, final)
-            sync_directory(destination)
-        return ContentReference(path=final.resolve(), sha256=reference.sha256)
-    finally:
+            temporary.unlink(missing_ok=True)
+            return ContentReference(path=final.resolve(), sha256=digest.hexdigest())
+    except BaseException:
         temporary.unlink(missing_ok=True)
+        raise
+    if _GROUPED and os.name != "nt":
+        # The file itself is already fsynced. Its directory entry only has to be
+        # durable before a commit can refer to it, so one directory sync per
+        # group commit (see ``_commit``) replaces one per object.
+        temporary.replace(final)
+        with _DIRECTORY_SYNC:
+            _UNSYNCED_DIRECTORIES.add(destination)
+    else:
+        replace_file(temporary, final)  # also fsyncs the objects directory on POSIX
+    return ContentReference(path=final.resolve(), sha256=digest.hexdigest())
+
+
+def _file_chunks(path: Path) -> Iterator[bytes]:
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            yield chunk
+
+
+def snapshot(archive: Path, path: Path) -> ContentReference:
+    """Copy once into content-addressed storage before committing a DB reference."""
+    destination = archive / "objects"
+    if destination.is_symlink():
+        raise ValueError("processor objects directory must not be a symlink")
+    resolved = path.resolve()
+    if (resolved.parent == destination.resolve() and OBJECT_NAME.fullmatch(resolved.name)
+            and not path.is_symlink()):
+        # Already this archive's object (a checkpoint output being re-queued).
+        # Verify it instead of copying it onto itself with three more fsyncs.
+        reference = content_reference(resolved)
+        if reference.sha256 == resolved.name:
+            return reference
+    return _store_object(destination, _file_chunks(path))
+
+
+def snapshot_bytes(archive: Path, data: bytes) -> ContentReference:
+    """``snapshot`` for bytes already in memory, without a staging file."""
+    return _store_object(archive / "objects", (data,))
 
 
 USER_CANCELLED = "Cancelled by user"
+
+# Connections whose checkpoint units currently share one SQLite transaction.
+# Each unit is still all-or-nothing (a savepoint); only durability is grouped.
+_GROUPED: set[int] = set()
+_COMMIT_FIRST: dict[int, list[sqlite3.Connection]] = {}
+# Object directories renamed into while a group was open, synced before any commit.
+# Shared by every owner thread (the GUI can import into several archives), so
+# the lock makes a commit wait for a sync another owner already started.
+_UNSYNCED_DIRECTORIES: set[Path] = set()
+_DIRECTORY_SYNC = threading.Lock()
+
+
+@contextmanager
+def grouped(database: sqlite3.Connection) -> Iterator[None]:
+    """Make nested ``unit`` blocks share one commit, issued when the group ends.
+
+    Rollback-journal commits cost several fsyncs each, and one message used to
+    commit dozens of times. A crash now loses only the uncommitted group, which
+    replays from the last commit exactly like a crash between two old commits.
+    The group commits on exceptions too: every closed unit was already
+    complete, matching the old per-unit commit semantics. Nested groups join
+    the outer one.
+    """
+    key = id(database)
+    if key in _GROUPED:
+        yield
+        return
+    _GROUPED.add(key)
+    try:
+        yield
+    finally:
+        _GROUPED.discard(key)
+        _commit(database)
+
+
+def flush_group(database: sqlite3.Connection) -> None:
+    """Commit the open group early, e.g. before object cleanup requires it."""
+    _commit(database)
+
+
+def _archive_of(database: sqlite3.Connection) -> Path | None:
+    """The archive directory holding ``database``, or None for an in-memory database."""
+    for _sequence, name, filename in database.execute("PRAGMA database_list"):
+        if name == "main" and filename:
+            return Path(filename).resolve().parent
+    return None
+
+
+def _sync_object_directories(database: sqlite3.Connection) -> None:
+    """Sync the pending directories of ``database``'s archive; each stays pending until synced.
+
+    Only this archive's directories are synced, so one archive's filesystem
+    failure cannot block or roll back another archive's import.
+    """
+    archive = _archive_of(database)
+    with _DIRECTORY_SYNC:
+        for directory in sorted(_UNSYNCED_DIRECTORIES):
+            if archive is not None and directory.resolve().parent != archive:
+                continue
+            sync_directory(directory)
+            _UNSYNCED_DIRECTORIES.discard(directory)
+
+
+def _commit(database: sqlite3.Connection) -> None:
+    """Sync objects, commit dependents, then commit ``database``.
+
+    If a barrier before the final commit fails, ``database`` is rolled back so
+    no later commit (such as saving the policy at close) can mark jobs
+    completed whose objects or derived rows are not durable. Those jobs rerun.
+    """
+    try:
+        _sync_object_directories(database)
+        for dependent in _COMMIT_FIRST.get(id(database), ()):
+            if dependent.in_transaction:
+                dependent.commit()
+    except BaseException:
+        if database.in_transaction:
+            database.rollback()
+        raise
+    if database.in_transaction:
+        database.commit()
+
+
+@contextmanager
+def commit_first(database: sqlite3.Connection, dependent: sqlite3.Connection) -> Iterator[None]:
+    """Commit ``dependent`` before every grouped commit of ``database``.
+
+    Derived databases (search) written inside a processing group must become
+    durable before the processing commit marks those jobs completed; a crash
+    between the two commits then only repeats idempotent derived writes.
+    """
+    hooks = _COMMIT_FIRST.setdefault(id(database), [])
+    hooks.append(dependent)
+    try:
+        yield
+    finally:
+        hooks.remove(dependent)
+        if not hooks:
+            _COMMIT_FIRST.pop(id(database), None)
+
+
+@contextmanager
+def unit(database: sqlite3.Connection) -> Iterator[None]:
+    """An atomic checkpoint: commits alone, or as a savepoint inside ``grouped``."""
+    if id(database) not in _GROUPED:
+        with database:
+            yield
+            _sync_object_directories(database)
+        return
+    if not database.in_transaction:
+        database.execute("BEGIN")
+    database.execute("SAVEPOINT checkpoint_unit")
+    try:
+        yield
+    except BaseException:
+        database.execute("ROLLBACK TO checkpoint_unit")
+        database.execute("RELEASE checkpoint_unit")
+        raise
+    database.execute("RELEASE checkpoint_unit")
 
 
 def enqueue(database: sqlite3.Connection, item: ProcessingObject, registry_hash: str, parent_job_id: int | None = None) -> None:

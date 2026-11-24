@@ -68,6 +68,11 @@ class ScannerProcess:
     def pid(self) -> int:
         return self.process.pid
 
+    @property
+    def sentinel(self) -> int:
+        """Process handle that ``multiprocessing.connection.wait`` signals at exit."""
+        return int(getattr(self.process, "_handle"))  # Popen keeps no public handle accessor.
+
     def is_alive(self) -> bool:
         return self.process.poll() is None
 
