@@ -47,7 +47,7 @@ from .contracts import AddressEvidence, ContentMetadata, Filing, HeaderMetadata,
 from .objects import collect_objects
 from .registry import fingerprint, load_processors
 from .runtime import RANK_FAILURE, ProcessingProgress, dispatch, prepare_run, run
-from .store import DATABASE, USER_CANCELLED, connect, enqueue, report, snapshot
+from .store import DATABASE, USER_CANCELLED, connect, enqueue, flush_group, grouped, report, snapshot, snapshot_bytes, unit
 
 Publisher = Callable[[MailObject, ParsedMessage, MailboxReference, int], int]
 
@@ -105,6 +105,7 @@ class ProductionPipeline:
     def release(self, message_id: str) -> None:
         if self._ingesting:
             return
+        flush_group(self.database)
         if self.catalog.in_transaction:
             raise ValueError("object cleanup requires committed catalog records")
         collect_objects(self.database, self.archive, self._canonical_bytes, message_id=message_id)
@@ -177,13 +178,14 @@ class ProductionPipeline:
         return item
 
     def ingest(self, source: MailObject, metadata: SourceMetadata) -> IngestedMessage:
-        with tempfile.NamedTemporaryFile(dir=self.archive, prefix=".processing-input-", delete_on_close=False) as temporary:
-            temporary.write(source.raw)
-            temporary.flush()
-            temporary.close()
-            reference = snapshot(self.archive, Path(temporary.name))
+        reference = snapshot_bytes(self.archive, source.raw)
         existing = self.catalog.execute("SELECT message_pk FROM messages WHERE sha256=?", (reference.sha256,)).fetchone()
-        with self.database:
+        with grouped(self.database):
+            return self._ingest_grouped(reference, metadata, existing is not None)
+
+    def _ingest_grouped(self, reference: ContentReference, metadata: SourceMetadata, duplicate: bool) -> IngestedMessage:
+        # One commit per message instead of one per processor checkpoint.
+        with unit(self.database):
             item = self._admit(reference, metadata)
             # Retry only unpublished ingest roots. Cancelled derived jobs may
             # have lost their temporary inputs and require explicit reprocessing.
@@ -199,7 +201,7 @@ class ProductionPipeline:
         row = self.database.execute("SELECT parsed_json,catalog_message_pk,excluded FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()
         if row is None or row[0] is None:
             raise RuntimeError("ingest processor tree ended without a filing decision")
-        return IngestedMessage(parsed=ParsedMessage.model_validate_json(row[0]), message_pk=row[1], duplicate=existing is not None, excluded=bool(row[2]))
+        return IngestedMessage(parsed=ParsedMessage.model_validate_json(row[0]), message_pk=row[1], duplicate=duplicate, excluded=bool(row[2]))
 
     def resume_ingest(self, *, progress: ProcessingProgress | None = None) -> None:
         """Replay durable ingest work with cooperative stops between messages."""
@@ -267,7 +269,7 @@ class ProductionPipeline:
             self.database.execute("DETACH DATABASE derived_search")
 
     def _invalidate(self, generation: str) -> None:
-        with self.database:
+        with unit(self.database):
             self.database.execute("UPDATE jobs SET status='aborted',detail='explicit reprocessing' WHERE status IN ('pending','running','failed')")
             self.database.execute("DELETE FROM content_parts")
             self.database.execute("DELETE FROM evidence")

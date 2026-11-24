@@ -38,7 +38,7 @@
           {% if stream.windows_url %} · <a href="{{ stream.windows_url }}">Windows (.msixbundle)</a>{% endif %}
         </p>{% endif %}
         {% endfor %}
-        <p><a href="{{ config.extra.readme }}">Read the README</a></p>
+        <p><a href="{{ get_url(path='quick-start/') }}">Quick start</a> · <a href="{{ config.extra.readme }}">Read the README</a></p>
       </details>
     </div>
   </section>
@@ -103,7 +103,7 @@
 
   <section class="resource-grid shell" aria-labelledby="resources-title">
     <div class="section-heading"><p class="eyebrow">Learn more</p><h2 id="resources-title">Explore the project.</h2></div>
-    <a class="resource-card" href="{{ get_url(path='manual/') }}"><span aria-hidden="true">↗</span><h3>User Manual</h3><p>Guides to importing, searching, features, and advanced archive care.</p></a>
+    <a class="resource-card" href="{{ get_url(path='manual/') }}"><span aria-hidden="true">↗</span><h3>User Manual</h3><p>Quick start, importing, searching, archive care, and troubleshooting.</p></a>
     <a class="resource-card" href="{{ get_url(path='discussions/') }}"><span aria-hidden="true">↗</span><h3>Community Forum</h3><p>Announcements, feature discussions, and support links.</p></a>
     <a class="resource-card" href="{{ config.extra.release_notes }}"><span aria-hidden="true">↗</span><h3>Release notes</h3><p>Changes included in current and previous releases.</p></a>
   </section>

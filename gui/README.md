@@ -7,7 +7,7 @@ desktop on macOS and Windows. Native hosts use WKWebView and WebView2. The share
 application controller owns archive documents, search windows and import jobs;
 canonical writes use the ingest engine and OS writer lease.
 
-For user workflows, see the [user manual](../doc/USER_MANUAL.md). The
+For user workflows, see the [user manual](https://simsong.github.io/email-collection-toolkit/manual/). The
 [desktop implementation](../doc/implementation/DESKTOP.md) owns controller,
 bridge, lifecycle and platform details.
 

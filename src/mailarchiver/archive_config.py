@@ -19,7 +19,9 @@ Fundamental dependents:
 
 from __future__ import annotations
 
+import copy
 import os
+from functools import lru_cache
 from pathlib import Path
 import tempfile
 from typing import Literal
@@ -58,11 +60,26 @@ def config_path(archive: Path) -> Path:
     return archive / ARCHIVE_CONFIG_FILENAME
 
 
+@lru_cache(maxsize=8)
+def _parse_yaml_text(text: str) -> object:
+    return safe_load(text)
+
+
+def parse_yaml_cached(text: str) -> object:
+    """Parse YAML, reusing the result for identical text.
+
+    Processors read their configuration once per invocation, and YAML parsing
+    was about 8% of import time. Keying on the full text (not file metadata)
+    means any change to the file is always seen. Callers get a private copy.
+    """
+    return copy.deepcopy(_parse_yaml_text(text))
+
+
 def load_archive_config(archive: Path) -> ArchiveConfig:
     path = config_path(archive)
     try:
         with open_shared_text(path) as source:
-            value = safe_load(source)
+            value = parse_yaml_cached(source.read())
         return ArchiveConfig.model_validate({} if value is None else value)
     except FileNotFoundError:
         return ArchiveConfig()

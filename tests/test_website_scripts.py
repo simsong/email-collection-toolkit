@@ -34,7 +34,7 @@ NEEDS = "needs"
 
 
 def test_manual_index_links_to_built_guides(tmp_path: Path) -> None:
-    """Requirement: the manual and navigation reach all four guides, retaining old Features URLs."""
+    """Requirement: the manual and navigation reach all six guides, retaining old Features and Advanced URLs."""
     if not shutil.which("zola"):
         pytest.skip("Zola is required for built-site navigation acceptance")
     root = Path(__file__).parents[1]
@@ -45,8 +45,10 @@ def test_manual_index_links_to_built_guides(tmp_path: Path) -> None:
 
     page = BeautifulSoup((output / "manual/index.html").read_text(encoding="utf-8"), "html.parser")
     guides = page.select("main .prose ul a")
-    assert [link.get_text() for link in guides] == ["Importing", "Searching", "Features", "Advanced"]
-    for link, path in zip(guides, ("importing", "searching", "features", "advanced"), strict=True):
+    guide_paths = ("quick-start", "importing", "searching", "archive-care", "command-line", "troubleshooting")
+    assert [link.get_text() for link in guides] == [
+        "Quick start", "Importing", "Searching", "Archive care", "Command line", "Troubleshooting"]
+    for link, path in zip(guides, guide_paths, strict=True):
         assert link[HREF] == f"https://simsong.github.io/email-collection-toolkit/{path}/"
         assert (output / path / "index.html").is_file()
     for path in ("index.html", "manual/index.html", "features/index.html"):
@@ -57,7 +59,8 @@ def test_manual_index_links_to_built_guides(tmp_path: Path) -> None:
         manual = next(link for link in navigation if link.get_text() == "User Manual")
         assert manual[HREF] == "https://simsong.github.io/email-collection-toolkit/manual"
     # Existing bookmarked routes must redirect to maintained guides, rather than empty pages.
-    for alias, destination in (("use-cases", "features"), ("oauth-client-registration", "gmail-authorization")):
+    for alias, destination in (("use-cases", "features"), ("advanced", "archive-care"),
+                               ("oauth-client-registration", "gmail-authorization")):
         redirect = BeautifulSoup((output / alias / "index.html").read_text(encoding="utf-8"), "html.parser")
         refresh = redirect.find("meta", attrs={"http-equiv": "refresh"})
         assert refresh is not None

@@ -20,7 +20,7 @@ ect --version
 From a source checkout, use `uv sync --locked` once and prefix commands with
 `uv run --locked`, for example `uv run --locked ect-create collection.mailarchive`.
 All examples below use the installed commands directly. No Make installation is
-needed to run them. Build and test commands are in [Developer commands](DEVELOPER_COMMANDS.md).
+needed to run them. Build and test commands are in [Developing](DEVELOPING.md).
 
 Python 3.12 or newer is required; uv can provide it. Antivirus scanning also
 needs a native `libclamav` runtime, its one-shot updater and verified definitions;
@@ -158,7 +158,7 @@ ect-search --archive collection.mailarchive --mime 42
 ```
 
 `--headers` shows all headers, `--html` prints decoded HTML, and `--mime` prints
-the complete stored RFC 5322/MIME source. See the [search guide](USER_MANUAL.md#search-with-the-graphical-interface)
+the complete stored RFC 5322/MIME source. See the [search guide](https://simsong.github.io/email-collection-toolkit/searching/)
 for shared query and date behavior.
 
 ## Verification
@@ -209,7 +209,7 @@ ect human-contacts --archive collection.mailarchive --format tsv
 `ect identities --help` lists filters and the manual rename, merge and affiliation
 actions. Those actions write durable decisions. `human-contacts` reads likely
 direct correspondents; `--all` includes all human header addresses. See
-[Contacts policy](USER_MANUAL.md#contact-filter-policy).
+[contact filters](CUSTOMIZABLE_DEFAULT_LISTS.md).
 
 ## Desktop
 
@@ -253,6 +253,6 @@ Use `ect COMMAND --help` for each command's actual options.
 | `ect validation` | List, fetch, prepare or run explicitly selected validation corpora; cloud runs need separately provisioned credentials and authorization |
 | `ect processor` | Disposable plugin-development harness; not a canonical archive creator |
 
-[Developer commands](DEVELOPER_COMMANDS.md) covers builds, signing, tests, Rust
+[Developing](DEVELOPING.md) covers builds, signing, tests, Rust
 helpers and research scripts. [The documentation guide](README.md) locates the
 maintained user, developer and format references.

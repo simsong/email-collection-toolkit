@@ -3,8 +3,25 @@
 # Release notes
 
 Entries describe their recorded revisions. For current behavior use the
-[user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
+[user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
+
+## 1.0.0a73 — faster imports
+
+- Progress refreshes no longer recount the whole processing job table and fsync
+  the status file once per message. Those costs grew with archive size, which
+  made imports quadratic. Phase changes and final states still render at once.
+- Processor checkpoints for one message, or one processing job, share a single
+  SQLite commit instead of committing several times per processor. A SIGKILL
+  during ingest or processing, followed by a restart, gives the same archive as
+  an uninterrupted import.
+- Write each message's working copy once instead of staging and copying it,
+  skip re-copying processor outputs that are already stored, and stop
+  re-parsing unchanged YAML configuration for every processor call.
+- `make benchmark-import` times a deterministic 50 MB synthetic corpus and
+  records the result in `benchmarks/import/results.jsonl`.
+- Ctrl-C is acknowledged at once on macOS even when the signal lands on a worker
+  thread; previously the main thread could sleep until that worker finished.
 
 ## 1.0.0a72 — dependency security updates
 
@@ -200,7 +217,7 @@ worker, progress, Preferences and window-lifecycle fixes apply to both desktops.
 Windows acceptance now exercises those shared regressions, native OLE transfer,
 and relocated Outlook import with source integrity and retry checks. Package
 builds alone do not establish installed behavior; see the
-[Windows checklist](WINDOWS_RELEASE_TESTING.md) for remaining acceptance gates.
+[Windows checklist](RELEASING.md#windows-installer-checklist) for remaining acceptance gates.
 
 ## Quiet timeout status and visible screenshot version
 
@@ -1638,6 +1655,6 @@ consolidation added x64 private CPython, ClamAV, WinSparkle, standard Open,
 Windows writer/publication fixes and native Close/Quit acceptance.
 The earlier ARM64 package, Rust updater and frozen-executable recipes are
 superseded. [RUST_GUI_EXPERIMENTS.md](RUST_GUI_EXPERIMENTS.md) retains the
-historical revision/run evidence; [WINDOWS_MSIX_TEST.md](WINDOWS_MSIX_TEST.md)
+historical revision/run evidence; [MSIX packaging](RELEASING.md#msix-packaging)
 owns the current package and acceptance contract. Public signing preparation is
 recorded above; neither these notes nor local tests establish hosted trust.

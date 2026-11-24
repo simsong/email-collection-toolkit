@@ -20,7 +20,16 @@ desktop on macOS and Windows. The compiled Rust UI was retired (see
 [the retrospective](RUST_GUI_EXPERIMENTS.md)); its tests are historical. A Chromium
 pass or skipped Cocoa test is not validation of the Windows WebView2 host;
 Windows evidence comes from `make test-python-reader-native` and the installed
-MSIX checks described in [WINDOWS_MSIX_TEST.md](WINDOWS_MSIX_TEST.md).
+MSIX checks described in [MSIX packaging](RELEASING.md#msix-packaging).
+
+## Import performance benchmark
+
+`make benchmark-import` generates a deterministic ~50 MB synthetic corpus
+(`scripts/perf_corpus.py`, `.test` addresses only, cached under `.tmp/`),
+imports it with `--no-scan` into a scratch archive, and appends one JSON line
+with commit, machine, per-phase seconds and messages/s to
+`benchmarks/import/results.jsonl`. See `benchmarks/import/README.md`. Results
+from different machines are not comparable; compare rows from the same machine.
 
 ## Synthetic name-resolution benchmark
 

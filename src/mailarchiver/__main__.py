@@ -143,6 +143,10 @@ REFRESH_INDEX_MAX_IN_FLIGHT_BYTES = 256 * 1024 * 1024
 CLAMAV_START_PHASE = "waiting for ClamAV startup"
 DISCOVERY_PHASE = "discovering sources"
 TOP_LINE_STYLE = "\x1b[37;44m"
+# Unlabelled progress refreshes render at most this often (phase changes and
+# final states always render); see ProgressReporter.display.
+REFRESH_INTERVAL_SECONDS = 0.25
+SAVED_COUNT_MIN_INTERVAL_SECONDS = 2.0
 ANSI_RESET = "\x1b[0m"
 WorkerItem = TypeVar("WorkerItem")
 
@@ -566,6 +570,25 @@ class ProgressReporter:
         self.interrupt_announced = False
         self.activity_kind: Literal["source", "processing"] = "source"
         self.saved_message_counter: Callable[[], int] | None = None
+        # Unlabelled refreshes arrive many times per message. Rendering each one
+        # re-printed the status line, rewrote and fsynced the status file, and
+        # (while processing) ran a jobs-table count that grows with the archive,
+        # making imports quadratic. Phase changes and final states always render.
+        self.refresh_interval = REFRESH_INTERVAL_SECONDS
+        self.last_rendered_monotonic: float | None = None
+        self.saved_count_min_interval = SAVED_COUNT_MIN_INTERVAL_SECONDS
+        self.saved_count_due_monotonic = 0.0
+        self.trailing_render: threading.Timer | None = None
+
+    def _schedule_trailing_render(self, delay: float) -> None:
+        """Wake the status driver once the interval ends, so the last state of a
+        burst (for example an IMAP backoff notice) is shown even if no later
+        event arrives. The driver waits on ``self.changed``."""
+        if self.trailing_render is not None and self.trailing_render.is_alive():
+            return
+        self.trailing_render = threading.Timer(max(delay, 0.0), self.changed.notify)
+        self.trailing_render.daemon = True
+        self.trailing_render.start()
 
     def _queue_update(self, update: ProgressUpdate) -> None:
         self.updates.put(update)
@@ -954,9 +977,22 @@ class ProgressReporter:
     ) -> None:
         self._drain_updates()
         now = time.monotonic()
-        if self.activity_kind == "processing" and self.saved_message_counter is not None:
-            self.state.saved_messages_remaining = self.saved_message_counter()
         display_label = label or self._worker_phase()
+        if (label is None and ingest_state == "running" and display_label == self.phase
+                and self.last_rendered_monotonic is not None
+                and now - self.last_rendered_monotonic < self.refresh_interval):
+            self._schedule_trailing_render(self.last_rendered_monotonic + self.refresh_interval - now)
+            return
+        self.last_rendered_monotonic = now
+        if self.trailing_render is not None:
+            self.trailing_render.cancel()
+            self.trailing_render = None
+        if (self.activity_kind == "processing" and self.saved_message_counter is not None
+                and (now >= self.saved_count_due_monotonic or ingest_state != "running")):
+            self.state.saved_messages_remaining = self.saved_message_counter()
+            # The count scans the job table; keep it under ~5% of wall time.
+            counted = time.monotonic()
+            self.saved_count_due_monotonic = counted + max(self.saved_count_min_interval, 20 * (counted - now)) if self.saved_count_min_interval else counted
         if display_label != self.phase:
             self.phase = display_label
             self.phase_started_monotonic = now
@@ -2689,7 +2725,7 @@ def add_ingest_arguments(parser: argparse.ArgumentParser, *, require_scan: bool 
         default=[],
         help="trusted plug-in root to load (repeatable; Python code in this directory will execute)",
     )
-    parser.add_argument("--index-attachments", action="store_true", help="index text attachments; non-text attachments require the planned Tika extractor")
+    parser.add_argument("--index-attachments", action="store_true", help="index text attachments; PDF and Office extraction is planned")
     parser.add_argument("--defer-content", action="store_true", help="file messages and extract headers; leave content jobs pending")
     parser.add_argument("--installation-config", type=Path, help="installation plugin settings override")
     parser.add_argument("roots", nargs="+" if require_roots else "*", metavar="SOURCE")
@@ -2739,7 +2775,7 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     contacts_parser.add_argument("--format", choices=("table", "tsv", "json"), default="table")
     contacts_parser.set_defaults(function=contact_list)
     refresh_parser = commands.add_parser("refresh-index")
-    refresh_parser.add_argument("--index-attachments", action="store_true", help="include text attachments; non-text attachments require the planned Tika extractor")
+    refresh_parser.add_argument("--index-attachments", action="store_true", help="include text attachments; PDF and Office extraction is planned")
     refresh_parser.add_argument(
         "--workers",
         type=worker_argument,

@@ -4,13 +4,16 @@ description = "Guides to collecting, searching, and preserving your email."
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-Choose a guide to get started or learn more about your collection:
+New here? Start with the quick start.
 
-- [Importing](@/importing.md) — create a collection and import supported email files.
-- [Searching](@/searching.md) — find messages, browse results, and view attachments.
-- [Features](@/use-cases.md) — explore personal and institutional archive workflows.
-- [Advanced](@/advanced.md) — understand archive storage, configuration, and recovery.
+- [Quick start](@/quick-start.md) — install the application, import mail, and search it.
+- [Importing](@/importing.md) — supported sources, owner addresses, progress, and IMAP.
+- [Searching](@/searching.md) — search syntax, reading messages, folders, and names.
+- [Archive care](@/archive-care.md) — what is in an archive, backups, verification, dates, and settings.
+- [Command line](@/command-line.md) — install and use the `ect` tools.
+- [Troubleshooting](@/troubleshooting.md) — failed imports, warnings, and reporting problems.
 
-For commands and options, see the [CLI reference](https://github.com/simsong/email-collection-toolkit/blob/main/doc/CLI_REFERENCE.md).
-The [detailed user manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md) covers operational workflows;
-the [documentation index](https://github.com/simsong/email-collection-toolkit/blob/main/doc/README.md) maps the technical guides.
+[Archive Gmail](@/gmail-authorization.md) covers Google Takeout and IMAP.
+[Features](@/use-cases.md) describes personal and institutional workflows. The
+[command-line reference](https://github.com/simsong/email-collection-toolkit/blob/main/doc/CLI_REFERENCE.md)
+lists every option.

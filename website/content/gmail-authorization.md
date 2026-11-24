@@ -22,7 +22,7 @@ ect-import --archive gmail.mailarchive /path/to/extracted-takeout
 ect verify gmail.mailarchive
 ```
 
-See [CLI installation and prerequisites](https://github.com/simsong/email-collection-toolkit/blob/main/doc/CLI_REFERENCE.md#install)
+See [Command line](@/command-line.md#install)
 before using these terminal commands. Large exports can be split across ZIP files;
 direct ZIP import and automatic Takeout creation/download are not implemented.
 
@@ -45,7 +45,7 @@ check its [current account guidance](https://support.google.com/accounts/answer/
 
 A synchronized Apple Mail cache is a best-effort source. Complete `.emlx` messages
 can be imported, but partial records and missing detached attachments prevent a
-completeness claim. See [Apple Mail cache limits](@/advanced.md#apple-mail-as-a-temporary-provider-adapter).
+completeness claim. See [Apple Mail](@/importing.md#apple-mail).
 
 Direct Gmail API and OAuth acquisition are not available. End users do not need
 to register a Google application. The [provider guide](https://github.com/simsong/email-collection-toolkit/blob/main/doc/GMAIL.md)
