@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import os
 import sqlite3
+import threading
 import tempfile
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -105,7 +106,8 @@ def _store_object(destination: Path, chunks: Iterable[bytes]) -> ContentReferenc
         # durable before a commit can refer to it, so one directory sync per
         # group commit (see ``_commit``) replaces one per object.
         temporary.replace(final)
-        _UNSYNCED_DIRECTORIES.add(destination)
+        with _DIRECTORY_SYNC:
+            _UNSYNCED_DIRECTORIES.add(destination)
     else:
         replace_file(temporary, final)  # also fsyncs the objects directory on POSIX
     return ContentReference(path=final.resolve(), sha256=digest.hexdigest())
@@ -143,7 +145,10 @@ USER_CANCELLED = "Cancelled by user"
 _GROUPED: set[int] = set()
 _COMMIT_FIRST: dict[int, list[sqlite3.Connection]] = {}
 # Object directories renamed into while a group was open, synced before any commit.
+# Shared by every owner thread (the GUI can import into several archives), so
+# the lock makes a commit wait for a sync another owner already started.
 _UNSYNCED_DIRECTORIES: set[Path] = set()
+_DIRECTORY_SYNC = threading.Lock()
 
 
 @contextmanager
@@ -175,15 +180,29 @@ def flush_group(database: sqlite3.Connection) -> None:
 
 
 def _sync_object_directories() -> None:
-    while _UNSYNCED_DIRECTORIES:
-        sync_directory(_UNSYNCED_DIRECTORIES.pop())
+    """Sync every pending directory; each stays pending until its sync succeeds."""
+    with _DIRECTORY_SYNC:
+        for directory in sorted(_UNSYNCED_DIRECTORIES):
+            sync_directory(directory)
+            _UNSYNCED_DIRECTORIES.discard(directory)
 
 
 def _commit(database: sqlite3.Connection) -> None:
-    _sync_object_directories()
-    for dependent in _COMMIT_FIRST.get(id(database), ()):
-        if dependent.in_transaction:
-            dependent.commit()
+    """Sync objects, commit dependents, then commit ``database``.
+
+    If a barrier before the final commit fails, ``database`` is rolled back so
+    no later commit (such as saving the policy at close) can mark jobs
+    completed whose objects or derived rows are not durable. Those jobs rerun.
+    """
+    try:
+        _sync_object_directories()
+        for dependent in _COMMIT_FIRST.get(id(database), ()):
+            if dependent.in_transaction:
+                dependent.commit()
+    except BaseException:
+        if database.in_transaction:
+            database.rollback()
+        raise
     if database.in_transaction:
         database.commit()
 

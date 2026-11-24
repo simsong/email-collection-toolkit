@@ -45,7 +45,12 @@ Rust delivery plans and historical package checks are not current acceptance.
   drops the importer's own SQLite locks. It now watches the archive directory,
   and file watches refuse SQLite files outright.
 - A batch of finished messages is committed within about a second even when
-  downloads stall, instead of waiting for the next message to arrive.
+  downloads stall or one processor runs long, instead of waiting for the next
+  message or job to finish.
+- If the `objects/` directory sync or the search commit fails, the processing
+  batch is rolled back, so no job is recorded as done without its stored
+  objects and search rows. A failed directory sync is retried before the next
+  commit, and concurrent imports in the GUI wait for each other's syncs.
 - A processor that runs past its time limit is always recorded as a timeout,
   even when the time-limit signal surfaces inside library code as a different
   error.

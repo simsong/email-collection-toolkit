@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import os
+
 import sqlite3
 from pathlib import Path
 
@@ -79,8 +81,55 @@ def test_object_directory_is_synced_before_the_commit_that_references_it(
             with unit(processing):
                 processing.execute("INSERT INTO rows VALUES(?)", (reference.sha256,))
         assert not log
-    assert log == ["sync objects", "processing"]
+    # Windows uses write-through replacement per object instead of a deferred directory sync.
+    assert log == (["processing"] if os.name == "nt" else ["sync objects", "processing"])
     log.clear()
     with unit(processing):  # outside a group: the old per-object sync, then commit
         processing.execute("INSERT INTO rows VALUES(?)", (snapshot_bytes(archive, b"three").sha256,))
     assert log == ["processing"]
+
+
+class _FailingCommit(sqlite3.Connection):
+    def commit(self) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+
+def test_failed_dependent_commit_rolls_back_the_processing_group(tmp_path: Path) -> None:
+    """A search commit that fails must not leave jobs marked completed for a later commit."""
+    log: list[str] = []
+    processing = _database(tmp_path / "processing.sqlite3", log, "processing")
+    search = sqlite3.connect(tmp_path / "search.sqlite3", factory=_FailingCommit)
+    search.execute("CREATE TABLE rows(value TEXT)")
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        with grouped(search), commit_first(processing, search), grouped(processing):
+            with unit(processing):
+                processing.execute("INSERT INTO rows VALUES('completed')")
+            with unit(search):
+                search.execute("INSERT INTO rows VALUES('derived')")
+    assert not processing.in_transaction
+    with processing:  # e.g. saving the policy at close
+        pass
+    assert _visible(tmp_path / "processing.sqlite3") == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows replaces objects write-through, with no deferred sync")
+def test_failed_directory_sync_stays_pending_and_rolls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    log: list[str] = []
+    processing = _database(tmp_path / "processing.sqlite3", log, "processing")
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    def failing(_path: Path) -> None:
+        raise OSError("sync failed")
+    monkeypatch.setattr(store, "sync_directory", failing)
+    with pytest.raises(OSError, match="sync failed"):
+        with grouped(processing):
+            reference = snapshot_bytes(archive, b"object")
+            with unit(processing):
+                processing.execute("INSERT INTO rows VALUES(?)", (reference.sha256,))
+    assert not processing.in_transaction and _visible(tmp_path / "processing.sqlite3") == []
+    assert archive / "objects" in store._UNSYNCED_DIRECTORIES  # pylint: disable=protected-access
+    monkeypatch.setattr(store, "sync_directory", lambda path: log.append(f"sync {path.name}"))
+    with unit(processing):
+        processing.execute("INSERT INTO rows VALUES('later')")
+    assert log == ["sync objects", "processing"]
+    assert not store._UNSYNCED_DIRECTORIES  # pylint: disable=protected-access

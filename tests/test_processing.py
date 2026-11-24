@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -646,3 +647,21 @@ def test_parallel_import_stop_preserves_inflight_checkpoints_and_blocks_remainin
         assert result.completed == 1 and result.failed == 1 and result.pending == 0
         assert len(list(archive.glob("later-*"))) == 1
         assert next(stat for stat in result.statistics if stat.kind == "gate").invocations == 2
+
+
+def test_idle_hook_bounds_the_dispatcher_wait_during_a_slow_processor(tmp_path: Path) -> None:
+    """PROCESSING (#202): a due release batch is committed while a slow processor runs, not after it."""
+    plugin(tmp_path, "slow", 'import time\ntime.sleep(0.6)\nreturn ProcessingResult()', timeout=5)
+    plugins = load_processors((tmp_path,))
+    archive = tmp_path / "archive"
+    calls: list[float] = []
+    def idle() -> float:
+        calls.append(time.monotonic())
+        return 0.05
+    with connect(archive, create=True) as database:
+        source = tmp_path / "message.eml"
+        source.write_bytes(b"Subject: slow\n\nbody")
+        submit(database, archive, source, fingerprint(plugins))
+        result = run(database, plugins, workers=2, idle=idle)  # A worker pool; one worker runs inline.
+    assert result.completed == 1
+    assert len(calls) >= 4, calls

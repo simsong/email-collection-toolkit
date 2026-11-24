@@ -281,7 +281,8 @@ class ProductionPipeline:
         with grouped(self.search), commit_first(self.database, self.search):
             result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,
                          installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
-                         message_id=message_id, continue_after_failure=True, progress=progress, workers=workers, heartbeat=self.heartbeat, signals=self.signals)
+                         message_id=message_id, continue_after_failure=True, progress=progress, workers=workers, heartbeat=self.heartbeat, signals=self.signals,
+                         idle=self.collect_released_when_due)
         self.collect_released()
         if fail_on_error:
             self._raise_failures(pipelines, failures, message_id=message_id)
