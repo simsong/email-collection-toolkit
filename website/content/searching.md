@@ -4,136 +4,106 @@ description = "Find messages across your collection by words, people, dates, sub
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-
-Email Collection Toolkit searches the full time span of your local archive.
-Search and viewing leave the preserved messages unchanged. Start with a word
-or phrase, then narrow the collection by person, date, subject, or source folder.
+Search covers the whole archive, across every account and year. Searching and
+reading never change the archive.
 
 ![The search interface with results and a selected demonstration message](../images/search-interface.png)
 
-*The working interface with a synthetic collection. No private email is shown.*
-
-Warnings and errors stay expanded until you choose **Collapse messages** or
-**Dismiss messages**. Collapsing shows a **Messages** pill near the bottom. Click it
-to read the full text and earlier messages from the same window; **Collapse
-messages** returns to the pill. Warning-only messages use yellow. **Dismiss
-messages** clears both the banner and pill without reopening them on the next
-status refresh. Native application notices are also in About.
+*The search window with a synthetic collection. No private email is shown.*
 
 ## Words, phrases, and selectors
 
-Enter words to search indexed headers and message text. Put a phrase in double
-quotes to keep its words together. Combine terms and selectors to narrow a
-search: every supplied term must match. The empty search screen includes a
-built-in reference and examples; submitting an empty query does not list the
-whole archive.
+Type words to search message headers and text. Put a phrase in double quotes.
+Every term must match. When the search box is empty, the results pane shows a
+built-in reference with examples.
 
 | Search | Finds |
 | --- | --- |
-| `exhibition` | The word in indexed headers or message text |
-| `"community archive"` | An indexed phrase |
+| `exhibition` | The word in headers or message text |
+| `"community archive"` | The exact phrase |
 | `any:alex@example.org` | The address in From, To, Cc, or Bcc |
 | `from:alex@example.org` | A matching sender |
-| `to:sam@example.org` | A matching To recipient |
-| `cc:sam@example.org` | A matching Cc recipient |
-| `bcc:sam@example.org` | A matching Bcc recipient |
+| `to:sam@example.org` | A matching To recipient (also `cc:` and `bcc:`) |
 | `subject:"annual report"` | A phrase in the subject |
-| `date:2024-05-01` | Messages during that worldwide calendar date |
-| `before:2024-05-01` | Messages before that date begins anywhere |
-| `after:2024-05-01` | Messages after that date ends everywhere |
-| `from:alex subject:exhibition after:2024-01-01` | Messages matching all three filters |
+| `date:2024-05-01` | Messages sent on that date anywhere in the world |
+| `before:2024-05-01` | Messages before that date |
+| `after:2024-05-01` | Messages after that date |
+| `from:alex subject:exhibition after:2024-01-01` | Messages matching all three |
 
-Address and subject selectors match text within the corresponding fields.
-Invalid search syntax is shown as an inline error so you can correct the query.
+Search ignores case and accents and does not match word stems. Punctuation in
+quotes counts: `"CACM-"` requires the hyphen. Dates can be written
+`2020-01-05`, `1/5/2020`, or `"January 5, 2020"`.
 
-Date searches cover a 50-hour worldwide window, including late-evening messages
-whose UTC timestamp falls on the following day. Adjacent date searches overlap.
-See [Date handling](@/advanced.md#date-handling) for boundaries and examples.
+A date search includes every moment that was that date somewhere on Earth, so a
+message sent late in the evening in Boston still matches its local date.
+Adjacent dates therefore overlap. See [Dates](@/archive-care.md#dates) for the
+exact rule.
 
-## Suggestions and search filters
+## Suggestions and filters
 
-After three characters of a value, the search box suggests matching addresses,
-names, subjects, and recognized dates with message counts. It matches original
-header names and saved authoritative names even before content processing finishes.
-Use arrow keys and Return, or click a suggestion. An explicit prefix such as
-`from:simson` restricts suggestions to that field.
+After three characters, the search box suggests names, addresses, subjects, and
+dates, with message counts. Choose one with the arrow keys and Return, or click
+it. A chosen address becomes a filter whose menu picks **Any**, **From**,
+**To**, **Cc**, or **Bcc**. Click **×**, or press Delete in an empty search box,
+to remove the last filter.
 
-An address/name match defaults to its only matching role, or **Any** if several
-roles match. Click the tile's tag to choose among matching **From**, **To**,
-**Cc**, and **Bcc** roles. **Any** counts each message once across roles.
-Date tiles offer **Date**, **Before**, and **After**. Dates accept `2020-01-05`,
-`1/5/2020`, or `January 5, 2020`; selecting one normalizes it to ISO format.
-Quote multiword values in a typed query: `date:"January 5, 2020"`.
-Click **×** to remove a filter, or press Delete in an empty input field.
+## Results
 
-## Sort and read results
+Sort the results by **date**, **subject**, or **sender**. Large searches show
+the first 2,000 results right away and fetch the rest in the background; the
+count is exact once **Searching in background** disappears.
 
-Search ignores case and accents and treats `ß`/`ẞ` as `ss`, without stemming.
-Existing indexes need no rebuild. Quoted symbols remain significant: `"CACM-"`
-requires the hyphen and `"Ham+Sandwhich"` requires the plus. Word boundaries apply.
+Click a result to read it beside the list, use Up and Down to move through
+results, or double-click to open the message in its own window.
+**Window → New Search Window** opens another independent search of the same
+archive.
 
-The footer shows archive notices above the separate ingest-history line.
+## Reading a message
 
-Sort the complete matching set by **date**, **subject**, or **sender**, in either
-direction. Large searches show an initial group of 2,000 results and retrieve
-the rest automatically. **Searching in background** indicates more results
-are arriving; the final count is exact when that work finishes. There is no
-manual next-page control, and starting a new query supersedes the old search.
+Search terms are highlighted in the message. Command-F finds text within the
+message, and Command-G finds the next match.
 
-Click a result to read it beside the list. Use Up and Down to move through
-messages, double-click to open a separate message window, or drag the divider
-to resize the panes. Each message includes its original headers and source
-locations. Search terms are highlighted in headers and body text.
+The menu above the message lists its text and HTML versions plus **Raw
+Source**, the complete original message. HTML is cleaned before display, and
+remote images stay blocked until you choose **Load Remote Content**. Clicking
+a link asks before opening it. Attachments appear below the message; opening
+one always asks first.
 
-The body menu offers available text and HTML parts plus **Raw Source**.
-On macOS, Command-1 through Command-9 selects numbered MIME parts;
-Command-0 or Command-Shift-U opens Raw Source. HTML is sanitized and remote
-images remain blocked until you choose **Load Remote Content**. Message links
-show their destination and offer **Open Link**, **Copy Link**, or **Ignore**.
-Attachments can be saved; available preview and open actions depend on their type.
+The bottom of each message lists where it is stored in the archive and every
+source where it was found. **Save Message…** saves an exact `.eml` copy.
 
-## Find within a message
+## Attachment text
 
-With a message selected, Command-F opens **Find in message**, initially filled
-with the textual part of your archive query. Command-G advances to the next
-match; Shift-Command-G goes back. The find text stays when you select another
-message. This works with text, HTML, and raw-source views.
+Turn on **Search attachments** to include plain-text attachments. The archive
+must be indexed with attachment support first:
 
-Command-A selects results when the result list has focus, or displayed message
-text when the message body has focus. The copy-text control copies visible
-message text. Save and print controls operate on the selected message.
-
-## Include attachment text
-
-Enable **Search attachments** to include indexed text attachments. The archive
-must first have been indexed with attachment support. PDF and Microsoft Office
-attachment-text extraction are not currently implemented; the checkbox does
-not add those capabilities.
-
-```console
+```sh
 ect refresh-index --archive collection.mailarchive --index-attachments
 ```
 
-## Original folders and saved filter sets
+Text from PDF, Word, Excel, and PowerPoint attachments, and text in scanned
+documents and images, is not searchable yet. That work is
+[planned](https://github.com/simsong/email-collection-toolkit/issues/159).
 
-Enable **Show original folder structure** to reveal the **Original mailboxes**
-tree. Select one or more folders to search their combined contents. Folder
-counts represent distinct messages, and duplicate source copies still appear
-once in the results. Parent checkboxes include their descendants; a dash means
-only part of a branch is selected.
+## Original folders
 
-By default, matching logical folders from different backup volumes are combined.
-**Show source volumes** separates them when needed. Source paths remain visible
-with the message. Hiding the tree disables its filter without forgetting the
-selection; showing it restores the filter.
+Turn on **Show original folder structure** to see the **Original mailboxes**
+tree, built from where the mail was found. Select one or more folders to search
+only those. Counts are of distinct messages, so a message found in several
+backups appears once. **Show source volumes** separates folders that came from
+different backup disks.
 
-Use **Filter set → Save...** to name a folder selection. Select its name to
-restore it, or **None** for no folder filter. The **...** manager renames and
-deletes saved sets. These are local preferences, not changes to the archive.
+**Filter set → Save...** names a folder selection so you can return to it.
+Filter sets are saved on this computer, not in the archive.
 
-## Independent windows
+## Names and contacts
 
-**Window → New Search Window** gives the same collection another independent
-query and selection. See [Advanced → Command Line](@/advanced.md#command-line)
-for terminal commands and the [user manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
-for keyboard controls and the message-viewing workflow.
+The **Names and addresses** button opens the Name matcher, which groups the
+addresses that belong to one person. Drag one entry onto
+another to merge them, or use **Make separate** to split an address off. Your
+changes are saved in the archive right away. Double-click a name to search all
+of that person's addresses. Organizations and services are hidden unless you
+check **Show non-person identities**.
+
+The command `ect human-contacts` lists your likely correspondents with dates
+and message counts. See [Command line](@/command-line.md).

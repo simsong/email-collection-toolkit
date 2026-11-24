@@ -15,6 +15,12 @@ weight = 20
 - [ePADD](https://epaddproject.org/)
   develops open-source tools for processing, discovering, and delivering email
   archives.
+- [code4lib](https://code4lib.org/) is a volunteer community of people who build
+  technology for libraries, archives, and museums.
+- [DigiPres.org](https://www.digipres.org/) links community resources for
+  digital preservation.
+- [The Digital Library Federation](https://www.diglib.org/) is a community of
+  digital library practitioners.
 - [The International Internet Preservation Consortium](https://netpreserve.org/)
   is an international organization for web preservation.
 

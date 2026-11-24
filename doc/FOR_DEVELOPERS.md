@@ -374,9 +374,51 @@ include `make runtime-license-bundle LICENSE_OUTPUT=PATH` output.
 
 ## Environment and research settings
 
-The [README environment-variable reference](../README.md#environment-variables)
-documents runtime, build, signing, test, and research overrides without secret
-values. Keep new settings documented there and beside their Makefile targets.
+User-facing runtime variables (`MAIL_ARCHIVE_DIR`, the ClamAV overrides and TLS
+trust) are listed on the website's
+[Command line](https://simsong.github.io/email-collection-toolkit/command-line/#environment-variables)
+page. Build, test, signing and research settings are below. Never document secret
+values. Keep new settings documented here and beside their Makefile targets.
+Legacy `MAILARCHIVER_CLAMD*` variables are unused.
+
+| Variable / Make parameter | Purpose |
+| --- | --- |
+| `CARGO`, `RUST_TARGET_DIR`, `CARGO_TARGET_DIR` | Cargo executable and build output; Make uses `RUST_TARGET_DIR`, direct Cargo uses `CARGO_TARGET_DIR` |
+| `RUSTUP_TOOLCHAIN` | Override the compiler selected by `rust-toolchain.toml` |
+| `CARGO_BUILD_JOBS` | Limit native Rust compilation parallelism |
+| `OPENSSL_DIR`, `OPENSSL_LIB_DIR`, `OPENSSL_INCLUDE_DIR` | Select the OpenSSL installation for Rust dependencies |
+| `OPENSSL_NO_VENDOR`, `PKG_CONFIG_PATH` | Control vendored OpenSSL and package metadata lookup |
+| `TMPDIR` | Optional disposable-test temporary root; all test subprocesses share it so lock tests stay separate from a running desktop import |
+| `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, `UV_PYTHON_BIN_DIR` | Locations for uv's cache, managed Python, and interpreter links |
+| `UV_PROJECT_ENVIRONMENT`, `PYTHONPATH` | Isolated packaging environment and repository-local test import path |
+| `FQDN` | Disposable IMAP tests use `localhost` to avoid reverse DNS |
+| `CI_DIAGNOSTICS`, `CI_DIAGNOSTICS_DIRECTORY` | Opt-in synthetic writer/OST test profiles (`1` enables); output directory, default `dist/ci-diagnostics` |
+| `MAILARCHIVER_PST_ACTIVITY_FILE` | Host-owned, newly created eight-byte PST work-counter snapshot; separates extraction liveness from batched diagnostic history |
+| `MAILARCHIVER_NATIVE_APPLICATION_E2E`, `MAILARCHIVER_NATIVE_GUI_E2E` | Opt into visible native tests; focus/menu acceptance requires an unlocked desktop |
+| `GITHUB_ENV`, `RUNNER_TEMP` | GitHub Actions environment handoff file and temporary area |
+| `GITHUB_REPOSITORY`, `GH_TOKEN`, `GITHUB_REF_NAME` | Release repository, API authorization, and tag being validated |
+| `SIGNING_IDENTITY` | Local macOS Developer ID signing identity |
+| `SPARKLE_ED25519_PRIVATE_KEY_BASE64` | Protected key used to sign installers and update feeds |
+| `APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD` | Protected Developer ID certificate export and its password |
+| `APPLE_NOTARY_KEY_ID`, `APPLE_NOTARY_ISSUER_ID`, `APPLE_NOTARY_PRIVATE_KEY_BASE64` | Protected Apple notarization credentials |
+| `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` | Windows signing OIDC identity and subscription |
+| `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE` | Microsoft public signing service selection |
+| `MSIX_PUBLISHER`, `PUBLIC_SIGNING` | Approved Windows publisher and workflow signing-mode selector |
+| `MSIX_TEST_CERT_PFX_BASE64` | Protected persistent test-signing key; never used for public releases |
+| `DEVELOPER_DIR`, `TOOLCHAINS`, `SDKROOT`, `CODESIGN_ALLOCATE` | Apple toolchain overrides; discarded during historical-feed trust checks |
+| `__PYVENV_LAUNCHER__`, `PYTHONEXECUTABLE` | Interpreter selection handled internally by the macOS development launcher |
+| `DEFINITIONS_DIRECTORY`, `SEED_DIRECTORY` | New definition-download destination and existing baseline to copy |
+| `ARGS`, `ARCHIVE`, `IMAP_ARGS` | Makefile command arguments and archive selection; never password channels |
+| `RELEASE_TAG`, `APPCAST`, `WINDOWS_ARCHIVE`, `WINDOWS_RELEASE_URL` | Candidate release tag, feed path, and Windows signing inputs |
+| `MSIX_PACKAGE`, `MSIX_EVIDENCE`, `MSIX_PAYLOADS` | Windows package, relocation-test evidence, and bundle inputs |
+| `TIKA_VERSION` | Optional Tika distribution version |
+| `LICENSE_OUTPUT` | Destination for a generated runtime license bundle |
+| `NAME_RESEARCH_ENV`, `EVIDENCE`, `OUTPUT`, `DATABASE`, `LABELS` | Research environment, observations, private outputs, frozen experiment, and owner-review labels |
+
+`make security-lock` refreshes the affected dependency packages across the
+application, converter, optional name-matcher research environment and Rust
+workspace. Patched minimum versions are recorded in their manifests; commit the
+refreshed lockfiles together.
 
 Name-matching experiments use the separate locked environment in
 [`research/name-matcher`](../research/name-matcher). See the
