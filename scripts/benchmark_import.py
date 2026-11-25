@@ -6,8 +6,11 @@ Purpose: a repeatable import-throughput measurement that can be compared across
 commits and machines, so performance regressions and gains are visible.
 How it works: generate (or reuse) the seeded corpus from ``perf_corpus.py``,
 create a fresh scratch archive, run ``ect-import --no-scan`` as a subprocess,
-timestamp each status line to attribute wall time to import phases, and append
-one JSON result line (commit, machine, phases, messages/s) to a results file.
+timestamp each status line to attribute wall time to import phases, then
+verify the archive end to end against the corpus (every generated message is
+cataloged with its exact bytes, indexed for search and fully processed, and
+the archive passes its standalone verifier). Append one JSON result line
+(commit, machine, phases, messages/s, verification) to a results file.
 System role: backs ``make benchmark-import``; never touches a real archive.
 """
 
@@ -28,7 +31,8 @@ from pathlib import Path
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent))
-from perf_corpus import OWNER_MARKER, CorpusManifest, generate  # noqa: E402
+from corpus_verify import Verification, verify  # noqa: E402
+from perf_corpus import CORPUS_VERSION, OWNER_MARKER, CorpusManifest, generate  # noqa: E402
 
 ROOT = Path(__file__).parents[1]
 DEFAULT_RESULTS = ROOT / "benchmarks" / "import" / "results.jsonl"
@@ -53,6 +57,10 @@ class BenchmarkResult(BaseModel):
     phase_seconds: dict[str, float]
     messages_per_second: float
     exit_code: int
+    verified: bool = False
+    verification_errors: list[str] = []
+    # Checks that cannot pass yet (e.g. no text extractor for a document type).
+    verification_gaps: list[str] = []
 
 
 def _git(*arguments: str) -> str:
@@ -68,7 +76,8 @@ def _corpus(directory: Path, megabytes: float, seed: int) -> CorpusManifest:
         manifest_path = directory / "MANIFEST.json"
         if manifest_path.exists():
             manifest = CorpusManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
-            if manifest.seed == seed and manifest.target_bytes == int(megabytes * 1024 * 1024):
+            if (manifest.corpus_version == CORPUS_VERSION and manifest.seed == seed
+                    and manifest.target_bytes == int(megabytes * 1024 * 1024)):
                 return manifest
         shutil.rmtree(directory)
     return generate(directory, int(megabytes * 1024 * 1024), seed)
@@ -86,7 +95,7 @@ def run(corpus: Path, megabytes: float, seed: int, workers: str | None, label: s
         environment = {**os.environ, "MAIL_ARCHIVE_DIR": ""}
         subprocess.run(["ect-create", str(archive), "--owner", "owner@example.test"],
                        check=True, capture_output=True, env=environment)
-        command = ["ect-import", "--archive", str(archive), "--no-scan"]
+        command = ["ect-import", "--archive", str(archive), "--no-scan", "--index-attachments"]
         if workers:
             command += ["--workers", workers]
         command += [str(corpus / "maildir"), str(corpus / "mbox")]
@@ -110,6 +119,9 @@ def run(corpus: Path, megabytes: float, seed: int, workers: str | None, label: s
         finished = time.monotonic()
         phases[current] = phases.get(current, 0.0) + finished - last
         wall = finished - started
+        # Verification runs after timing stops; it never counts toward wall time.
+        verification = verify(archive, manifest) if exit_code == 0 else Verification(
+            problems=[f"ect-import exited {exit_code}"])
     finally:
         # Removes a partial scratch archive after a failure or Ctrl-C too.
         shutil.rmtree(scratch, ignore_errors=True)
@@ -130,6 +142,9 @@ def run(corpus: Path, megabytes: float, seed: int, workers: str | None, label: s
         phase_seconds={name: round(value, 2) for name, value in phases.items() if value >= 0.05},
         messages_per_second=round(manifest.message_count / wall, 2) if wall else 0.0,
         exit_code=exit_code,
+        verified=not verification.problems,
+        verification_errors=verification.problems,
+        verification_gaps=verification.gaps,
     )
 
 
@@ -154,6 +169,9 @@ def main() -> None:
             output.write(line + "\n")
     if result.exit_code:
         raise SystemExit(result.exit_code)
+    if not result.verified:
+        print("\n".join(["Import verification FAILED:", *result.verification_errors]), file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

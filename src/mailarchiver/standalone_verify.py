@@ -433,7 +433,7 @@ def write_integrity_file(
             if current_identity != initial_identity or _digest_file(mbox_path, ("sha256",))["sha256"] != mbox_sha256:
                 raise ValueError(f"MBOX changed while writing integrity file: {mbox_path}")
             output.flush()
-            os.fsync(output.fileno())
+            _full_sync(output.fileno())
         if os.name == "nt":
             native = ctypes.WinDLL("kernel32", use_last_error=True)
             native.MoveFileExW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
@@ -449,12 +449,24 @@ def write_integrity_file(
     return mbox_sha256
 
 
+def _full_sync(descriptor: int) -> None:
+    """fsync, plus a drive cache flush on macOS (stdlib-only twin of storage_sync.durable_sync)."""
+    command = getattr(import_module("fcntl"), "F_FULLFSYNC", None) if sys.platform == "darwin" else None
+    if command is not None:
+        try:
+            import_module("fcntl").fcntl(descriptor, command)
+            return
+        except OSError:
+            pass
+    os.fsync(descriptor)
+
+
 def _sync_directory(path: Path) -> None:
     if os.name == "nt":
         return  # The publication above uses a write-through native rename.
     descriptor = os.open(path, os.O_RDONLY)
     try:
-        os.fsync(descriptor)
+        _full_sync(descriptor)
     finally:
         os.close(descriptor)
 

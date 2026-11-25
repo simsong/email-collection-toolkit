@@ -30,7 +30,7 @@ from .objects import OBJECT_NAME, ensure_object_index, index_inputs
 from .api import ArchiveContext, ContentReference, PluginStatistics, ProcessingObject, RAW_MESSAGE, RunReport
 from ..catalog import PROCESSING_DATABASE as DATABASE
 from ..catalog import require_processing_schema
-from ..storage_sync import replace_file, sync_directory
+from ..storage_sync import durable_sqlite, durable_sync, replace_file, sync_directory
 
 SCHEMA_RESOURCE = "V2__processing.sql"
 
@@ -62,7 +62,7 @@ def connect(archive: Path, *, create: bool = False, production: bool = False) ->
             replace_file(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
-    database = sqlite3.connect(path)
+    database = durable_sqlite(sqlite3.connect(path))
     try:
         database.execute("PRAGMA foreign_keys=ON")
         require_processing_schema(database)
@@ -95,7 +95,7 @@ def _store_object(destination: Path, chunks: Iterable[bytes]) -> ContentReferenc
                 digest.update(chunk)
                 target.write(chunk)
             target.flush()
-            os.fsync(target.fileno())
+            durable_sync(target.fileno())
         except BaseException:
             target.close()
             temporary.unlink(missing_ok=True)

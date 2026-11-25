@@ -1,0 +1,110 @@
+[
+  {
+    "filename": "documentz01ztxtz1.txt",
+    "identifier": "documentz01ztxtz1",
+    "mime_type": "text/plain",
+    "sha256": "0194948acb76cb9a7c42f3a1054ecc34bbb12948cce1a1f2e147d9cd73feff99"
+  },
+  {
+    "filename": "documentz02ztxtz2.txt",
+    "identifier": "documentz02ztxtz2",
+    "mime_type": "text/plain",
+    "sha256": "f93908debbc1cac03660f8aed0903d96dc7c826d976ce3fec565ed1d1f146285"
+  },
+  {
+    "filename": "documentz03zpdfz1.pdf",
+    "identifier": "documentz03zpdfz1",
+    "mime_type": "application/pdf",
+    "sha256": "e601c3e97429a6e5a426385f927282121a1b125a188856434c804e191ea8391e"
+  },
+  {
+    "filename": "documentz04zpdfz2.pdf",
+    "identifier": "documentz04zpdfz2",
+    "mime_type": "application/pdf",
+    "sha256": "580572ae45bacbe3aa1427bca65dd0152e998756d897ebff11d6350436b3c109"
+  },
+  {
+    "filename": "documentz05zdocxz1.docx",
+    "identifier": "documentz05zdocxz1",
+    "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "sha256": "84e69e02c5f66018c21fea0ad363e4ddfbd5ba97b54bb083c38d6686b98189d7"
+  },
+  {
+    "filename": "documentz06zdocxz2.docx",
+    "identifier": "documentz06zdocxz2",
+    "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "sha256": "d5b57214f48a8623cc2e6156a7203ee3746983e2cad63f957bccf851590fec84"
+  },
+  {
+    "filename": "documentz07zdocz1.doc",
+    "identifier": "documentz07zdocz1",
+    "mime_type": "application/msword",
+    "sha256": "586dde156b2f9bbaae11b2ad00947f89276ca024a0c1d7b52895439b280ba41b"
+  },
+  {
+    "filename": "documentz08zdocz2.doc",
+    "identifier": "documentz08zdocz2",
+    "mime_type": "application/msword",
+    "sha256": "48bb4ae3fdc1e387403b6e9c8babfd6bc0e775a04a0f9534741a9f2ba3016aed"
+  },
+  {
+    "filename": "documentz09zxlsz1.xls",
+    "identifier": "documentz09zxlsz1",
+    "mime_type": "application/vnd.ms-excel",
+    "sha256": "7aa268fe7b11e62cd7655c1673146215840568006c1b3d9f3b9389f40d4e9aa3"
+  },
+  {
+    "filename": "documentz10zxlsz2.xls",
+    "identifier": "documentz10zxlsz2",
+    "mime_type": "application/vnd.ms-excel",
+    "sha256": "a6b669113779ec64c12fc01b2219cdbe45a642a73e3b08d5c450f89d72b29662"
+  },
+  {
+    "filename": "documentz11zxlsxz1.xlsx",
+    "identifier": "documentz11zxlsxz1",
+    "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "sha256": "0161b7db0eadb9b74291125b4c94174ceae27a9d4864c57199ece0b0d140b41e"
+  },
+  {
+    "filename": "documentz12zxlsxz2.xlsx",
+    "identifier": "documentz12zxlsxz2",
+    "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "sha256": "45a10ab925898843fbe0be7c3d02fdcde71f6fbab524f971736bd8cf7f785888"
+  },
+  {
+    "filename": "documentz13zpptz1.ppt",
+    "identifier": "documentz13zpptz1",
+    "mime_type": "application/vnd.ms-powerpoint",
+    "sha256": "895bb1b9580361f3850c11a9d1240779bbba550166291c85cf08f86686169823"
+  },
+  {
+    "filename": "documentz14zpptz2.ppt",
+    "identifier": "documentz14zpptz2",
+    "mime_type": "application/vnd.ms-powerpoint",
+    "sha256": "15a82d89363e4f10ab41d42dcdeea5729218d311320a4b5403762cba11b79325"
+  },
+  {
+    "filename": "documentz15zpptxz1.pptx",
+    "identifier": "documentz15zpptxz1",
+    "mime_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "sha256": "6e61f50f5691fbe75edfc9555185555596e9cce6298f689aac60b9e0a79db113"
+  },
+  {
+    "filename": "documentz16zpptxz2.pptx",
+    "identifier": "documentz16zpptxz2",
+    "mime_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "sha256": "54b61afd0897cea826e981d163219e47cd3c8ca791aecf9634697a0e072a3fed"
+  },
+  {
+    "filename": "documentz17zjpegz1.jpeg",
+    "identifier": "documentz17zjpegz1",
+    "mime_type": "image/jpeg",
+    "sha256": "22d6807e5aea367ef61df757641c6e0e909d163f2328ea3277888b2cd702f23b"
+  },
+  {
+    "filename": "documentz18zjpegz2.jpeg",
+    "identifier": "documentz18zjpegz2",
+    "mime_type": "image/jpeg",
+    "sha256": "6e0ddd669d3900311ef0dd1bafac384a296a88d328e5eac63cb91dae7cbcab26"
+  }
+]

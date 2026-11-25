@@ -77,6 +77,37 @@ invocation workspaces are reused within a dispatch, plugin code is compiled
 once per exact source text (`CurrentSourceLoader` keys on the SHA-256 of the
 bytes it just read, so edited helpers still load), and two models avoid
 pydantic 2.13's per-instance signature inspection of `PrivateAttr(default_factory=list)`.
+During ingest, catalog rows that processors write (header metadata, defects)
+use `unit(self.catalog)` inside `grouped(self.catalog)` with
+`commit_first(self.database, self.catalog)`, so they commit once, just before
+the processing commit for that message. Per-source bookkeeping in `__main__`
+(`register_container`, `begin_integrity_check`, `publish_checkpoint`) is not
+committed on its own. It rides along with the next message's publication
+commit, or `commit_due_work` (the ingest idle hook) commits it within
+`RELEASE_BATCH_SECONDS` while sources stall. Interrupt and pause paths commit it.
+A crash loses only those checkpoints, so the affected sources are rescanned and
+their messages are recognized as already archived. `archive_scanned` opens its
+publication with `SAVEPOINT publication` instead of `BEGIN`, so a failed
+publication rolls back only its own rows. With these changes, ingest makes 3
+commits per Maildir message instead of about 9 (one publication commit required
+by the MBOX journal protocol, one catalog group and one processing group).
+
+Durability points use `storage_sync.durable_sync`. On macOS it issues
+`fcntl(F_FULLFSYNC)` so that the drive flushes its write cache. Plain `fsync`
+there only hands data to the drive, and a sleep, unplug or power loss can still
+drop or reorder those writes. It falls back to `fsync` where a file system
+refuses `F_FULLFSYNC`, as SQLite does. Elsewhere it is `fsync`. These
+durability points are:
+- MBOX appends and the publication journal,
+- `objects/` files,
+- BagIt checkpoint files,
+- integrity files (`standalone_verify._full_sync`, its stdlib-only twin),
+- `sync_directory`.
+
+`durable_sqlite` sets `PRAGMA fullfsync` and `checkpoint_fullfsync` on the
+catalog, search and processing connections on macOS. Progress status files keep
+plain `fsync`, because they are not recovery state.
+
 While any group is open, `_store_object` still fsyncs each object file but
 renames it without syncing `objects/`; `store._commit` (every grouped commit)
 and a non-grouped `unit` sync the recorded directories before committing, so

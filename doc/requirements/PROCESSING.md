@@ -84,7 +84,9 @@ job, so a message does not pay for dozens of rollback-journal commits. A crash
 may lose only that uncommitted group, which replays from the previous commit;
 object cleanup shall commit the group first. Body/attachment processing may
 group the commits of up to 64 finished messages or one second of work, even
-while no further message arrives, and a
+while no further message arrives. During ingest, a message's processor catalog
+rows shall share one commit, and source checkpoints may ride along with message
+commits, committing within one second while sources stall. A
 derived search write shall commit before the processing commit that marks its
 job completed. A SIGKILL during ingest or during
 body/attachment processing followed by a restart shall yield the same catalog

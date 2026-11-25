@@ -20,7 +20,6 @@ import csv
 import hashlib
 import logging
 import math
-import os
 import re
 import sqlite3
 import uuid
@@ -35,7 +34,7 @@ from pydantic import BaseModel
 from .layout import integrity_directory, mbox_directory
 from .mbox import IntegrityMessage, write_integrity_files
 from .standalone_verify import EXTRA_FILE_WARNING, INSTALLED_NAME
-from .storage_sync import replace_file, sync_directory
+from .storage_sync import durable_sync, replace_file, sync_directory
 
 BAGIT_DECLARATION = "BagIt-Version: 1.0\nTag-File-Character-Encoding: UTF-8\n"
 BAG_INFO = "bag-info.txt"
@@ -96,7 +95,7 @@ def _write_atomic(path: Path, content: bytes) -> None:
         with temporary.open("wb") as output:
             output.write(content)
             output.flush()
-            os.fsync(output.fileno())
+            durable_sync(output.fileno())
         replace_file(temporary, path)
     except BaseException:
         temporary.unlink(missing_ok=True)
@@ -202,7 +201,7 @@ class MailbagCsvWriter:
         if self.output is None:
             return
         self.output.flush()
-        os.fsync(self.output.fileno())
+        durable_sync(self.output.fileno())
         self.output.close()
         self.output = None
         self.writer = None

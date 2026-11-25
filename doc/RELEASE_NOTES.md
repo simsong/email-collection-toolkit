@@ -6,6 +6,29 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a75 — fewer ingest commits, full macOS durability
+
+- Ingest makes about 3 commits per message instead of about 9. Catalog rows
+  that processors write share one commit, and per-source checkpoints are
+  committed along with message commits (within one second if sources stall).
+  After a crash, the affected sources are rescanned, and their messages are
+  recognized as already archived.
+- On macOS, every point the archive relies on for crash recovery now uses
+  `F_FULLFSYNC`. Plain `fsync` there does not make the drive flush its cache,
+  so a sleep, unplug or power loss could lose writes that the archive treated
+  as saved. SQLite connections use `fullfsync` too. Expect imports on macOS to
+  be slower than before, especially on USB drives. Fewer commits offset part
+  of the cost.
+- `make benchmark-import` now checks the result end to end. It checks every
+  generated message's bytes, MBOX pointer, Subject, sender, recipients, date,
+  Message-ID and attachments, and that unique tokens and sampled words are
+  searchable. The corpus (version 2) adds two real documents each of .txt,
+  .pdf, .docx, .doc, .xls, .xlsx, .ppt, .pptx and .jpeg, each with a unique
+  search identifier. Identifiers in types without a text extractor yet are
+  reported as gaps rather than failures. The crash-recovery tests run the same
+  check. The check holds only digests and metadata in memory, never the corpus
+  itself.
+
 ## 1.0.0a74 — faster body and attachment processing
 
 - Body/attachment processing commits once per batch of up to 64 messages (or

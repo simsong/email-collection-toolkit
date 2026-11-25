@@ -6,7 +6,9 @@ Purpose: Publish flushed files with platform-appropriate rename durability.
 
 How it works:
 Replace files atomically, exclusively rename new files/directories, flush POSIX directories
-and use Windows write-through replacement with explicit reader sharing.
+and use Windows write-through replacement with explicit reader sharing. On macOS,
+``fsync`` only hands data to the drive; ``durable_sync`` uses ``F_FULLFSYNC`` so
+the drive also flushes its write cache, and SQLite connections enable the same.
 
 Fundamental dependents:
 
@@ -19,8 +21,40 @@ from __future__ import annotations
 import ctypes
 import errno
 import os
+import sqlite3
 import sys
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None  # type: ignore[assignment]
+
+# Only macOS needs (and defines) F_FULLFSYNC; elsewhere fsync reaches stable storage.
+_FULLFSYNC: int | None = getattr(fcntl, "F_FULLFSYNC", None) if sys.platform == "darwin" else None
+
+
+def durable_sync(descriptor: int) -> None:
+    """Flush a file or directory to stable storage, including the drive's write cache.
+
+    Falls back to ``fsync`` where ``F_FULLFSYNC`` is refused (some network and
+    FUSE file systems), as SQLite does.
+    """
+    if _FULLFSYNC is not None and fcntl is not None:
+        try:
+            fcntl.fcntl(descriptor, _FULLFSYNC)
+            return
+        except OSError:
+            pass
+    os.fsync(descriptor)
+
+
+def durable_sqlite(database: sqlite3.Connection) -> sqlite3.Connection:
+    """Make SQLite commits use F_FULLFSYNC on macOS (no effect elsewhere)."""
+    if _FULLFSYNC is not None:
+        database.execute("PRAGMA fullfsync=ON")
+        database.execute("PRAGMA checkpoint_fullfsync=ON")
+    return database
 
 
 def publish_exclusive(source: Path, destination: Path) -> None:
@@ -50,7 +84,7 @@ def sync_directory(path: Path) -> None:
         return
     descriptor = os.open(path, os.O_RDONLY)
     try:
-        os.fsync(descriptor)
+        durable_sync(descriptor)
     finally:
         os.close(descriptor)
 
