@@ -49,6 +49,7 @@ from .mailsearch import (
     read_message_bytes,
     search_header_page,
     search_result_count,
+    warm_search_vocabulary,
 )
 from .message import decoded_message_header
 from .mime_tree import MimeReaderLimitError, OriginalMimeParts, decoded_leaf_payload, original_part_payload, walk_mime
@@ -226,6 +227,14 @@ def search_page(
         highlight_terms=_highlight_terms(terms),
         has_more=bool(limit and len(page.results) > limit),
     )
+
+
+def warm_search(archive: Path) -> None:
+    """Prepare legacy search vocabulary in the background; failures surface on search."""
+    try:
+        warm_search_vocabulary(archive)
+    except (OSError, ValueError, sqlite3.Error):
+        return
 
 
 def search_count(

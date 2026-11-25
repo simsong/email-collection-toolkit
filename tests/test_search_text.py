@@ -21,6 +21,7 @@ from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.gui_service import search_page, search_suggestions
 from mailarchiver.mailsearch import SortDirection, SortField, parse_query, search_headers, search_result_count
 from mailarchiver.search import index_message, message_text
+from mailarchiver import mailsearch, search_text
 from mailarchiver.search_text import compile_text, search_vocabulary
 from test_mailsearch import add_catalogued_message, run_search
 
@@ -46,15 +47,15 @@ def test_split_compatibility_prunes_unrelated_documents_before_reading_content()
         ).fetchone() == (1,)
 
 
-def test_ambiguous_split_fallback_retains_native_sharp_s(tmp_path: Path) -> None:
-    """Bounded legacy fragmentation must keep native prefixes that expand under folding."""
+def test_ambiguous_split_retains_native_sharp_s(tmp_path: Path) -> None:
+    """Highly ambiguous legacy fragmentation must keep native fragments that expand under folding."""
     archive = natural_archive(tmp_path, ["straße\u1dc0" + "a" * 20,
                                          " ".join("a" * size for size in range(1, 21))], legacy=True)
     assert [row.message_pk for row in search_page(archive, "strasse" + "a" * 20).results] == [1]
 
 
-def test_fragment_search_bounds_dead_end_exploration() -> None:
-    """An absent repetitive token cannot explore exponentially many native fragment paths."""
+def test_fragment_search_is_polynomial_and_exact_for_absent_fragments() -> None:
+    """A long repetitive word issues one vocabulary lookup, and absent fragments add no candidates."""
     with sqlite3.connect(":memory:") as database:
         database.execute("ATTACH ':memory:' AS search")
         database.execute("CREATE VIRTUAL TABLE search.message_fts USING fts5(content)")
@@ -62,10 +63,46 @@ def test_fragment_search_bounds_dead_end_exploration() -> None:
         vocabulary = search_vocabulary(database, None, False)
         statements: list[str] = []
         database.set_trace_callback(statements.append)
-        compiled = compile_text("a" * 40 + "z", vocabulary, database, False)
-        assert compiled.split_match
-        assert sum(statement.startswith("SELECT term FROM search_words_")
-                   for statement in statements) <= 64
+        word = "a" * 40 + "z"
+        assert compile_text(word, vocabulary, database, False).split_match == ""
+        assert sum(statement.startswith("SELECT term FROM search_words_") for statement in statements) <= 2
+        database.execute("INSERT INTO search.message_fts VALUES ('aaaaaaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaaaaaa z')")
+        compiled = compile_text(word, search_vocabulary(database, None, False), database, False)
+        assert compiled.split_match.count('"') <= 2 * 2 * len(word) * len(word)
+        assert database.execute(
+            "SELECT count(*) FROM search.message_fts WHERE message_fts MATCH ?", (compiled.split_match,),
+        ).fetchone() == (1,)
+
+
+def test_one_letter_prefix_documents_are_not_split_candidates(tmp_path: Path) -> None:
+    """Prefix-rich mail is not read for split checks, while a three-fragment legacy word still matches."""
+    with sqlite3.connect(":memory:") as database:
+        database.execute("ATTACH ':memory:' AS search")
+        database.execute("CREATE VIRTUAL TABLE search.message_fts USING fts5(content)")
+        database.executemany("INSERT INTO search.message_fts VALUES (?)",
+                             [("g ga gan gand ganda gandal and lf alf dalf",)] * 500)
+        database.execute("INSERT INTO search.message_fts VALUES (?)", ("ga\u1dc0nda\u1dc0lf",))
+        compiled = compile_text("gandalf", search_vocabulary(database, None, False), database, False)
+        assert database.execute(
+            "SELECT rowid FROM search.message_fts WHERE message_fts MATCH ?", (compiled.split_match,),
+        ).fetchall() == [(501,)]
+    archive = natural_archive(tmp_path, ["g ga gan gand ganda gandal", "ga\u1dc0nda\u1dc0lf", "gandalf"],
+                              legacy=True)
+    assert [row.message_pk for row in search_page(archive, "GANDALF").results] == [3, 2]
+    assert search_result_count(archive, parse_query("gandalf")) == 2
+
+
+def test_stored_vocabulary_is_reused_by_a_new_process(tmp_path: Path) -> None:
+    """A later process loads the stored scan for an unchanged index instead of rescanning it."""
+    archive = natural_archive(tmp_path, ["unusualstraße"], legacy=True)
+    assert len(search_page(archive, "unusualstrasse").results) == 1
+    search_text._VOCABULARIES.clear()
+    with pytest.MonkeyPatch.context() as patch:
+        def rescanned(*_args: object) -> list[search_text.WordVariant]:
+            raise AssertionError("unchanged index was rescanned")
+        patch.setattr(search_text, "_scan_terms", rescanned)
+        assert len(search_page(archive, "unusualstrasse").results) == 1
+    assert len(list(search_text.vocabulary_cache_directory().glob("*.json"))) <= search_text.STORED_VOCABULARIES
 
 
 def natural_archive(root: Path, bodies: list[str], *, legacy: bool = False,
@@ -270,3 +307,25 @@ def test_cli_query_preserves_literal_quotation(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout.startswith("2 ")
     assert "\n1 " not in result.stdout
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_date_walk_for_frequent_words_matches_sorted_hits(tmp_path: Path, legacy: bool) -> None:
+    """Frequent-word pages walked in date order equal pages from sorting every hit, at every offset."""
+    bodies = ["co᷀operate alpha", "cooperate", "co operate", "alpha co᷀operate beta", "a᷀bc",
+              "abc cooperate", "unrelated", "COOPÉRATE", "co᷀operate"]
+    archive = natural_archive(tmp_path, bodies, legacy=legacy)
+
+    def pages(query: str) -> list[list[int]]:
+        return [[row.message_pk for row in search_page(archive, query, offset=offset, limit=2).results]
+                for offset in range(0, len(bodies) + 1, 2)]
+
+    for query in ("cooperate", "abc", "alpha cooperate", "co", '"co operate"'):
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(mailsearch, "_frequent_text", lambda *_args: False)
+            sorted_hits = pages(query)
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(mailsearch, "DATE_WALK_MINIMUM_HITS", 1)
+            walked = pages(query)
+        assert walked == sorted_hits, query
+    assert pages("cooperate")[0] == [9, 8]

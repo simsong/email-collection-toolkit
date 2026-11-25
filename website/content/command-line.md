@@ -94,4 +94,5 @@ Most people need none of these. Never put passwords in environment variables.
 | `MAILARCHIVER_CLAMAV_UPDATES` | Where downloaded virus definitions are kept |
 | `MAILARCHIVER_FRESHCLAM` | Path to the ClamAV `freshclam` updater |
 | `MAILARCHIVER_CLAMAV_CERTIFICATES` | Certificates for checking virus definitions |
+| `MAILARCHIVER_SEARCH_VOCABULARY_CACHE` | Folder for stored search-index word lists (default: the user cache folder) |
 | `SSL_CERT_FILE`, `SSL_CERT_DIR` | Extra trusted certificates for private IMAP servers |

@@ -1,6 +1,6 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-.PHONY: benchmark-import benchmark-name-resolution check compare-apple-mail data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
+.PHONY: benchmark-import benchmark-name-resolution benchmark-search check compare-apple-mail data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
 
 # Windows reader uses x64 CPython and the same GUI as macOS. MSIX_TEST_CERT_PFX_BASE64
 # supplies the pinned test key only to the explicit signer; never to the payload build.
@@ -474,6 +474,16 @@ benchmark-name-resolution:
 BENCH_MB ?= 50
 benchmark-import:
 	uv run python scripts/benchmark_import.py --megabytes $(BENCH_MB) $(if $(BENCH_LABEL),--label "$(BENCH_LABEL)") $(if $(BENCH_WORKERS),--workers $(BENCH_WORKERS))
+
+# End-to-end desktop search latency on an existing archive, opened read-only;
+# appends to benchmarks/search/results.jsonl. BENCH_ARCHIVE (required) names the
+# archive, BENCH_QUERIES the words (default gandalf), BENCH_VOCABULARY=empty times
+# a never-searched index, BENCH_LABEL tags the row. Fails if a latency goal is missed.
+BENCH_QUERIES ?= gandalf
+BENCH_VOCABULARY ?= stored
+benchmark-search:
+	@test -n "$(BENCH_ARCHIVE)" || { echo "set BENCH_ARCHIVE=/path/to/archive"; exit 2; }
+	uv run python scripts/benchmark_search.py --check --archive "$(BENCH_ARCHIVE)" --vocabulary-cache $(BENCH_VOCABULARY) $(if $(BENCH_LABEL),--label "$(BENCH_LABEL)") $(BENCH_QUERIES)
 
 data-quality-summary:
 	@test -d "$(AUDIT_OUTPUT)" || { echo "missing audit output directory: $(AUDIT_OUTPUT)"; exit 2; }

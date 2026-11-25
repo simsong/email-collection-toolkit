@@ -102,6 +102,7 @@ from .gui_service import (
     search_page,
     search_suggestions,
     searchable_message_count,
+    warm_search,
     write_attachment,
     write_message,
     write_messages_zip,
@@ -937,6 +938,7 @@ class GuiApi:
         self._suggestion_closed = False
         self._tree_cache: dict[bool, list[dict[str, Any]]] = {}
         self._message_count: int | None = None
+        self._search_warmed = False
         self._ingest_window_lock = Lock()
         self._ingest_window_api: IngestWindowApi | None = None
 
@@ -963,6 +965,11 @@ class GuiApi:
         ready = self.archive is not None and _is_archive(self.archive)
         if ready and self._message_count is None:
             self._message_count = searchable_message_count(self._archive())
+            if not self._search_warmed:
+                # Opening an index can need a one-time vocabulary scan; start it before the first
+                # search, once per window so repeated publishes during ingest do not rescan.
+                self._search_warmed = True
+                Thread(target=warm_search, args=(self._archive(),), name="search-warmup", daemon=True).start()
         return GuiStatus(
             archive=(
                 str(self.document.display_path)

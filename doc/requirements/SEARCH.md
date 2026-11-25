@@ -117,6 +117,15 @@ Canonical and merged alias names have the same expansion. Email substring querie
 remain address-specific; organization names retain their domain-based membership.
 `make test-gui-processing` verifies live merge and separation behavior.
 
+## Word search latency
+
+On a warm machine, a single-word desktop search shows its first page in under
+1 s and completes page plus count in under 5 s, including the first search after
+launch on an index searched before. Legacy-index compatibility must not read the
+text of every message that merely contains a one-letter fragment of the word.
+`make benchmark-search` measures this end to end on a real archive; the
+natural-search tests check candidate pruning and date-walk equivalence.
+
 ## Autocomplete responsiveness
 
 Superseded typing cancels outstanding SQLite suggestion work. Only the current

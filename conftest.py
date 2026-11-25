@@ -29,3 +29,11 @@ def pinned_scanner_definitions() -> Iterator[None]:
             else:
                 patch.setenv(DATABASE_ENV, str(definitions.directory))
         yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolated_search_vocabulary_cache(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """Keep stored legacy-vocabulary scans out of the developer's user cache."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("MAILARCHIVER_SEARCH_VOCABULARY_CACHE", str(tmp_path_factory.mktemp("search-vocabulary")))
+        yield

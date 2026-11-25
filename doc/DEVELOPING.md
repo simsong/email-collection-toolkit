@@ -137,6 +137,14 @@ Use `BENCH_MB=5` for a quick run. Compare rows only from the same machine. See
 [the benchmark README](../benchmarks/import/README.md) for the corpus mix
 and recorded results.
 
+`make benchmark-search BENCH_ARCHIVE=<archive>` times desktop text search end to
+end on an existing archive, opened read-only. Each query (`BENCH_QUERIES`,
+default `gandalf`) runs in a fresh process: first page, count, then both warm.
+`BENCH_VOCABULARY=empty` times an index never searched before. Rows go to
+`benchmarks/search/results.jsonl`; the target fails when a first page takes 1 s
+or a first page plus count takes 5 s. See
+[the search benchmark README](../benchmarks/search/README.md).
+
 ## Outlook PST and OST
 
 Build the helpers with `make pst-importer mcti-scan pff-converter`. Rust and
@@ -297,7 +305,7 @@ environment variables. Legacy `MAILARCHIVER_CLAMD*` variables are unused.
 | `ruff`, `pylint`, `ty`, `pyright`, `lint`, `types`, `syntax-check` | Individual static checks |
 | `rust-check`, `rust-fmt`, `rust-lock`, `rust-toolchain` | Rust workspace checks, formatting, and dependencies |
 | `runtime-license-check`, `runtime-license-bundle`, `copyright-check`, `distribution-check` | License and distribution audits |
-| `benchmark-import`, `benchmark-name-resolution` | Benchmarks |
+| `benchmark-import`, `benchmark-name-resolution`, `benchmark-search` | Benchmarks |
 
 The remaining `test-*`, `fixture-*`, smoke, and golden-update targets are
 described in [End-to-end testing](END_TO_END_TESTING.md),
