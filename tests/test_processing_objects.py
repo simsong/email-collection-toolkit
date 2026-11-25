@@ -23,7 +23,7 @@ from mailarchiver.mailsearch import read_message_bytes
 from mailarchiver.processing.objects import collect_objects
 from mailarchiver.processing.registry import fingerprint, load_processors
 from mailarchiver.processing.runtime import run
-from mailarchiver.processing.store import connect, submit
+from mailarchiver.processing.store import connect, snapshot, submit
 from mailarchiver.standalone_verify import verify_archive
 from tests.test_cli_processing import HEADER, cli, ingest
 from tests.test_processing import MESSAGE, plugin
@@ -31,6 +31,35 @@ from tests.test_processing import MESSAGE, plugin
 
 def objects(archive: Path) -> set[str]:
     return {path.name for path in (archive / "objects").iterdir()}
+
+
+def test_snapshot_does_not_replace_invalid_cached_object(tmp_path: Path) -> None:
+    """PROCESSING: an invalid shared input is reported and preserved for diagnosis."""
+    source = tmp_path / "source.eml"
+    source.write_bytes(b"original bytes")
+    reference = snapshot(tmp_path, source)
+    reference.path.write_bytes(b"damaged working bytes")
+    with pytest.raises(ValueError, match="existing processor object failed SHA-256 verification"):
+        snapshot(tmp_path, source)
+    assert reference.path.read_bytes() == b"damaged working bytes"
+    assert source.read_bytes() == b"original bytes"
+    assert objects(tmp_path) == {reference.sha256}
+
+
+def test_failed_duplicate_ingest_retains_invalid_cached_object(tmp_path: Path) -> None:
+    """PROCESSING: real ingest shutdown preserves the working bytes it refused to reuse."""
+    raw = HEADER + b"\r\noriginal\r\n"
+    archive, _ = ingest(tmp_path, raw)
+    source = tmp_path / "duplicate.eml"
+    source.write_bytes(raw)
+    cached = archive / "objects" / hashlib.sha256(raw).hexdigest()
+    cached.write_bytes(b"damaged working bytes")
+    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive),
+                             "ingest", "--no-scan", str(source)], capture_output=True, text=True, check=False, timeout=60)
+    assert result.returncode != 0
+    assert "existing processor object failed SHA-256 verification" in result.stderr
+    assert cached.read_bytes() == b"damaged working bytes"
+    assert read_message_bytes(archive, 1) == raw and not verify_archive(archive)
 
 
 def test_completed_local_ingest_reprocesses_from_canonical_bytes(tmp_path: Path) -> None:
@@ -102,7 +131,7 @@ def test_collection_preserves_unknown_files_and_symlink_targets(tmp_path: Path) 
             (directory / ("b" * 64)).symlink_to(target)
         except OSError:
             pytest.skip("platform cannot create fixture symlinks")
-        (directory / ("c" * 64)).write_bytes(b"orphan")
+        (directory / hashlib.sha256(b"orphan").hexdigest()).write_bytes(b"orphan")
         (directory / '.object-interrupted').write_bytes(b"incomplete")
         assert collect_objects(database, archive) == 2
         assert unknown.read_text() == "keep"
@@ -181,7 +210,7 @@ def test_collection_rejects_uncommitted_processing_records(tmp_path: Path) -> No
     with connect(archive, create=True) as database:
         directory = archive / "objects"
         directory.mkdir()
-        candidate = directory / ("a" * 64)
+        candidate = directory / hashlib.sha256(b"orphan").hexdigest()
         candidate.write_bytes(b"orphan")
         database.execute("BEGIN")
         with pytest.raises(ValueError, match="committed processing"):

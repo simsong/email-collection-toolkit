@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ctypes
 from importlib import import_module
+import logging
 import os
 from pathlib import Path
 import subprocess
@@ -172,20 +173,34 @@ def open_external_url(destination: str) -> None:
 def post_window_event(window: Any, event: str) -> None:
     """Post a state-change event without making a producer wait for a webview reply."""
     import json  # pylint: disable=import-outside-toplevel
-    script = f"window.dispatchEvent(new Event({json.dumps(event)}));"
+    post_window_script(window, f"window.dispatchEvent(new Event({json.dumps(event)}));")
+
+
+def post_window_script(window: Any, script: str, *, require_loaded: bool = True) -> None:
+    """Queue one-way delivery; JavaScript owns API-reply acknowledgement and its deadline."""
     if not isinstance(window, import_module("webview").Window):
         window.run_js(script)  # Non-native protocol consumers retain their own delivery boundary.
-    elif window.events.loaded.is_set() and not window.events.closed.is_set():
+    elif (not require_loaded or window.events.loaded.is_set()) and not window.events.closed.is_set():
         if sys.platform == "darwin":
             from webview.platforms.cocoa import BrowserView  # pylint: disable=import-outside-toplevel,import-error
             view = BrowserView.instances.get(window.uid)
             if view is not None:
-                import_module("PyObjCTools.AppHelper").callAfter(
-                    lambda: None if window.events.closed.is_set() else view.webview.evaluateJavaScript_completionHandler_(script, None))
+                def deliver() -> None:
+                    try:
+                        if not window.events.closed.is_set() and view.webview is not None:
+                            view.webview.evaluateJavaScript_completionHandler_(script, None)
+                    except Exception:  # pylint: disable=broad-exception-caught
+                        logging.getLogger(__name__).warning("Window update could not be delivered; refresh its status.")
+                import_module("PyObjCTools.AppHelper").callAfter(deliver)
         elif sys.platform == "win32":
             native = window.native
             if native is not None and not native.IsDisposed:
-                native.BeginInvoke(import_module("System").Action(
-                    lambda: None if native.IsDisposed else native.webview.ExecuteScriptAsync(script)))
+                def deliver_windows() -> None:
+                    try:
+                        if not window.events.closed.is_set() and not native.IsDisposed:
+                            native.webview.ExecuteScriptAsync(script)
+                    except Exception:  # pylint: disable=broad-exception-caught
+                        logging.getLogger(__name__).warning("Window update could not be delivered; refresh its status.")
+                native.BeginInvoke(import_module("System").Action(deliver_windows))
         else:
             window.run_js(script)

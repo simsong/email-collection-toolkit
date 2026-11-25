@@ -21,7 +21,7 @@ import webview
 
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
 from mailarchiver.clamav_definitions import UPDATE_ENV, UPDATER_ENV
-from mailarchiver.gui_app import APPLICATION_VERSION, GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events, macos_import_picker, macos_owner_rules
+from mailarchiver.gui_app import APPLICATION_VERSION, GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_desktop_events, macos_import_picker, macos_owner_rules
 from mailarchiver.desktop_platform import TITLEBAR_VERSION_ID
 from mailarchiver.loopback import LoopbackAssetServer
 from mailarchiver.identity import APPLICATION_NAME
@@ -151,6 +151,48 @@ def check_document_path(window: webview.Window, path: Path | None) -> None:
 
     AppHelper.callAfter(inspect)
     assert finished.wait(5) and not errors, errors
+
+
+def check_ingest_wake_refresh(application: PyWebViewApplication, ingest: webview.Window) -> None:
+    """Desktop: a workspace wake reaches the open Ingests bridge without focus."""
+    native = ingest.native
+    assert native is not None
+    hidden = Event()
+
+    def order_out() -> None:
+        native.orderOut_(None)
+        hidden.set()
+
+    AppHelper.callAfter(order_out)
+    assert hidden.wait(5), "Ingests window did not order out"
+    assert evaluate_async(ingest, """(async () => {
+        await refreshHistory();
+        const original = pywebview.api.history;
+        let reads = 0;
+        pywebview.api.history = () => { reads++; return original(); };
+        window.wakeRefresh = new Promise(resolve => {
+            window.addEventListener("mailarchiver-status-changed", async () => {
+                await refreshHistory();
+                pywebview.api.history = original;
+                resolve(reads > 0 && document.getElementById("error").hidden && !document.hasFocus());
+            }, {once: true});
+        });
+        return !document.hasFocus();
+    })()""") is True
+    appkit = import_module("AppKit")
+    workspace = appkit.NSWorkspace.sharedWorkspace()
+    center = workspace.notificationCenter()
+    returned = Event()
+
+    def wake() -> None:
+        center.postNotificationName_object_(appkit.NSWorkspaceDidWakeNotification, workspace)
+        returned.set()
+
+    with application._lock:  # pylint: disable=protected-access
+        AppHelper.callAfter(wake)
+        assert returned.wait(3), "Workspace wake blocked Cocoa on the application lock"
+    assert evaluate_async(ingest, "window.wakeRefresh") is True
+    AppHelper.callAfter(native.orderFront_, None)
 
 
 def check_antivirus_menu(application: PyWebViewApplication, about: webview.Window) -> None:
@@ -296,7 +338,7 @@ def main() -> None:
     server = LoopbackAssetServer(GUI_DIRECTORY)
     controller = ApplicationController(ApplicationPreferencesStore(Path(os.environ[PROBE_PREFERENCES_ENV])))
     application = PyWebViewApplication(controller, server)
-    install_macos_document_events(application)
+    install_desktop_events(application)
     application.create_about_window()
     about = webview.windows[0]
     failures: list[str] = []
@@ -698,6 +740,7 @@ def main() -> None:
             evaluate_async(ingest, "refreshHistory().then(() => true)")
             assert ingest.evaluate_js("document.getElementById('import-directory').textContent") == "Import Directory…"
             assert not ingest.evaluate_js("document.getElementById('import-directory').disabled")
+            check_ingest_wake_refresh(application, ingest)
             document_id = document.descriptor.document_id
             lease = WriterLease.acquire(document.path, document.descriptor.identity, "test", "button-test", "test")
             controller.begin_ingest(document_id, IngestJob(operation_id="button-test", owner_window_id=api.search_window.window_id), lease)

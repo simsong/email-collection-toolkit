@@ -33,7 +33,6 @@ from contextlib import contextmanager, nullcontext
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from importlib import import_module
-from importlib.metadata import version
 from pathlib import Path
 from queue import Empty, SimpleQueue
 from threading import Event, Lock, RLock, Thread
@@ -48,12 +47,13 @@ from webview.menu import Menu, MenuAction, MenuSeparator
 
 from .file_drag import FILE_DRAGS, install_file_drag
 from .desktop_platform import copy_windows_text, drag_windows_file, open_export, open_external_url, refresh_windows_menu, set_macos_document_path, set_macos_titlebar_version, startup_error, windows_webview
-from .identity import APPLICATION_NAME
+from .identity import APPLICATION_NAME, APPLICATION_VERSION
 from .build_info import BUILD_INFO, BuildInfo
 from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argument
 from .imap_protocol import ImapAuthenticationError, ImapPaused, ImapSession
 from .imap_credentials import save_password
 from .imap_models import ImapAccount
+from .desktop_lifecycle import DesktopLifecycle
 from .search_completion import SearchSuggestions
 from .processor_graph import ProcessorGraphStatus, processor_graph
 from .updates import UpdateChannel, UpdateService, UpdateStatus, default_channel
@@ -123,7 +123,6 @@ GUI_DIRECTORY = (Path(getattr(sys, "_MEIPASS")) if getattr(sys, "frozen", False)
 E2E_DRIVER = Path(__file__).parents[2] / "e2e_tests" / "gui_driver.js"
 DEFAULT_PAGE_SIZE = 100
 APPLICATION_ICON = GUI_DIRECTORY / "icons" / "rainbow-post-192.png"
-APPLICATION_VERSION = version("mailarchiver")
 EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 INTERNET_CHECK_URL = "https://www.example.com/"
 QUIT_TIMEOUT_SECONDS = 5.0
@@ -186,6 +185,7 @@ class ApplicationNotice(BaseModel):
     severity: Literal["information", "warning", "error"]
     message: str
     window_id: str | None = None
+    imap_source_id: str | None = None
 
 
 class ApplicationTask(BaseModel):
@@ -634,6 +634,11 @@ def macos_owner_rules(destination: Path, defaults: OwnerRules) -> OwnerRules | N
     return result.result()
 
 
+def _ingest_window_parameters(status_id: str | None, imap_source_id: str | None) -> list[tuple[str, str]]:
+    return [(key, value) for key, value in (("status", status_id), ("imap_password", imap_source_id))
+            if value is not None]
+
+
 class IngestWindowApi:
     """History and explicit import actions bound to one archive."""
 
@@ -1022,23 +1027,26 @@ class GuiApi:
         active = bool(self.document and self.document.ingest_job) or bool(status and status.state == "running")
         return GuiIngestOverview(status=status, active=active).model_dump(mode="json")
 
-    def open_ingest_window(self, status_id: str | None = None) -> bool:
+    def open_ingest_window(self, status_id: str | None = None, imap_source_id: str | None = None) -> bool:
         """Open or focus the ingest browser shared by this archive document."""
         if self.e2e_directory is not None:
             return True
         if self.application is not None and self.document is not None:
-            return self.application.open_ingest_window(self.document, status_id)
+            return self.application.open_ingest_window(self.document, status_id, imap_source_id)
         with self._ingest_window_lock:
             api = self._ingest_window_api
             if api is not None and api.window is not None:
                 api.archive = self.archive
                 if status_id is not None:
                     api.window.run_js(f"window.selectIngest({json.dumps(status_id)});")
+                if imap_source_id is not None:
+                    api.window.run_js(f"window.requestImapPassword?.({json.dumps(imap_source_id)});")
                 api.window.restore()
                 api.window.show()
                 return True
             api = IngestWindowApi(self.archive)
-            selected = "" if status_id is None else f"?status={status_id}"
+            parameters = _ingest_window_parameters(status_id, imap_source_id)
+            selected = f"?{urlencode(parameters)}" if parameters else ""
             window = webview.create_window(
                 "Email Collection Toolkit — Ingests",
                 str(GUI_DIRECTORY / f"ingests.html{selected}"),
@@ -1764,6 +1772,7 @@ class PyWebViewApplication:
         self._notices: list[ApplicationNotice] = []
         self._pending_notices: SimpleQueue[ApplicationNotice] = SimpleQueue()
         self._connectivity: ConnectivityMonitor | None = None
+        self._lifecycle: DesktopLifecycle | None = None
         self._status_observers: dict[str, PathObserver] = {}
         self._menu_observer: Any = None
         self._lock = RLock()
@@ -2071,8 +2080,9 @@ class PyWebViewApplication:
         self._refresh_menus()
         return True
 
-    def add_notice(self, severity: Literal["information", "warning", "error"], message: str, *, window_id: str | None = None) -> None:
-        notice = ApplicationNotice(severity=severity, message=message, window_id=window_id)
+    def add_notice(self, severity: Literal["information", "warning", "error"], message: str, *,
+                   window_id: str | None = None, imap_source_id: str | None = None) -> None:
+        notice = ApplicationNotice(severity=severity, message=message, window_id=window_id, imap_source_id=imap_source_id)
         with self._lock:
             self._notices.append(notice)
             self._notices = self._notices[-100:]
@@ -2202,7 +2212,17 @@ class PyWebViewApplication:
         activity = getattr(self._sparkle, "activity_changed", None)
         if activity is not None:
             activity()
-        for window in self._registered_windows():
+        self._post_status_change(self._registered_windows())
+
+    def _lifecycle_status_changed(self) -> None:
+        # Cocoa may need to finish opening a window while a worker holds the
+        # application lock. The native window list suffices for this refresh.
+        if not self._quitting:
+            self._post_status_change(tuple(webview.windows))
+
+    @staticmethod
+    def _post_status_change(windows: tuple[webview.Window, ...]) -> None:
+        for window in windows:
             try:
                 post_window_event(window, "mailarchiver-status-changed")
             except Exception:  # pylint: disable=broad-exception-caught
@@ -2601,14 +2621,16 @@ class PyWebViewApplication:
         notice_task = task or ApplicationTask(name=f"Import for {document.display_path}")
         notice_task.window_id = job.owner_window_id if job is not None else ""
 
-        def notice(severity: Literal["information", "warning", "error"], message: str) -> None:
+        def notice(severity: Literal["information", "warning", "error"], message: str, *,
+                   imap_source_id: str | None = None) -> None:
             current = document.ingest_job
             if current is not None and current.operation_id == operation_id:
                 notice_task.window_id = current.owner_window_id
-            self.add_notice(severity, message, window_id=notice_task.window_id)
+            self.add_notice(severity, message, window_id=notice_task.window_id, imap_source_id=imap_source_id)
 
         try:
-            run_ingest(request, lease, stop_event=stop, outcome=outcome, terminal=False)
+            run_ingest(request, lease, stop_event=stop, outcome=outcome, terminal=False,
+                       imap_transport=self._lifecycle.transport if self._lifecycle is not None else None)
             try:
                 if request.roots:
                     remember_import_directory(request.archive, [Path(root) for root in request.roots])
@@ -2650,7 +2672,7 @@ class PyWebViewApplication:
         elif error is None:
             notice("information", f"Import completed for {document.display_path}")
         elif isinstance(error, ImapAuthenticationError):
-            notice("error", str(error))
+            notice("error", str(error), imap_source_id=error.source_id)
         elif isinstance(error, ConfigurationError):
             notice("warning", str(error))
         else:
@@ -2878,7 +2900,8 @@ class PyWebViewApplication:
         self._refresh_menus()
         return True
 
-    def open_ingest_window(self, document: ArchiveDocument, status_id: str | None = None) -> bool:
+    def open_ingest_window(self, document: ArchiveDocument, status_id: str | None = None,
+                           imap_source_id: str | None = None) -> bool:
         if document.path is None:
             return False
         document_id = document.descriptor.document_id
@@ -2891,7 +2914,7 @@ class PyWebViewApplication:
                     f"{APPLICATION_NAME} — Ingests — {document.display_path}",
                     self.asset_url(
                         "ingests.html",
-                        [("status", status_id)] if status_id is not None else None,
+                        _ingest_window_parameters(status_id, imap_source_id),
                     ),
                     js_api=WindowBridge(api, INGEST_BRIDGE_METHODS),
                     width=1050,
@@ -2922,6 +2945,8 @@ class PyWebViewApplication:
         if reused is not None:
             if status_id is not None:
                 reused.run_js(f"window.selectIngest({json.dumps(status_id)});")
+            if imap_source_id is not None:
+                reused.run_js(f"window.requestImapPassword?.({json.dumps(imap_source_id)});")
             reused.restore()
             reused.show()
             return True
@@ -3199,6 +3224,9 @@ class PyWebViewApplication:
             release(lambda key=key, observer=observer: self._close_status_observer(key, observer))
         if self._connectivity is not None:
             release(self._connectivity.close)
+        if self._lifecycle is not None:
+            release(self._lifecycle.close)
+            self._lifecycle = None
         if self.asset_server is not None:
             release(self.asset_server.close)
         if cleanup_errors:
@@ -3471,8 +3499,11 @@ def configure_macos_application() -> None:
     install_cocoa_reply_boundary()
 
 
-def install_macos_document_events(application: PyWebViewApplication) -> None:
-    """Extend pywebview's delegate without replacing its quit/ingest safeguards."""
+def install_desktop_events(application: PyWebViewApplication) -> None:
+    """Install common lifecycle handling and the platform's document events."""
+    if application._lifecycle is None:
+        application._lifecycle = DesktopLifecycle(application._lifecycle_status_changed)
+        application._lifecycle.start(sys.platform)
     if sys.platform != "darwin":
         return
     from webview.platforms.cocoa import BrowserView  # pylint: disable=import-outside-toplevel
@@ -3603,7 +3634,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     else:
         controller = ApplicationController()
         application = PyWebViewApplication(controller, asset_server, workers_override=args.workers)
-        install_macos_document_events(application)
+        install_desktop_events(application)
         startup = controller.startup((archive,) if archive is not None else (), new=new_setup)
         prompt_for_archive = any(
             controller.document(session.document_id).descriptor.untitled

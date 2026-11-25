@@ -19,8 +19,10 @@ import errno
 import imaplib
 import logging
 import re
+import socket
 import ssl
 from collections.abc import Sequence
+from concurrent.futures import Future
 from email.utils import parsedate_to_datetime
 from types import TracebackType
 from typing import Protocol, cast
@@ -31,6 +33,8 @@ from .imap_models import ImapAccount, ImapMailbox, ImapMessageMetadata
 
 IMAP_TIMEOUT = 30
 UID_BATCH_SIZE = 256
+LITERAL_LENGTH = re.compile(rb"\{([0-9]+)\}$")
+BODY_LITERAL_LENGTH = re.compile(rb"[ (]BODY\[\] \{([0-9]+)\}$", re.IGNORECASE)
 
 
 class ImapAuthenticationError(ValueError):
@@ -71,6 +75,13 @@ class ImapPaused(ConnectionError):
     """A lost IMAP connection requires a fresh session and an explicit resume."""
 
 
+class ImapSessionExpired(ImapPaused):
+    """A desktop power transition retired this transport."""
+
+    def __init__(self) -> None:
+        super().__init__("Computer slept during the IMAP session. Saved progress is retained.")
+
+
 class ImapServerBusy(ImapPaused):
     """A temporary server refusal permits another connection attempt after backoff."""
 
@@ -102,6 +113,8 @@ def connection_interrupted(error: BaseException) -> bool:
     error = connection_cause(error)
     return isinstance(error, (TimeoutError, ConnectionError,
                               ssl.SSLEOFError, ssl.SSLZeroReturnError)) or (
+        isinstance(error, socket.gaierror) and error.errno in {
+            socket.EAI_AGAIN, socket.EAI_NONAME, socket.EAI_FAIL}) or (
         isinstance(error, OSError) and error.errno in {
             errno.ENETDOWN, errno.ENETRESET, errno.ENETUNREACH, errno.EHOSTUNREACH,
             getattr(errno, "EHOSTDOWN", errno.EHOSTUNREACH)}) or (
@@ -111,11 +124,6 @@ def connection_interrupted(error: BaseException) -> bool:
 class ImapToken(BaseModel):
     value: bytes | None = None
     children: list[ImapToken] = Field(default_factory=list)
-
-
-class ImapBody(BaseModel):
-    metadata: bytes
-    raw: bytes
 
 
 class _ServerBye(imaplib.IMAP4.abort):
@@ -187,7 +195,7 @@ def response_tokens(data: Sequence[bytes | tuple[bytes, bytes] | None]) -> list[
     for part in data:
         if isinstance(part, tuple):
             prefix, literal = part
-            pieces.append(re.sub(rb"\{[0-9]+\}$", b"", prefix) + quoted(literal))
+            pieces.append(LITERAL_LENGTH.sub(b"", prefix) + quoted(literal))
         elif isinstance(part, bytes):
             pieces.append(part)
     raw = b" ".join(pieces)
@@ -279,45 +287,49 @@ def message_metadata(data: Sequence[bytes | tuple[bytes, bytes] | None], mailbox
 
 def body_literal(data: Sequence[bytes | tuple[bytes, bytes] | None], uid: int) -> bytes:
     """Verify a complete FETCH envelope without parsing or quoting its body bytes."""
-    literals: list[ImapBody] = []
-    stripped: list[bytes | tuple[bytes, bytes] | None] = []
-    for part in data:
-        if isinstance(part, tuple):
-            prefix, raw = part
-            literals.append(ImapBody(metadata=prefix, raw=raw))
-            stripped.append((prefix, b""))
-        else:
-            stripped.append(part)
+    literals = [(index, part) for index, part in enumerate(data) if isinstance(part, tuple)]
     if len(literals) != 1:
         raise RuntimeError("IMAP body disappeared or had an unexpected identity; retry synchronization")
-    matches = 0
-    tokens = response_tokens(stripped)
-    for sequence, fields in zip(tokens[::2], tokens[1::2], strict=True):
-        if sequence.value is None or not sequence.value.isdigit():
-            raise ValueError("Invalid IMAP FETCH sequence")
-        fetched_uid: int | None = None
-        size: int | None = None
-        has_body = False
-        for key, value in zip(fields.children[::2], fields.children[1::2], strict=True):
-            name = (key.value or b"").upper()
-            if name == b"UID":
-                fetched_uid = int(value.value or b"0")
-            elif name == b"RFC822.SIZE":
-                size = int(value.value or b"-1")
-            elif name == b"BODY[]":
-                has_body = value.value == b""
-        if fetched_uid == uid and has_body:
-            if size != len(literals[0].raw):
-                raise RuntimeError("IMAP returned an incomplete message body")
-            matches += 1
-    if matches != 1:
+    index, (prefix, raw) = literals[0]
+    length = BODY_LITERAL_LENGTH.search(prefix)
+    declared = int(length[1]) if length else None
+    received = len(raw)
+    # imaplib appends the FETCH trailer immediately after the literal tuple.
+    # Read the UID from this FETCH only, independent of unsolicited responses.
+    tokens = response_tokens([(prefix, b""), *data[index + 1:index + 2]])
+    if len(tokens) != 2 or not (tokens[0].value or b"").isdigit():
+        raise ValueError("Invalid IMAP FETCH sequence")
+    fields = tokens[1].children
+    fetched_uid: int | None = None
+    reported: int | None = None
+    has_body = False
+    for key, value in zip(fields[::2], fields[1::2], strict=True):
+        name = (key.value or b"").upper()
+        if name == b"UID":
+            fetched_uid = int(value.value or b"0")
+        elif name == b"RFC822.SIZE" and value.value is not None and value.value.isdigit():
+            reported = int(value.value)
+        elif name == b"BODY[]":
+            has_body = value.value == b""
+    if fetched_uid != uid or not has_body:
         raise RuntimeError("IMAP body had an unexpected identity or FETCH envelope")
-    return literals[0].raw
+    if declared != received:
+        raise RuntimeError(
+            f"IMAP returned an incomplete message body (UID={uid}, RFC822.SIZE={reported}, "
+            f"declared literal length={declared}, received byte count={received})"
+        )
+    if reported is not None and reported != received:
+        logging.getLogger(__name__).warning(
+            "IMAP RFC822.SIZE mismatch for UID=%d: server reported %d bytes, BODY[] delivered %d bytes",
+            uid, reported, received,
+        )
+    return raw
 
 
 class ImapSession:
     def __init__(self, account: ImapAccount, password: str,
-                 context: ssl.SSLContext | None = None, *, authentication_only: bool = False) -> None:
+                 context: ssl.SSLContext | None = None, *, authentication_only: bool = False,
+                 session_expired: Future[None] | None = None) -> None:
         self.account = account
         self.password = password
         self.context = context or ssl.create_default_context()
@@ -325,11 +337,13 @@ class ImapSession:
         self.gmail = False
         self.utf8 = False
         self.authentication_only = authentication_only
+        self._session_expired = session_expired
 
     def __enter__(self) -> ImapSession:
         if not self.context.check_hostname or self.context.verify_mode != ssl.CERT_REQUIRED:
             raise ValueError("Verified TLS is required for IMAP")
         try:
+            self._check_transport()
             if any(character in self.password for character in "\r\n\x00"):
                 raise ValueError("IMAP passwords cannot contain CR, LF or NUL")
             if self.account.tls == "implicit":
@@ -338,8 +352,10 @@ class ImapSession:
             else:
                 client = _ImapClient(self.account.server, self.account.port, timeout=IMAP_TIMEOUT)
             self.client = client
+            self._check_transport()
             if self.account.tls == "starttls":
                 client.starttls(ssl_context=self.context)
+                self._check_transport()
             try:
                 if "AUTH=PLAIN" in client.capabilities:
                     credentials = b"\x00" + self.account.username.encode("utf-8") + b"\x00" + self.password.encode("utf-8")
@@ -357,11 +373,13 @@ class ImapSession:
                 raise ImapAuthenticationError(self.account, detail) from None
             if self.authentication_only:
                 return self
+            self._check_transport()
             status, capabilities = client.capability()
             self._initial_ok(status, capabilities, "CAPABILITY")
             advertised = b" ".join(item for item in capabilities if item).upper().split()
             self.gmail = b"X-GM-EXT-1" in advertised
             if {b"UTF8=ACCEPT", b"UTF8=ONLY"}.intersection(advertised):
+                self._check_transport()
                 # ENABLE checks imaplib's cached, potentially pre-login capabilities.
                 client.capabilities = tuple(item.decode("ascii") for item in advertised)
                 status, data = client.enable("UTF8=ACCEPT")
@@ -381,8 +399,7 @@ class ImapSession:
                 if (isinstance(error, _ServerRefusal) or closed) and temporary_refusal(error):
                     failure = ImapServerBusy(detail)
                 elif connection_interrupted(error) or closed:
-                    reason = "timed out" if isinstance(connection_cause(error), TimeoutError) else "was interrupted"
-                    failure = ImapPaused(f"IMAP connection {reason}. Saved progress is retained; use Resume when connected.")
+                    failure = self._transport_error(error)
                 else:
                     # Malformed replies remain protocol failures even when their
                     # text mentions capacity. Never retain an unsanitized cause.
@@ -402,7 +419,7 @@ class ImapSession:
         if client is not None:
             try:
                 # A timed-out buffered socket cannot be reused, even for LOGOUT.
-                if _error is None:
+                if _error is None and not self._expired():
                     client.logout()
             except (OSError, imaplib.IMAP4.error):
                 logging.getLogger(__name__).debug("IMAP logout did not complete", exc_info=True)
@@ -413,8 +430,13 @@ class ImapSession:
                 except OSError:
                     logging.getLogger(__name__).debug("IMAP socket cleanup did not complete", exc_info=True)
         if _error is not None and not isinstance(_error, ImapPaused) and (connection_interrupted(_error) or server_closed):
-            reason = "timed out" if isinstance(connection_cause(_error), TimeoutError) else "was interrupted"
-            raise ImapPaused(f"IMAP connection {reason}. Saved progress is retained; use Resume when connected.") from _error
+            raise self._transport_error(_error) from _error
+
+    def _transport_error(self, error: BaseException) -> ImapPaused:
+        if self._expired():
+            return ImapSessionExpired()
+        reason = "timed out" if isinstance(connection_cause(error), TimeoutError) else "was interrupted"
+        return ImapPaused(f"IMAP connection {reason}. Saved progress is retained; use Resume when connected.")
 
     @staticmethod
     def _ok(status: str, command: str) -> None:
@@ -433,7 +455,15 @@ class ImapSession:
     def _client(self) -> imaplib.IMAP4:
         if self.client is None:
             raise RuntimeError("IMAP session is not connected")
+        self._check_transport()
         return self.client
+
+    def _expired(self) -> bool:
+        return self._session_expired is not None and self._session_expired.done()
+
+    def _check_transport(self) -> None:
+        if self._expired():
+            raise ImapSessionExpired()
 
     def mailboxes(self) -> list[ImapMailbox]:
         status, data = self._client().list('""', '"*"')
@@ -482,16 +512,18 @@ class ImapSession:
         status, data = client.uid("FETCH", ",".join(str(uid) for uid in uids), fields)
         self._ok(status, "UID FETCH metadata")
         messages = message_metadata(data, mailbox, uids, self.gmail)
-        self.check_epoch(mailbox.uid_validity)
+        self._check_epoch(client, mailbox.uid_validity)
         return messages
 
-    def check_epoch(self, expected: int) -> None:
-        values = self._client().response("UIDVALIDITY")[1]
+    @staticmethod
+    def _check_epoch(client: imaplib.IMAP4, expected: int) -> None:
+        values = client.response("UIDVALIDITY")[1]
         if values and any(int(value) != expected for value in values if value is not None):
             raise RuntimeError("IMAP UIDVALIDITY changed during download; retry synchronization")
 
     def body(self, message: ImapMessageMetadata) -> bytes:
-        status, data = self._client().uid("FETCH", str(message.uid), "(UID RFC822.SIZE BODY.PEEK[])")
+        client = self._client()
+        status, data = client.uid("FETCH", str(message.uid), "(UID RFC822.SIZE BODY.PEEK[])")
         self._ok(status, "UID FETCH body")
-        self.check_epoch(message.uid_validity)
+        self._check_epoch(client, message.uid_validity)
         return body_literal(data, message.uid)

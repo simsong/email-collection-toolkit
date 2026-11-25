@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = "==3.12.*"
 
 [manifest]
@@ -505,7 +505,7 @@ wheels = [
 
 [[package]]
 name = "mailarchiver"
-version = "1.0.0a72"
+version = "1.0.0a96"
 source = { editable = "../../" }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -516,6 +516,7 @@ dependencies = [
     { name = "py7zr" },
     { name = "pycryptodomex" },
     { name = "pydantic" },
+    { name = "pyobjc-framework-systemconfiguration", marker = "sys_platform == 'darwin'" },
     { name = "pywebview" },
     { name = "pyyaml" },
     { name = "striprtf" },
@@ -532,6 +533,7 @@ requires-dist = [
     { name = "py7zr", specifier = ">=1.0.0" },
     { name = "pycryptodomex", specifier = ">=3.23.0" },
     { name = "pydantic", specifier = ">=2.13.4" },
+    { name = "pyobjc-framework-systemconfiguration", marker = "sys_platform == 'darwin'", specifier = ">=12.2.2" },
     { name = "pywebview", specifier = ">=6.2" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "striprtf", specifier = ">=0.0.29" },
@@ -919,6 +921,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c2/92/c304b7fc3a0fe7484a2a3cf25711e70c8fa2b6969d82f4010e35b9af2164/pyobjc_framework_security-12.2.2.tar.gz", hash = "sha256:33efab1ff7d18570148f8f3ddd44eca305f733aee00b9115d5263bef81018f65", size = 181827, upload-time = "2026-08-11T19:45:24.042Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/15/59/79722efbbb5cf6a313d364bb4faff39f9c165740e46acaa4d0a3d71c0f8c/pyobjc_framework_security-12.2.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:266f41995f2fc80660c8451bdb199a7e259a6cad02fbc1e0e2f69dd5576e2203", size = 41298, upload-time = "2026-08-11T19:41:27.54Z" },
+]
+
+[[package]]
+name = "pyobjc-framework-systemconfiguration"
+version = "12.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/50/14/4d4a417e7594a0ef919b804449cb3bb4b53194a5e940fd9e4fed304db51f/pyobjc_framework_systemconfiguration-12.2.2.tar.gz", hash = "sha256:9a82d5a1214e49697843f39e72718a5d606378999e94b5b4591bd429bb8e6ada", size = 63578, upload-time = "2026-08-11T19:45:35.295Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c5/35/cd0d8e0aec48ce38463089ab8fb7d4994310874c690a3cfdcf59b47d5d52/pyobjc_framework_systemconfiguration-12.2.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:8b19abf14ca878a2429432544f44921e16d1315868abe3e9827487ddd803d5b0", size = 21568, upload-time = "2026-08-11T19:42:41.987Z" },
 ]
 
 [[package]]

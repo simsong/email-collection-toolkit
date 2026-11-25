@@ -19,6 +19,7 @@ from typing import Self, cast
 from pydantic import BaseModel, ConfigDict
 
 WORKER_NUMBER: ContextVar[int | None] = ContextVar("mailfile_worker_number", default=None)
+PROCESSING_WORKER: ContextVar[bool] = ContextVar("processing_worker", default=False)
 
 
 class BoundedWorkers:

@@ -105,6 +105,12 @@ def collect_objects(database: sqlite3.Connection, archive: Path,
             except (OSError, ValueError):
                 # Unpublished/damaged originals remain even if their jobs ended.
                 continue
+        try:
+            with path.open("rb") as source:
+                if hashlib.file_digest(source, "sha256").hexdigest() != path.name:
+                    continue  # Keep mismatched bytes for diagnosis.
+        except OSError:
+            continue
         path.unlink()
         removed += 1
     if removed:

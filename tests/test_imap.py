@@ -22,15 +22,18 @@ from pathlib import Path
 import sqlite3
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
 import traceback
+from typing import Literal
 from threading import Barrier, Event
 
 import pytest
 
 from mailarchiver.file_events import wait_for_path_state
+from mailarchiver.change_signal import ChangeEvent
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import create_empty_archive
 from mailarchiver.archive_config import load_archive_config, save_archive_config
@@ -50,15 +53,17 @@ from mailarchiver.gui_service import SearchPage, search_page
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.ingest_diagnostics import format_failure
 from mailarchiver.imap_source import ImapSourcePlugin, imap_locator
+from mailarchiver.imap_transport import ImapTransport
 from mailarchiver.standalone_verify import verify_archive
 from tests.test_gui_processing import open_headless, wait_for_import
 from mailarchiver.mbox import MboxLocation, read_verified_location
 from mailarchiver.owner_rules import OwnerRules
-from mailarchiver.plugin_api import MailContainer, MailObject, ProgressEvent, SourceObservation, SourceReference, SourceSpec
+from mailarchiver.plugin_api import MailContainer, MailObject, PluginContext, ProgressEvent, SourceObservation, SourceReference, SourceSpec
 
 from tests.imap_fixture import DisposableImap, FixtureKeyring, ImapFault, InterruptibleImap, Utf8Imap
 
 SSL_CERT_FILE_ENV = "SSL_CERT_FILE"
+ACCEPTANCE_SUCCESS_KEY = "successful"
 
 
 @pytest.mark.parametrize("plain", [False, True])
@@ -844,6 +849,31 @@ def test_invalid_imap_response_remains_a_failure(imap_archive: Path, imap_inbox:
     assert totals(imap_archive).archived == 3 and totals(imap_archive).duplicates == 0
 
 
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+def test_imap_import_continues_after_advisory_size_mismatch(imap_archive: Path, imap_inbox: DisposableImap,
+                                                           imap_messages: tuple[bytes, ...]) -> None:
+    """ACQUISITION: commit a complete literal with a conflicting size and keep importing."""
+    assert isinstance(imap_inbox, InterruptibleImap)
+    with imap_inbox.connect() as client:
+        client.select("INBOX", readonly=True)
+        _, results = client.uid("SEARCH", "ALL")
+        assert isinstance(results[0], bytes)
+        uids = results[0].split()
+    raw = imap_messages[1]
+    response = f"* 2 FETCH (UID {int(uids[1])} RFC822.SIZE {len(raw) + 329} BODY[] {{{len(raw)}}}\r\n".encode()
+    imap_inbox.fault = ImapFault(command=b"BODY.PEEK[]", mode="fetch-reply", skip=1, once=True,
+                               response=response + raw + b")\r\n")
+    args = parser().parse_args(["--archive", str(imap_archive), "--no-scan", "--workers", "1"])
+    assert synchronize(args) == 0
+    status = read_ingest_history(imap_archive).statuses[0]
+    assert status.state == "completed" and status.failure_detail is None
+    assert status.download_coverage is not None and status.download_coverage.messages == 3
+    with closing(sqlite3.connect(imap_archive / "archive.sqlite3")) as database:
+        assert database.execute("SELECT uid FROM imap_seen ORDER BY uid").fetchall() == [(int(uid),) for uid in uids]
+        assert {row[0] for row in database.execute("SELECT sha256 FROM messages")} == {
+            hashlib.sha256(message.replace(b"\r\n", b"\n")).hexdigest() for message in imap_messages}
+
+
 @pytest.mark.parametrize("wrapped", [False, True], ids=["direct", "imaplib-wrapped"])
 def test_host_down_is_a_resumable_transport_interruption(wrapped: bool) -> None:
     """ACQUISITION: host-down socket failures pause instead of recording a failed ingest."""
@@ -868,6 +898,13 @@ def test_host_down_is_a_resumable_transport_interruption(wrapped: bool) -> None:
 def test_host_down_handling_requires_a_transport_errno(error: OSError) -> None:
     """ACQUISITION: host-down-looking text alone must not hide genuine failures."""
     assert not connection_interrupted(error)
+
+
+@pytest.mark.parametrize("code", [socket.EAI_AGAIN, socket.EAI_NONAME, socket.EAI_FAIL])
+def test_dns_unavailability_retries(code: int) -> None:
+    """ACQUISITION: captive portals can return either temporary failure or an unknown hostname."""
+    assert connection_interrupted(socket.gaierror(code, "Name lookup unavailable"))
+    assert not connection_interrupted(socket.gaierror(socket.EAI_BADFLAGS, "Invalid resolver flags"))
 
 
 def test_imaplib_wrapped_send_timeout_retains_timeout_presentation() -> None:
@@ -911,7 +948,8 @@ def test_shared_cli_login_reason_survives_long_account_names(tmp_path: Path, sho
     server = Utf8Imap(tmp_path, credentials=(username, "demopass"),
                       login_response=None if paused else b"NO " + reason + b" demopass",
                       setup_command=b"CAPABILITY" if paused else None, setup_authenticated=False,
-                      setup_response=b"BYE Server shutting down" if paused else None)
+                      setup_response=b"BYE Server shutting down" if paused else None,
+                      setup_failures=None if paused else 1)
     try:
         account = server.start().model_copy(update={"username": username})
         archive = tmp_path / "archive"
@@ -1070,8 +1108,22 @@ def test_body_literal_allows_legal_fetch_order_and_unsolicited_flags() -> None:
     assert body_literal(data, 7) == raw
     with pytest.raises(RuntimeError, match="identity"):
         body_literal(data, 8)
-    with pytest.raises(RuntimeError, match="incomplete"):
-        body_literal([(b"1 (BODY[] {3}", b"abc"), b" UID 7 RFC822.SIZE 4)"], 7)
+    with pytest.raises(RuntimeError, match="identity or FETCH envelope"):
+        body_literal([(b"1 (UID 8 BODY[] {3}", b"abc"), b")", b'2 (UID 7 BODY[] "")'], 7)
+    with pytest.raises(RuntimeError, match="incomplete") as failure:
+        body_literal([(b"1 (BODY[] {5}", b"abc"), b" UID 7 RFC822.SIZE 3)"], 7)
+    assert "UID=7, RFC822.SIZE=3, declared literal length=5, received byte count=3" in str(failure.value)
+
+
+@pytest.mark.parametrize("reported", [b" RFC822.SIZE 6383", b""])
+def test_body_literal_accepts_advisory_size_disagreement(reported: bytes, caplog: pytest.LogCaptureFixture) -> None:
+    """ACQUISITION: the literal length governs acceptance even with incorrect or missing RFC822.SIZE."""
+    raw = b"x" * 6054
+    assert body_literal([(b"1 (UID 1380747" + reported + b" BODY[] {6054}", raw), b")"], 1380747) == raw
+    if reported:
+        assert "UID=1380747: server reported 6383 bytes, BODY[] delivered 6054 bytes" in caplog.text
+    else:
+        assert not caplog.records
 
 
 def test_untrusted_tls_is_rejected_before_login(imap_server: DisposableImap) -> None:
@@ -1346,3 +1398,479 @@ finally:
     result = subprocess.run([sys.executable, "-c", code, str(tmp_path)], cwd=ROOT,
                             capture_output=True, text=True, check=False, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_scratch_acceptance_refuses_canonical_and_unmarked_archives(imap_archive: Path, tmp_path: Path) -> None:
+    """ACQUISITION: acceptance must never reuse its source or an unrelated archive as scratch."""
+    from scripts.imap_acceptance import AcceptanceSettings, prepare
+    original = (imap_archive / "config.yaml").read_bytes()
+    for scratch in (imap_archive, imap_archive / "nested", tmp_path / "unmarked"):
+        if scratch.name == "unmarked":
+            scratch.mkdir()
+            (scratch / "preserve.txt").write_text("keep")
+        with pytest.raises(ValueError):
+            prepare(AcceptanceSettings(source_archive=imap_archive, scratch_archive=scratch))
+    assert (imap_archive / "config.yaml").read_bytes() == original
+    assert (tmp_path / "unmarked/preserve.txt").read_text() == "keep"
+
+
+def test_scratch_cycle_imports_and_resumes_real_tls(imap_archive: Path, tmp_path: Path) -> None:
+    """ACQUISITION: scratch uses the production importer, preserves source settings and resumes exact UIDs."""
+    from scripts.imap_acceptance import AcceptanceResult, AcceptanceSettings, import_cycle, prepare
+    scratch = tmp_path / "scratch.mailarchive"
+    settings = AcceptanceSettings(source_archive=imap_archive, scratch_archive=scratch, seconds=10, no_scan=True)
+    prepare(settings)
+    import_cycle(settings)
+    assert totals(scratch).archived == 3 and not verify_archive(scratch)
+    status = read_ingest_history(scratch).statuses[0]
+    assert AcceptanceResult(child_exitcode=0, forced_stop=False, integrity_errors=[],
+                            status=status, progress_observed=True).successful
+    prepare(settings)
+    import_cycle(settings)
+    assert totals(scratch).archived == 3 and totals(scratch).duplicates == 0
+    status = read_ingest_history(scratch).statuses[0]
+    assert status.download_coverage is not None and status.download_coverage.messages == 0
+    result = AcceptanceResult(child_exitcode=0, forced_stop=False, integrity_errors=[],
+                              status=status, progress_observed=False)
+    assert not result.successful and not json.loads(result.model_dump_json())[ACCEPTANCE_SUCCESS_KEY]
+    assert totals(imap_archive).archived == 0
+
+
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+@pytest.mark.parametrize("command,mode", [(b" LIST ", "disconnect"), (b" EXAMINE ", "disconnect"),
+    (b"BODY.PEEK[]", "disconnect"), (b"BODY.PEEK[]", "partial"), (b"BODY.PEEK[]", "timeout")])
+def test_transient_reads_recover_without_replaying_delivered_bodies(imap_archive: Path,
+        imap_inbox: DisposableImap, monkeypatch: pytest.MonkeyPatch, command: bytes, mode: Literal["disconnect", "partial", "timeout"]) -> None:
+    """ACQUISITION: discard broken TLS streams, reconnect and retain exact committed/delivered UID progress."""
+    assert isinstance(imap_inbox, InterruptibleImap)
+    monkeypatch.setattr("mailarchiver.imap_protocol.IMAP_TIMEOUT", 1)
+    imap_inbox.fault = ImapFault(command=command, mode=mode, once=True, skip=1 if command == b"BODY.PEEK[]" else 0)
+    args = parser().parse_args(["--archive", str(imap_archive), "--no-scan", "--workers", "1"])
+    assert synchronize(args) == 0
+    assert totals(imap_archive).archived == 3 and totals(imap_archive).duplicates == 0
+    status = read_ingest_history(imap_archive).statuses[0]
+    assert status.state == "completed"
+    assert status.download_coverage is not None and status.download_coverage.messages == 3
+    requests = [line for line in imap_inbox.commands if b"BODY.PEEK[]" in line]
+    assert len(requests) == (4 if command == b"BODY.PEEK[]" else 3)
+    requested_uids = [line.split()[3] for line in requests]
+    assert requested_uids.count(requested_uids[0]) == 1
+    if command == b"BODY.PEEK[]":
+        assert requested_uids.count(requested_uids[1]) == 2
+    assert not verify_archive(imap_archive)
+    assert_imap_searchable(imap_archive)
+
+
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+@pytest.mark.parametrize("power_cycle", [True, False], ids=["sleep-wake", "network-change"])
+def test_desktop_transport_signal_recovers_without_replaying_bodies(imap_archive: Path,
+        imap_inbox: DisposableImap, power_cycle: bool) -> None:
+    """ACQUISITION: native hints replace pre-sleep sessions or advance a waiting route retry."""
+    assert isinstance(imap_inbox, InterruptibleImap) and imap_inbox.account is not None
+    with closing(sqlite3.connect(imap_archive / "archive.sqlite3")) as database, database:
+        initialize_state(database)
+    transport = ImapTransport()
+    plugin = ImapSourcePlugin(PluginContext(imap_transport=transport))
+    source = SourceSpec(locator=imap_locator(imap_archive, imap_inbox.account, 1))
+    containers = [item for item in plugin.discover(source) if isinstance(item, MailContainer)]
+    # Iterate on one owner thread, as production does, across the lifecycle transition.
+    with closing(plugin.messages(containers[0], None)) as stream:
+        first = next(item for item in stream if isinstance(item, MailObject))
+        started = time.monotonic()
+        if power_cycle:
+            # Repeated sleep while between downloads does not exhaust attempts.
+            for _ in range(4):
+                transport.sleep()
+                retry = next(stream)
+                assert isinstance(retry, ProgressEvent) and "Computer slept" in retry.phase
+                transport.wake()
+                searching = next(stream)
+                assert isinstance(searching, ProgressEvent) and searching.phase == "finding unarchived IMAP messages"
+        else:
+            transport.network_changed(False)
+            imap_inbox.fault = ImapFault(command=b"BODY.PEEK[]", mode="disconnect", once=True)
+            retry = next(stream)
+            assert isinstance(retry, ProgressEvent) and "retrying in 150s" in retry.phase
+            transport.network_changed(True)
+        cursors = [first.cursor, *(item.cursor for item in stream if isinstance(item, MailObject))]
+        assert time.monotonic() - started < 10
+    assert len(cursors) == len(set(cursors)) == 3
+    requests = [line.split()[3] for line in imap_inbox.commands if b"BODY.PEEK[]" in line]
+    assert len(requests) == (3 if power_cycle else 4)
+    assert requests.count(requests[0]) == 1
+    assert sum(b" EXAMINE " in line for line in imap_inbox.commands) >= 3
+
+
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+@pytest.mark.parametrize("acquiring", [False, True], ids=["discovery", "acquisition"])
+def test_desktop_waits_through_captive_portal_dns_failure(imap_archive: Path, imap_inbox: DisposableImap,
+        monkeypatch: pytest.MonkeyPatch, acquiring: bool) -> None:
+    """ACQUISITION: four unknown-host replies retain a live import and exact delivered UID state."""
+    assert isinstance(imap_inbox, InterruptibleImap) and imap_inbox.account is not None
+    with closing(sqlite3.connect(imap_archive / "archive.sqlite3")) as database, database:
+        initialize_state(database)
+    transport = ImapTransport()
+    plugin = ImapSourcePlugin(PluginContext(imap_transport=transport))
+    source = SourceSpec(locator=imap_locator(imap_archive, imap_inbox.account, 1))
+    discovery = plugin.discover(source)
+    stream = discovery
+    cursors: list[str | None] = []
+    if acquiring:
+        containers = [item for item in discovery if isinstance(item, MailContainer)]
+        stream = plugin.messages(containers[0], None)
+        cursors.append(next(item.cursor for item in stream if isinstance(item, MailObject)))
+        imap_inbox.fault = ImapFault(command=b"BODY.PEEK[]", mode="disconnect", once=True)
+        interrupted = next(stream)
+        assert isinstance(interrupted, ProgressEvent) and "Waiting for IMAP connectivity" in interrupted.phase
+        transport.network_changed(True)
+
+    # Replace only the OS resolver boundary to reproduce the screenshot's DNS
+    # error. All successful sessions use the real fixture's verified TLS server.
+    resolve = socket.getaddrinfo
+    attempts = 0
+
+    def unavailable(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise socket.gaierror(socket.EAI_NONAME, "nodename nor servname provided, or not known")
+
+    monkeypatch.setattr(socket, "getaddrinfo", unavailable)
+    with closing(stream):
+        for _ in range(4):
+            waiting = next(stream)
+            assert isinstance(waiting, ProgressEvent)
+            assert "Waiting for IMAP connectivity; retrying in 150s" in waiting.phase
+            assert "sign-in" in waiting.phase
+            transport.network_changed(True)
+        monkeypatch.setattr(socket, "getaddrinfo", resolve)
+        remaining = list(stream)
+    assert attempts == 4
+    if acquiring:
+        cursors.extend(item.cursor for item in remaining if isinstance(item, MailObject))
+        assert len(cursors) == len(set(cursors)) == 3
+        requests = [line.split()[3] for line in imap_inbox.commands if b"BODY.PEEK[]" in line]
+        assert requests.count(requests[0]) == 1
+    else:
+        assert sum(isinstance(item, MailContainer) for item in remaining) == 1
+
+
+@pytest.mark.parametrize("finish", ["deadline", "suspend"])
+def test_desktop_connectivity_wait_retests_or_cancels(monkeypatch: pytest.MonkeyPatch, finish: str) -> None:
+    """ACQUISITION: automatic retests survive failed attempts and cancellation wakes the 150-second wait."""
+    from mailarchiver.imap_source import IMAP_NETWORK_RETEST_SECONDS
+    assert 120 <= IMAP_NETWORK_RETEST_SECONDS <= 180
+    stop = ChangeEvent()
+    plugin = ImapSourcePlugin(PluginContext(cancellation=stop, imap_transport=ImapTransport()))
+    if finish == "deadline":
+        monkeypatch.setattr("mailarchiver.imap_source.IMAP_NETWORK_RETEST_SECONDS", 0.01)
+    waiting = plugin._recover("fixture", 4, ImapPaused("Network unavailable"), None)
+    assert "Waiting for IMAP connectivity" in next(waiting).phase
+
+    def advance() -> bool:
+        try:
+            next(waiting)
+        except StopIteration as completed:
+            return bool(completed.value)
+        raise AssertionError("Connectivity wait emitted another event before completion")
+
+    with closing(waiting), ThreadPoolExecutor(max_workers=1) as pool:
+        # Advancing the iterator waits for the actual retry deadline or Stop.
+        result = pool.submit(advance)
+        if finish == "suspend":
+            stop.set()
+        assert result.result(timeout=2) == (finish == "deadline")
+        assert stop.is_set() == (finish == "suspend")
+
+
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+def test_desktop_transport_signal_during_tls_session_setup(imap_archive: Path, imap_inbox: DisposableImap) -> None:
+    """ACQUISITION: repeated sleep-induced setup aborts allow discovery to complete on wake."""
+    assert isinstance(imap_inbox, InterruptibleImap) and imap_inbox.account is not None
+    transport = ImapTransport()
+    attempts = 0
+
+    def sleep_during_setup() -> None:
+        nonlocal attempts
+        attempts += 1
+        transport.sleep()
+        transport.wake()
+        if attempts == 4:
+            imap_inbox.fault = None
+
+    imap_inbox.before_fault = sleep_during_setup
+    imap_inbox.fault = ImapFault(command=b" CAPABILITY", mode="disconnect", once=False)
+    source = SourceSpec(locator=imap_locator(imap_archive, imap_inbox.account, 1))
+    plugin = ImapSourcePlugin(PluginContext(imap_transport=transport))
+    events = list(plugin.discover(source))
+    assert attempts == 4
+    assert sum(isinstance(event, ProgressEvent) and "Computer slept" in event.phase for event in events) == 4
+    assert sum(isinstance(event, MailContainer) for event in events) == 1
+
+
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+def test_reconnect_epoch_change_never_reuses_old_uids(imap_archive: Path,
+        imap_inbox: DisposableImap) -> None:
+    """ACQUISITION: a new epoch on a replacement connection must stop before replaying old UIDs."""
+    assert isinstance(imap_inbox, InterruptibleImap)
+    imap_inbox.fault = ImapFault(command=b"BODY.PEEK[]", mode="disconnect", skip=1,
+                               once=True, next_uid_validity=999999999)
+    args = parser().parse_args(["--archive", str(imap_archive), "--no-scan", "--workers", "1"])
+    with pytest.raises(RuntimeError, match="epoch or capabilities changed"):
+        synchronize(args)
+    assert totals(imap_archive).archived == 1
+    assert sum(b"BODY.PEEK[]" in line for line in imap_inbox.commands) == 2
+    assert not verify_archive(imap_archive)
+
+
+def test_scratch_verification_worker_is_owned_and_bounded(imap_archive: Path, tmp_path: Path) -> None:
+    """ACQUISITION: actual CLI verification is independent of credentials and cannot exceed its budget."""
+    from mailarchiver.owned_command import run_owned_command
+    from scripts.imap_acceptance import AcceptanceSettings, import_cycle, prepare, worker_command
+    settings = AcceptanceSettings(source_archive=imap_archive, scratch_archive=tmp_path / "scratch.mailarchive", no_scan=True)
+    prepare(settings)
+    import_cycle(settings)
+    command = worker_command(settings, "verify")
+    result = run_owned_command(command, timeout=10)
+    assert result.returncode == 0 and json.loads(result.stdout) == []
+    with pytest.raises(RuntimeError, match="timed out"):
+        run_owned_command(command, timeout=0.001)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner-death containment; Windows uses the existing job boundary")
+def test_scratch_owner_death_reaps_utility(tmp_path: Path) -> None:
+    """ACQUISITION: the same owned-command boundary used by evaluation reaps an abruptly orphaned child."""
+    from mailarchiver.file_events import process_alive
+    marker = tmp_path / "utility.pid"
+    utility = "from pathlib import Path; import os; from threading import Event; " + \
+        f"Path({str(marker)!r}).write_text(str(os.getpid())); Event().wait()"
+    owner = f"from mailarchiver.owned_command import run_owned_command; run_owned_command({[sys.executable, '-c', utility]!r}, timeout=300)"
+    parent = subprocess.Popen([sys.executable, "-c", owner])
+    child_pid = None
+    try:
+        wait_for_path_state([marker], lambda: marker.exists() and marker.stat().st_size > 0, timeout=10)
+        child_pid = int(marker.read_text())
+        parent.terminate()
+        parent.wait(timeout=10)
+        deadline = time.monotonic() + 10
+        while process_alive(child_pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not process_alive(child_pid)
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait(timeout=5)
+        if child_pid is not None and process_alive(child_pid):
+            os.kill(child_pid, signal.SIGKILL)
+
+
+def test_scratch_cycle_never_reuses_old_success_if_status_writes_fail(imap_archive: Path, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """ACQUISITION: inject only the status-write fault; real directory denial blocks owner setup first."""
+    from scripts.imap_acceptance import AcceptanceSettings, import_cycle, prepare
+    from mailarchiver.ingest_status import IngestStatus, IngestStatusFile
+    scratch = tmp_path / "scratch.mailarchive"
+    settings = AcceptanceSettings(source_archive=imap_archive, scratch_archive=scratch, no_scan=True, seconds=10)
+    prepare(settings)
+    first = import_cycle(settings)
+    assert first is not None and first.download_coverage is not None and first.download_coverage.messages == 3
+    def deny_status_write(_self: IngestStatusFile, _status: IngestStatus) -> None:
+        raise PermissionError("simulated status-only permission failure")
+    monkeypatch.setattr(IngestStatusFile, "write", deny_status_write)
+    assert import_cycle(settings) is None
+    assert read_ingest_history(scratch).statuses[0].status_id == first.status_id
+    assert not verify_archive(scratch)
+
+
+def test_mixed_sources_and_saved_processing_report_separate_progress(
+        imap_archive: Path, imap_inbox: DisposableImap, tmp_path: Path) -> None:
+    """DESKTOP: saved attachments do not count as source mail, and unknown IMAP size prevents ETA."""
+    saved = tmp_path / "saved.eml"
+    saved.write_bytes(b"Date: Tue, 3 Jan 2023 12:00:00 +0000\r\nFrom: other@example.org\r\n"
+                      b"Message-ID: <saved-parent@example.test>\r\nSubject: parent\r\n"
+                      b"MIME-Version: 1.0\r\nContent-Type: multipart/digest; boundary=d\r\n\r\n"
+                      b"--d\r\n\r\nDate: Tue, 3 Jan 2023 12:00:00 +0000\r\nFrom: other@example.org\r\n"
+                      b"Message-ID: <saved-child@example.test>\r\nSubject: child\r\n\r\nchild\r\n--d--\r\n")
+    run_ingest(IngestRequest(archive=imap_archive, roots=[str(saved)], workers=1,
+        scan_policy="not-scanned", continue_content=False), terminal=False)
+    local = tmp_path / "local.eml"
+    local.write_bytes(b"Date: Tue, 5 Nov 2024 12:00:00 +0000\r\nFrom: other@example.org\r\n"
+                      b"Message-ID: <mixed@example.test>\r\nSubject: local\r\n\r\nlocal bytes\r\n")
+    account = load_archive_config(imap_archive).imap_sources[0]
+    imap_inbox.pause_after_bodies(0)
+    request = IngestRequest(archive=imap_archive, roots=[str(local), imap_locator(imap_archive, account, 1)],
+        workers=2, imap_connections=1, scan_policy="not-scanned")
+    def local_and_saved_finished() -> bool:
+        status = read_ingest_history(imap_archive).statuses[0]
+        return (status.counts.archived == 2 and status.bytes_processed == local.stat().st_size
+                and 0 < status.files_processed < status.files_total)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(run_ingest, request, terminal=False)
+        try:
+            assert imap_inbox.fetch_paused.wait(10)
+            wait_for_path_state([imap_archive / "status"], local_and_saved_finished, timeout=10)
+            status = read_ingest_history(imap_archive).statuses[0]
+            assert status.state == "running" and status.files_processed < status.files_total
+            assert status.bytes_processed == status.bytes_total == local.stat().st_size
+            assert status.eta == "unavailable"
+            assert status.download_coverage is not None and status.download_coverage.messages == 0
+            assert status.processed_messages == 1
+            assert status.earliest_date == status.latest_date == datetime(2024, 11, 5, 12, tzinfo=UTC)
+        finally:
+            imap_inbox.release_bodies()
+        future.result(timeout=20)
+    status = read_ingest_history(imap_archive).statuses[0]
+    assert status.state == "completed" and status.eta == "0s"
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive: Path,
+        imap_inbox: DisposableImap, imap_messages: tuple[bytes, ...], tmp_path: Path, cancel: bool, duplicate: bool) -> None:
+    """ACQUISITION/PROCESSING: publish fresh TLS bodies while a saved content invocation is held open."""
+    from mailarchiver.__main__ import IngestInterrupted
+    from mailarchiver.processing.api import ProcessingObject
+    from mailarchiver.processing_progress import saved_messages_remaining
+    from mailarchiver.processing.store import connect, enqueue
+    from tests.test_processing import plugin
+    saved = tmp_path / "2024/saved.eml"
+    saved.parent.mkdir()
+    raw = (b"From: other@example.org\r\nMessage-ID: <saved@example.test>\r\nSubject: saved body\r\n"
+           b"Date: Tue, 5 Nov 2024 12:00:00 +0000\r\n\r\nsavedoverlaptoken\r\n")
+    if duplicate:
+        raw = imap_messages[0].replace(b"\r\n", b"\n")
+    saved.write_bytes(raw)
+    run_ingest(IngestRequest(archive=imap_archive, roots=[str(saved)], workers=1,
+        scan_policy="not-scanned", continue_content=False), terminal=False)
+    custom = tmp_path / "custom"
+    plugin(custom, "saved-gate", 'if (item.archive.path / "hold-saved").exists():\n'
+        '    with item.content_ref.open() as original:\n'
+        '        (item.archive.path / "saved-entered").touch()\n'
+        '        item.wait_for_files((item.archive.path,), lambda: (item.archive.path / "release-saved").exists())\n'
+        '        assert original.read(1)\n'
+        'return ProcessingResult()', timeout=15)
+    manifest = custom / "processors/saved-gate/plugin.toml"
+    manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="content"'))
+    metadata_job: int | None = None
+    if duplicate:
+        # Model the eligible metadata sibling of an already-filed promoted message.
+        # It must remain pending while that digest's saved content job is active.
+        with connect(imap_archive) as database, database:
+            payload, = database.execute("SELECT root_item_json FROM message_state").fetchone()
+            parent, registry = database.execute("SELECT job_id,registry_hash FROM jobs WHERE status='completed' LIMIT 1").fetchone()
+            enqueue(database, ProcessingObject.model_validate_json(payload).model_copy(update={"pipeline": "message"}), registry, parent)
+            metadata_job = database.execute("SELECT max(job_id) FROM jobs").fetchone()[0]
+    (imap_archive / "hold-saved").touch()
+    imap_inbox.pause_after_bodies(0 if duplicate else 1)
+    account = load_archive_config(imap_archive).imap_sources[0]
+    request = IngestRequest(archive=imap_archive, roots=[imap_locator(imap_archive, account, 1)],
+        workers=1, imap_connections=1, scan_policy="not-scanned", plugin_dir=[custom])
+    stop = ChangeEvent()
+
+    expected = 3 if duplicate else 4
+    def fully_archived() -> bool:
+        with sqlite3.connect(imap_archive / "archive.sqlite3") as database:
+            status = read_ingest_history(imap_archive).statuses[0]
+            return (database.execute("SELECT count(*) FROM messages").fetchone() == (expected,)
+                    and status.files_processed == status.files_total > 0)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(run_ingest, request, terminal=False, stop_event=stop)
+        try:
+            wait_for_path_state([imap_archive], lambda: (imap_archive / "saved-entered").exists(), timeout=10)
+            assert imap_inbox.fetch_paused.wait(10), "Saved content blocked network acquisition"
+            held_object = imap_archive / "objects" / hashlib.sha256(raw).hexdigest()
+            held_inode = held_object.stat().st_ino
+            imap_inbox.release_bodies()
+            wait_for_path_state([imap_archive / "status"], fully_archived, timeout=10)
+            status = read_ingest_history(imap_archive).statuses[0]
+            assert status.processing_active and status.download_coverage is not None
+            assert status.download_coverage.messages == 3
+            assert any(worker.phase.startswith("processing ") for worker in status.saved_workers)
+            assert status.saved_messages_remaining == expected
+            assert not (imap_archive / "release-saved").exists()
+            assert held_object.stat().st_ino == held_inode
+            if metadata_job is not None:
+                with sqlite3.connect(f"{(imap_archive / 'processing.sqlite3').as_uri()}?mode=ro", uri=True) as database:
+                    assert database.execute("SELECT status FROM jobs WHERE job_id=?", (metadata_job,)).fetchone() == ("pending",)
+            if cancel:
+                stop.set()
+                with pytest.raises(IngestInterrupted):
+                    future.result(timeout=20)
+            else:
+                (imap_archive / "release-saved").touch()
+                future.result(timeout=20)
+        finally:
+            imap_inbox.release_bodies()
+            (imap_archive / "release-saved").touch()
+    if cancel:
+        run_ingest(request, terminal=False)
+    assert totals(imap_archive).archived == (2 if duplicate else 3)
+    assert totals(imap_archive).duplicates == int(duplicate)
+    assert sum(b"BODY.PEEK[]" in command for command in imap_inbox.commands) == 3
+    with connect(imap_archive) as database:
+        assert saved_messages_remaining(database) == 0
+        assert database.execute("SELECT count(*) FROM jobs WHERE status='running'").fetchone() == (0,)
+    from mailarchiver.mailsearch import read_message_bytes
+    if not duplicate:
+        assert len(search_page(imap_archive, "savedoverlaptoken").results) == 1
+    assert {read_message_bytes(imap_archive, number) for number in range(1, expected + 1)} == {raw} | {
+        message.replace(b"\r\n", b"\n") for message in imap_messages}
+    assert saved.read_bytes() == raw and not verify_archive(imap_archive)
+
+
+@pytest.mark.parametrize("scan_policy", ["not-scanned", "clamav"])
+def test_concurrent_saved_fail_import_stops_imap_while_peer_finishes(imap_archive: Path,
+        imap_inbox: DisposableImap, tmp_path: Path, scan_policy: Literal["not-scanned", "clamav"]) -> None:
+    """ACQUISITION: stop admission but count an already received body before scanning."""
+    from mailarchiver.processing.runtime import ProcessorStop
+    from tests.test_processing import plugin
+    source = tmp_path / "saved"
+    source.mkdir()
+    for marker in ("stop-this-saved", "hold-saved-peer"):
+        (source / f"{marker}.eml").write_bytes((f"From: other@example.org\r\nMessage-ID: <{marker}@example.test>\r\n"
+            f"Subject: fixture\r\nDate: Tue, 5 Nov 2024 12:00:00 +0000\r\n\r\n{marker}\r\n").encode())
+    run_ingest(IngestRequest(archive=imap_archive, roots=[str(source)], workers=2,
+        scan_policy="not-scanned", continue_content=False), terminal=False)
+    custom = tmp_path / "custom"
+    plugin(custom, "stop-gate", 'root = item.archive.path\n'
+        'if b"stop-this-saved" in item.content_ref.path.read_bytes():\n'
+        '    item.wait_for_files((root,), lambda: (root / "accept-stop").exists())\n'
+        '    return ProcessingResult(outcome="fail-import")\n'
+        'if b"hold-saved-peer" in item.content_ref.path.read_bytes():\n'
+        '    (root / "peer-entered").touch()\n'
+        '    item.wait_for_files((root,), lambda: (root / "release-peer").exists())\n'
+        'return ProcessingResult()', timeout=20)
+    manifest = custom / "processors/stop-gate/plugin.toml"
+    manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="content"'))
+    imap_inbox.pause_after_bodies(1)
+    account = load_archive_config(imap_archive).imap_sources[0]
+    request = IngestRequest(archive=imap_archive, roots=[imap_locator(imap_archive, account, 2)],
+        workers=2, imap_connections=1, scan_policy=scan_policy, plugin_dir=[custom])
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(run_ingest, request, terminal=False)
+        try:
+            wait_for_path_state([imap_archive], lambda: (imap_archive / "peer-entered").exists(), timeout=10)
+            assert imap_inbox.fetch_paused.wait(10)
+            (imap_archive / "accept-stop").touch()
+            wait_for_path_state([imap_archive / "status"],
+                lambda: read_ingest_history(imap_archive).statuses[0].processing_jobs_completed > 0, timeout=10)
+            imap_inbox.release_bodies()
+            assert imap_inbox.connections_closed.wait(10)
+            assert not future.done(), "An already-started peer was not allowed to finish"
+            assert sum(b"BODY.PEEK[]" in command for command in imap_inbox.commands) == 2
+            (imap_archive / "release-peer").touch()
+            with pytest.raises(ProcessorStop, match="processor requested fail-import"):
+                future.result(timeout=15)
+        finally:
+            imap_inbox.release_bodies()
+            (imap_archive / "accept-stop").touch()
+            (imap_archive / "release-peer").touch()
+    assert totals(imap_archive).archived == 1
+    coverage = read_ingest_history(imap_archive).statuses[0].download_coverage
+    assert coverage is not None and coverage.messages == 2
+    assert coverage.earliest_date == coverage.latest_date == datetime(2026, 10, 1, 10, tzinfo=UTC)
+    with sqlite3.connect(imap_archive / "processing.sqlite3") as database:
+        assert database.execute("SELECT status FROM invocations WHERE kind='stop-gate' ORDER BY invocation_id").fetchall() == [
+            ("completed",), ("completed",)]
+    assert not verify_archive(imap_archive)

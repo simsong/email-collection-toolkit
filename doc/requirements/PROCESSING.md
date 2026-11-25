@@ -4,6 +4,19 @@
 
 ## Working-object lifetime
 
+With unlimited content processing enabled during acquisition, saved message/content
+jobs shall not form a barrier before source downloads. Independent invocations and
+source reads run concurrently under their own configured bounds. One archive owner
+alone claims jobs and commits results, MBOX and indexes; processor workers never use
+its SQLite connections. Complete unfinished ingest roots, even if already filed;
+unpublished roots retain the prior healthy archived-content recovery pass before retry.
+Explicit deferred/limited-content modes retain their budgets. Suspension stops new
+acquisition and claims, checkpoints returned results, and retains resumable work.
+An explicit processor stop closes source admission immediately while active results
+settle. A real TLS regression must hold saved processing open while fresh bodies are
+downloaded and canonically published, then verify bytes, exactly-once delivery and
+cancel/resume integrity (`make test-concurrent-imap`).
+
 Deferred message/content processing shall use the configured worker count to
 execute independent messages concurrently. Workers drain one shared durable
 queue, claim each job once, and preserve per-message rank/parent ordering and
@@ -11,8 +24,9 @@ abort semantics. A content-job limit applies to the whole pool. Cancellation
 and explicit import failure stop new claims and leave unfinished work resumable.
 An explicit `fail-import` also stops remaining subscribers in the current rank.
 Keep inputs of running jobs resident; publication and object collection must not
-race active processors. Progress shall show each active worker and remain active
-until all workers finish. Validate with `make test-processors`,
+race active processors. Reuse SHA-256 verified existing objects rather than replacing
+an active input; report and preserve an invalid existing object. Progress shall show
+each active worker and remain active until all workers finish. Validate with `make test-processors`,
 `make test-ingest-recovery`, `make test-progress` and `make test-processing-cleanup`.
 
 Recovery shall expose the current processor/job and finished-job count while
@@ -53,12 +67,14 @@ or require manual review. Fresh source-worker scan evidence is scoped to the
 current scanner session so a timeout is not immediately repeated inside filing;
 old unsuccessful evidence still gets a new attempt when a scan session is available.
 Producer scan headers and explicit unscanned-import policy remain authoritative.
-When both ingestion and unbounded content processing are enabled, recover eligible
-archived message/content jobs before pending ingestion or source traversal. A
-failed pending ingest must not starve the existing archive's search reconstruction.
+When both ingestion and unbounded content processing are enabled, complete
+unfinished ingest roots before source traversal, including roots already filed.
+Before retrying unpublished roots, recover eligible archived content so a failed
+pending ingest does not starve the existing archive's search reconstruction.
+Otherwise, saved jobs and source workers share the owner without a queue drain barrier.
 Explicit deferred-content and content-job limits retain their existing behavior.
-Failed archived extraction remains durable and reportable, but the preliminary
-recovery pass must not prevent unrelated new mail from reaching canonical storage.
+Failed archived extraction remains durable and reportable without preventing
+unrelated new mail from reaching canonical storage.
 Saved metadata replay must preserve that isolation when content is deferred or
 bounded; failure records remain visible and unpublished ingest errors still stop.
 Independent healthy archived jobs must continue after a failed job. Descendants

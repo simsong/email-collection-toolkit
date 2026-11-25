@@ -59,6 +59,28 @@ jobs:
             fi
           fi
 
+  windows-lifecycle:
+    needs: ci-gate
+    if: ${{ needs.ci-gate.outputs.run_checks == 'true' }}
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.1
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+      - name: Install Make
+        run: choco install make --yes --no-progress
+      - name: Exercise native lifecycle subscriptions and common handlers
+        shell: bash
+        run: make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' test-windows-lifecycle
+
   static-rust:
     needs: ci-gate
     if: ${{ needs.ci-gate.outputs.run_checks == 'true' }}
@@ -109,6 +131,8 @@ jobs:
         run: uv sync --locked --all-groups
       - name: Verify real Sparkle release signer
         run: make test-sparkle-signing
+      - name: Verify frozen native lifecycle installation
+        run: make test-frozen-lifecycle
       - name: Refresh project virus definitions
         run: make freshclam
       - name: Install headless test browser

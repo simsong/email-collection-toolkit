@@ -6,10 +6,17 @@
 # Platform integration is separately exercised by the actual native reader probe.
 """DESKTOP: native reply cleanup must never leave a closed-window waiter blocked."""
 from concurrent.futures import ThreadPoolExecutor
+from importlib import import_module
+from pathlib import Path
+import os
+import sys
 from threading import Barrier
 
 import pytest
 
+from mailarchiver.change_signal import ChangeEvent
+from mailarchiver.desktop_lifecycle import DesktopLifecycle
+from mailarchiver.macos_lifecycle import MacOSLifecycle
 from mailarchiver.native_javascript import WindowReplies
 
 
@@ -54,3 +61,47 @@ def test_late_native_callback_cannot_publish_an_abandoned_reply() -> None:
     replies.remove(pending)
     replies.finish(pending, "obsolete result")
     assert pending.cancelled() and not replies.pending
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires actual macOS workspace and network run loop sources")
+def test_macos_lifecycle_observes_power_and_owns_network_source() -> None:
+    """DESKTOP: real Workspace notifications invalidate sessions and refresh status on wake."""
+    appkit = import_module("AppKit")
+    workspace = appkit.NSWorkspace.sharedWorkspace()
+    center = workspace.notificationCenter()
+    refreshed: list[str] = []
+    lifecycle = DesktopLifecycle(lambda: refreshed.append("wake"))
+    lifecycle.start("darwin")
+    adapter = lifecycle._subscription
+    assert isinstance(adapter, MacOSLifecycle)
+    refreshed.clear()  # Initial path observation also refreshes status.
+    source = adapter._source
+    cancellation = ChangeEvent()
+    session = lifecycle.transport.session(cancellation)
+    assert session is not None
+    try:
+        assert source is not None and adapter._core.CFRunLoopSourceIsValid(source)
+        center.postNotificationName_object_(appkit.NSWorkspaceWillSleepNotification, workspace)
+        assert session.done() and not refreshed
+        center.postNotificationName_object_(appkit.NSWorkspaceDidWakeNotification, workspace)
+        assert refreshed == ["wake"]
+        new_session = lifecycle.transport.session(cancellation)
+        assert new_session is not None and not new_session.done()
+    finally:
+        lifecycle.close()
+    assert not adapter._core.CFRunLoopSourceIsValid(source)
+    center.postNotificationName_object_(appkit.NSWorkspaceDidWakeNotification, workspace)
+    assert refreshed == ["wake"]
+
+
+@pytest.mark.skipif(sys.platform != "darwin" or os.environ.get("MAILARCHIVER_NATIVE_GUI_E2E") != "1",
+                    reason="requires explicit native acceptance on an unlocked Cocoa desktop")
+def test_native_api_replies_survive_repeated_suspend_resume() -> None:
+    """DESKTOP: real SDK callbacks resolve 201 history/control replies without uncaught reply deadlines."""
+    from mailarchiver.owned_command import run_owned_command
+    from e2e_tests.native_reply_probe import ProbeResult
+    probe = Path(__file__).resolve().parents[1] / "e2e_tests/native_reply_probe.py"
+    result = run_owned_command([sys.executable, str(probe)], timeout=45)
+    assert result.returncode == 0, result.stderr or result.stdout
+    evidence = ProbeResult.model_validate_json(result.stdout)
+    assert evidence.passed and evidence.calls == 100, evidence.detail

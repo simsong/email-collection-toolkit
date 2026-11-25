@@ -141,8 +141,10 @@ become stale after the recovery grace period; PID reuse remains a documented lim
 clean/EICAR scans and verifies status/cancellation without a successful delay.
 
 Updater command completion and validation forward the scanner status callback,
-retaining progress and cooperative Stop/Quit signals. Cancelled native startup reaps
-its candidate worker and temporary files before propagating cancellation. Explicit definition sets skip
+retaining progress and cooperative Stop/Quit signals. The native startup reader
+waits on both the scanner connection and an owned cancellation pipe. Cancelled
+startup wakes the reader and reaps the candidate worker and temporary files
+before propagating cancellation. Explicit definition sets skip
 the automatic path, preventing recursive updates while validating a candidate.
 `MAILARCHIVER_CLAMAV_DATABASE` also pins development/test definitions. Running
 engines keep their selected generation; automatic refresh happens once per session,

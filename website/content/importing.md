@@ -67,6 +67,16 @@ The **Ingests** window lists every import with its sources, counts, workers,
 and any failures. Open it from **Window → Ingests** or by clicking the status
 line. **Import Directory…** in that window starts another import.
 
+Downloads and saved-message processing can run at the same time after unfinished
+ingest recovery. Ingests shows their worker groups separately, so a saved-mail
+backlog does not have to finish before new downloads begin.
+
+The download details show the number of messages downloaded in this run, their
+earliest and latest server-reported dates in UTC, and counts by year. Emails
+extracted from attachments are counted separately from downloads. If the amount
+remaining is unknown, the display says **ETA unavailable** rather than claiming
+that downloading is finalizing.
+
 ![The import history window showing a completed synthetic collection import](../images/importing-interface.png)
 
 *The import history window after importing synthetic messages.*
@@ -92,8 +102,11 @@ picks up where it stopped. When you open an archive with unfinished work, you
 can also **Leave import suspended** or **Stop import**. Stopping keeps
 everything already archived.
 
-If an IMAP connection times out, for example after the laptop sleeps, Ingests
-shows **Timeout** and keeps its progress. Reconnect, then click **Resume**.
+IMAP imports on macOS and Windows wait through sleep, connectivity loss and
+captive portal sign-in, retesting the server every 2½ minutes using a fresh
+session. Ingests shows the waiting status while saved progress is retained.
+Complete the network sign-in when needed. **Suspend Import** remains available
+during the wait. Messages already saved are not downloaded again.
 
 ## Importing again
 

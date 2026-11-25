@@ -101,6 +101,33 @@ opt-in. They do not run in CI.
 | `test-native-worker-preferences` | `MAILARCHIVER_NATIVE_APPLICATION_E2E=1` | Preferences window, Close, saved edits |
 | `test-quit` | | Process exit, message-boundary stops, recovery |
 
+`make test-native-replies PYTEST_ARGS='--browser-channel chrome'` runs a disposable
+Cocoa reply probe and Ingests browser regressions, including lost status and
+Suspend/Resume replies. It uses synthetic state only and requires an unlocked
+macOS desktop; Windows WebView2 acceptance remains separate.
+
+`make test-desktop-lifecycle` checks common power and network event transport,
+cancellation and shutdown behavior, plus native Cocoa subscriptions on macOS.
+`make test-windows-lifecycle` requires Windows and checks native power registration,
+.NET network subscriptions and registered callback dispatch without suspending the
+computer or changing its network. Branch CI runs that focused Windows gate;
+installed-package and real sleep/network-change acceptance remain separate checks.
+`make test-frozen-lifecycle` requires macOS and builds a disposable PyInstaller
+executable with the production Python collection flags. It verifies native
+lifecycle adapter discovery, synthetic Workspace sleep/wake and subscription
+cleanup without an installed source checkout. Signed DMG acceptance is separate.
+
+Developer scratch IMAP acceptance uses `make imap-acceptance` with
+`IMAP_ACCEPTANCE_ARGS="--source-archive SOURCE --scratch-archive SCRATCH --seconds 600"`.
+This Make argument selects disjoint archives and a cancellation deadline (default
+ten minutes, plus two minutes for cleanup and a separate two-minute verification
+budget); it contains no password. The tool reuses one configured account through
+its existing vault reference and one extra connection, retains the scratch archive
+for subsequent runs, and prints status and canonical-integrity results. A forced
+stop is a failed evaluation. A scratch evaluation succeeds only after downloading
+at least one source message; a completed metadata-only refresh is explicitly not
+a successful download test.
+
 Other focused targets include `test-ingest-progress`, `test-ingest-recovery`,
 and `test-definition-refresh`. The test architecture and its coverage limits
 are in [End-to-end testing](END_TO_END_TESTING.md). Public-corpus validation
@@ -244,6 +271,7 @@ environment variables. Legacy `MAILARCHIVER_CLAMD*` variables are unused.
 
 | Variable / Make parameter | Purpose |
 | --- | --- |
+| `CONCURRENT_IMAP_TESTS` | Optional Python test selection for `make test-concurrent-imap`; browser checks still run |
 | `CARGO`, `RUST_TARGET_DIR`, `CARGO_TARGET_DIR` | Cargo executable and build output; Make uses `RUST_TARGET_DIR`, direct Cargo uses `CARGO_TARGET_DIR` |
 | `RUSTUP_TOOLCHAIN` | Override the compiler selected by `rust-toolchain.toml` |
 | `CARGO_BUILD_JOBS` | Limit native Rust compilation parallelism |

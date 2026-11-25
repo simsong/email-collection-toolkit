@@ -86,6 +86,8 @@ def content_reference(path: Path) -> ContentReference:
 
 def _store_object(destination: Path, chunks: Iterable[bytes]) -> ContentReference:
     """Write, hash and fsync in one pass, then publish under the SHA-256 name."""
+    if destination.is_symlink():
+        raise ValueError("processor objects directory must not be a symlink")
     destination.mkdir(exist_ok=True)
     digest = hashlib.sha256()
     with tempfile.NamedTemporaryFile(dir=destination, prefix=".object-", delete=False) as target:
@@ -101,6 +103,19 @@ def _store_object(destination: Path, chunks: Iterable[bytes]) -> ContentReferenc
             temporary.unlink(missing_ok=True)
             raise
     final = destination / digest.hexdigest()
+    try:
+        if final.is_symlink():
+            raise ValueError("processor object must not be a symlink")
+        if final.exists():
+            if not final.is_file() or content_reference(final).sha256 != digest.hexdigest():
+                raise ValueError("existing processor object failed SHA-256 verification")
+            # A saved processor can hold this immutable input open. Replacing
+            # identical bytes is unnecessary and fails with Windows delete sharing.
+            temporary.unlink(missing_ok=True)
+            return ContentReference(path=final.resolve(), sha256=digest.hexdigest())
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
     if _GROUPED and os.name != "nt":
         # The file itself is already fsynced. Its directory entry only has to be
         # durable before a commit can refer to it, so one directory sync per
@@ -122,6 +137,8 @@ def _file_chunks(path: Path) -> Iterator[bytes]:
 def snapshot(archive: Path, path: Path) -> ContentReference:
     """Copy once into content-addressed storage before committing a DB reference."""
     destination = archive / "objects"
+    if destination.is_symlink():
+        raise ValueError("processor objects directory must not be a symlink")
     resolved = path.resolve()
     if (resolved.parent == destination.resolve() and OBJECT_NAME.fullmatch(resolved.name)
             and not path.is_symlink()):

@@ -9,6 +9,27 @@ of `processing-status` remains unchanged.
 
 ## Working-object lifetime
 
+`runtime.dispatch_steps` yields only between invocation submissions/results, outside
+SQLite transactions. `dispatch` drives it synchronously for existing callers.
+`ProductionPipeline.resume_steps` does not reset retry state: construction recovers
+interrupted invocations once. `run_file_workers` advances this cooperative dispatcher
+alongside source futures and publication requests, waiting on all completion/change
+futures. Source admission retains its synchronous mandatory ingest/message ranks;
+content invocation results are committed by the same owner between admissions.
+Pending jobs are claimed once and running inputs remain pinned. The background
+dispatcher closes before pool/writer teardown, including cancellation and exceptions.
+Only unlimited combined acquisition/content runs enable this path; unpublished ingest
+roots retain the prior recovery-before-retry pass and limited/deferred modes are unchanged.
+Source and saved-processing lanes have separate status arrays; global job/source counts
+remain independent and mixed activity does not substitute a processing ETA for acquisition.
+Job advancement restores its logical worker context for attachment publication;
+source-triggered cancellation cannot replace the source's original exception.
+The serial recovery pass completes unfinished ingest roots, including already-filed
+roots. Independent archived metadata stays in the parallel saved-work pool.
+The owner retains the first failure, stops new source admission/processor claims and
+drains returned invocation results before teardown. Explicit processor stops let
+already-started peers finish; cooperative user cancellation wakes those peers.
+
 `runtime.run` prepares interrupted checkpoints once. The dispatcher advances one
 generator per active message and submits its next invocation to a bounded
 `ThreadPoolExecutor`. Workers return typed results from isolated temporary
@@ -21,6 +42,9 @@ Failure/cancellation stops new claims while active work is checkpointed.
 An explicit `fail-import` ends its rank immediately; the coordinator submits no
 further invocations, including same-rank subscribers, after accepting that stop.
 Running inputs remain pinned against collection, including shared raw digests.
+`store.snapshot` verifies and reuses an existing immutable object instead of
+replacing a file an active processor may hold open. A mismatched or unsafe path
+fails without overwriting the existing bytes or retaining the temporary copy.
 Production passes `request.workers` to both archived-content and final-content
 passes; CLI `process --workers` overrides the shared worker preference, while
 other saved processing/source policy is retained. Source admission retains its existing
@@ -118,7 +142,7 @@ and catalog/processing commits, under the publication lock and writer lease.
 Dispatcher completion also releases unused objects after job commits. Ingest
 rank transitions defer this release until the outer source observation commits.
 Operation shutdown sweeps orphaned SHA-256 files and owned interrupted staging
-files. Unknown files and symlinks are preserved.
+files. Unknown files, digest-mismatched files and symlinks are preserved.
 
 An additive `object_references` index records job inputs and successful checkpoint
 outputs in their existing transactions. Existing V2 archives backfill the index
@@ -151,14 +175,16 @@ checkpoint rather than rescanning after canonical publication; old failures
 without an accepted decision still retry normally.
 Other processor failures retain their existing dependency barriers.
 After scanner startup, progress switches to `preparing processing`, then
-`Processing saved mail` and `Finishing saved imports`. With ingestion
-and unlimited content work enabled, the host drains eligible message/content
-jobs before replaying unpublished ingest roots or traversing sources, then runs
-content processing again for newly admitted mail. Deferred or explicitly bounded
-content runs retain their previous dispatch order and job budget.
+`Finishing saved imports`. The host completes mandatory ingest roots, including
+already-filed roots with unfinished handoffs. Only a genuinely unpublished root
+needs the preliminary archived-content recovery pass. With unlimited processing
+and source work, remaining saved jobs and source reads proceed together. A duplicate
+of an already-filed message leaves its metadata jobs with the shared dispatcher.
+Deferred or bounded modes retain their existing dispatch order and budget.
 Saved-import replay isolates ordinary failures for already archived messages in
 these modes too; unpublished roots keep stop-on-error behavior. Failed jobs stay
-recorded, and explicit `fail-import` still propagates before new source admission.
+recorded. An accepted explicit `fail-import` stops new source admission immediately,
+and the owner checkpoints already-returned processor results before reporting it.
 The preliminary pass retains failed jobs without raising their aggregate error;
 the ordinary final content pass still reports failures after mail admission.
 Its dispatcher continues independent jobs after failure while leaving descendants
