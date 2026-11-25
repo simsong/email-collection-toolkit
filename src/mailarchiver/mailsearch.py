@@ -20,6 +20,7 @@ import argparse
 from collections.abc import Iterator
 from contextlib import contextmanager
 import json
+import math
 import re
 import shlex
 import shutil
@@ -53,6 +54,7 @@ from .search_text import (
 
 DEFAULT_LIMIT = 10
 RECENT_FTS_SCAN_LIMIT = 10_000
+DATE_WALK_MINIMUM_HITS = 1_000
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
@@ -166,7 +168,7 @@ def _prepare_text(database: sqlite3.Connection, terms: SearchTerms, attachments:
 
 
 def _text_predicate(terms: SearchTerms, content: str = "content", index: int | None = None,
-                    table: str = "message_fts") -> SearchStatement:
+                    table: str = "message_fts", fts_match: bool = True) -> SearchStatement:
     selected = terms.text if index is None else [terms.text[index]]
     matches = terms.fts_matches or [fts_query([term]) for term in terms.text]
     splits = terms.split_matches or [""] * len(terms.text)
@@ -174,8 +176,9 @@ def _text_predicate(terms: SearchTerms, content: str = "content", index: int | N
              for match, split in zip(matches, splits, strict=True)]
     selected_matches = broad if index is None else [broad[index]]
     match = " AND ".join(value for value in selected_matches if value)
-    clauses = [f"{content} MATCH ?"] if match else []
-    parameters: list[str | int] = [match] if match else []
+    # Callers that already restricted rows to the broad match omit the per-row MATCH.
+    clauses = [f"{content} MATCH ?"] if match and fts_match else []
+    parameters: list[str | int] = [match] if match and fts_match else []
     for term in selected:
         term_index = terms.text.index(term)
         if splits[term_index]:
@@ -194,7 +197,64 @@ def _text_predicate(terms: SearchTerms, content: str = "content", index: int | N
         if term in terms.phrase_checks:
             clauses.append(f"search_phrase({content}, ?)")
             parameters.append(search_fold(term))
-    return SearchStatement(sql=" AND ".join(clauses) or "0", parameters=parameters)
+    return SearchStatement(sql=" AND ".join(clauses) or ("0" if fts_match else "1"), parameters=parameters)
+
+
+def _broad_match(terms: SearchTerms) -> str:
+    """FTS expression every candidate of a body search satisfies, before content checks."""
+    matches = terms.fts_matches or [fts_query([term]) for term in terms.text]
+    splits = terms.split_matches or [""] * len(terms.text)
+    return " AND ".join(f"({match} OR ({split}))" if split else match
+                        for match, split in zip(matches, splits, strict=True) if match)
+
+
+def _date_walk_statement(terms: SearchTerms, limit: int, offset: int) -> SearchStatement:
+    """Walk the newest-first date index, testing each message against the precomputed FTS hits.
+
+    For frequent words a page fills after a few hundred messages, so neither
+    every hit's date nor every hit's content is read. Content checks run only
+    on messages already known to be broad FTS hits.
+    """
+    text = _text_predicate(terms, "f.content", fts_match=False)
+    sql = (
+        "WITH hits(rowid) AS MATERIALIZED (SELECT rowid FROM search.message_fts WHERE message_fts MATCH ?), "
+        "candidates AS MATERIALIZED ("
+        "SELECT m.message_pk, m.sha256, sender.address AS sender, m.subject, m.date_utc "
+        "FROM messages m INDEXED BY messages_date_message "
+        "CROSS JOIN search.message_metadata metadata ON metadata.sha256 = m.sha256 "
+        "CROSS JOIN search.message_fts f ON f.rowid = metadata.message_fts_rowid "
+        "CROSS JOIN email_addresses sender ON sender.address_pk = m.sender_address_pk "
+        f"WHERE m.category IN (?, ?) AND metadata.message_fts_rowid IN hits AND {text.sql} "
+        "ORDER BY m.date_utc DESC, m.message_pk DESC LIMIT ? OFFSET ?) "
+        "SELECT c.message_pk, COALESCE(group_concat(DISTINCT recipient.address), ''), "
+        "c.sender, c.subject, c.date_utc, COALESCE(metadata.attachment_count, 0) "
+        "FROM candidates c "
+        "LEFT JOIN search.message_metadata metadata ON metadata.sha256 = c.sha256 "
+        "LEFT JOIN recipients r ON r.message_pk = c.message_pk "
+        "LEFT JOIN email_addresses recipient ON recipient.address_pk = r.address_pk "
+        "GROUP BY c.message_pk ORDER BY c.date_utc DESC, c.message_pk DESC"
+    )
+    return SearchStatement(sql=sql, parameters=[_broad_match(terms), *SEARCH_CATEGORIES,
+                                                *text.parameters, limit, offset])
+
+
+def _frequent_text(database: sqlite3.Connection, terms: SearchTerms, limit: int, offset: int) -> bool:
+    """Choose the date walk when hits are dense enough that it beats sorting every hit.
+
+    Walking costs about (offset + limit) * N / hits probes; sorting costs about
+    hits row reads, so the crossover is near sqrt((offset + limit) * N). The
+    probe stops counting at that threshold, keeping this check cheap.
+    """
+    broad = _broad_match(terms)
+    if not broad:  # Symbols-only quotes scan text instead of matching words.
+        return False
+    indexed = database.execute("SELECT max(rowid) FROM search.message_fts").fetchone()[0] or 0
+    threshold = max(DATE_WALK_MINIMUM_HITS, math.isqrt((offset + limit) * indexed))
+    hits = database.execute(
+        "SELECT count(*) FROM (SELECT 1 FROM search.message_fts WHERE message_fts MATCH ? LIMIT ?)",
+        (broad, threshold),
+    ).fetchone()[0]
+    return bool(hits >= threshold)
 
 
 def _search_predicate(
@@ -480,6 +540,13 @@ def _search_session(archive: Path) -> Iterator[tuple[sqlite3.Connection, SearchI
         database.close()
 
 
+def warm_search_vocabulary(archive: Path) -> None:
+    """Scan (or load the stored scan of) legacy vocabulary before the first text search."""
+    with _search_session(archive) as (database, stamp):
+        if stamp is not None:
+            search_vocabulary(database, stamp, False)
+
+
 def search_header_page(
     archive: Path,
     terms: SearchTerms,
@@ -497,6 +564,14 @@ def search_header_page(
         terms = terms.model_copy(update={"address_names": True})
         terms = _prepare_text(database, terms, search_attachments, stamp)
         fields = ("message_pk", "recipients", "sender", "subject", "date_utc", "attachment_count")
+        if (limit and sort_by is SortField.DATE and direction is SortDirection.DESCENDING
+                and _is_plain_text_search(terms, sort_by, direction, search_attachments, mailbox_selections)
+                and _frequent_text(database, terms, limit, offset)):
+            walk = _date_walk_statement(terms, limit, offset)
+            return SearchHeaderPage(results=[
+                MessageHeader.model_validate(dict(zip(fields, row)))
+                for row in database.execute(walk.sql, walk.parameters)
+            ])
         recent_eligible = _is_plain_recent_text_search(
             terms, limit, sort_by, direction, search_attachments, mailbox_selections
         )

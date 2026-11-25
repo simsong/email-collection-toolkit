@@ -6,6 +6,17 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a98 — fast single-word search on legacy indexes
+
+- The scan of the full-text vocabulary for words whose spelling changes under
+  folding is stored in the user cache folder, keyed by the index, and warmed
+  in the background when a desktop window opens an archive. It used to run in
+  every process and took 11–30 s on large archives.
+- Words split by combining accents are matched with adjacent fragment pairs
+  instead of single-token prefixes, which leaves far fewer candidates to check.
+- Frequent words page through the date index instead of sorting every hit.
+- Add `make benchmark-search`, an end-to-end, read-only search benchmark.
+
 ## 1.0.0a97 — fewer ingest commits, full macOS durability
 
 - Combine the batched ingest commits, macOS durability and end-to-end benchmark
