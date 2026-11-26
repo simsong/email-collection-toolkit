@@ -53,7 +53,7 @@ from .mailsearch import (
     warm_search_vocabulary,
 )
 from .mbox import frame_message
-from .message import decoded_message_header
+from .message import decoded_message_header, display_entity
 from .mime_tree import MimeReaderLimitError, OriginalMimeParts, decoded_leaf_payload, original_part_payload, walk_mime
 from .plugin_api import SourceContainerMetadata
 from .processing.identities import IdentityMessages
@@ -65,9 +65,6 @@ IMMEDIATE_SEARCH_LIMIT = 2_000
 RAW_PART_ID = -1
 LEGACY_X_HTML_PART_ID = -2
 HEADER_BODY_SEPARATOR = re.compile(br"\r\n\r\n|\n\n|\r\r")
-# Older ingests kept a source envelope (often mboxo-quoted as ">From ") as the
-# first line of the canonical bytes. It is not a header, so display parsing skips it.
-LEADING_ENVELOPE_LINE = re.compile(br"\A>*From [^\r\n]*(?:\r\n|\n|\r)")
 LEGACY_X_HTML = re.compile(
     br"\A[ \t\r\n]*<x-html>[ \t\r\n]*(?P<body>.*?)[ \t\r\n]*</x-html>[ \t\r\n]*\Z",
     re.IGNORECASE | re.DOTALL,
@@ -314,15 +311,6 @@ def message_previews(archive: Path, message_pks: list[int]) -> list[MessagePrevi
         return [MessagePreview(message_pk=message_pk, preview=previews.get(message_pk, "")) for message_pk in unique_pks]
     finally:
         database.close()
-
-
-def display_entity(raw: bytes) -> bytes:
-    """Return the RFC 5322 entity to parse for display, without a leading envelope line.
-
-    The canonical bytes are unchanged; Raw Source, Save Message and hashes use them.
-    """
-    match = LEADING_ENVELOPE_LINE.match(raw)
-    return raw if match is None else raw[match.end():]
 
 
 def parsed_message(archive: Path, message_pk: int, *, headers_only: bool = False) -> tuple[bytes, Message]:

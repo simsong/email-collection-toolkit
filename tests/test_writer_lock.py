@@ -151,7 +151,7 @@ def test_update_reservation_waits_for_external_writer_and_blocks_external_creati
         assert blocked.is_dir()
 
 
-def test_cli_refresh_index_uses_the_same_writer_lease(tmp_path: Path) -> None:
+def test_cli_rebuild_index_uses_the_same_writer_lease(tmp_path: Path) -> None:
     """Requirement: a command-line search-index writer fails clearly instead of waiting."""
     archive = tmp_path / "archive"
     archive.mkdir()
@@ -160,7 +160,7 @@ def test_cli_refresh_index_uses_the_same_writer_lease(tmp_path: Path) -> None:
     lease = acquire(archive, "gui-import")
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index"],
+            [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "rebuild-index"],
             check=False,
             capture_output=True,
             text=True,

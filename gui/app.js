@@ -518,6 +518,14 @@ async function refreshIngestOverview() {
   line.hidden = elements.search.disabled;
   line.className = `ingest-status-line no-print${status ? ` ${status.state}` : ""}`;
   line.dataset.statusId = status?.status_id || "";
+  const rebuild = overview.index_rebuild;
+  if (rebuild) {
+    line.className = "ingest-status-line no-print running";
+    setIngestStatusText(rebuild.total_bytes
+      ? `${rebuild.phase} · ${Number(rebuild.percent).toFixed(1)}% · ${formatBytes(rebuild.completed_bytes)} of ${formatBytes(rebuild.total_bytes)} · ETA ${rebuild.eta}`
+      : rebuild.phase);
+    return;
+  }
   if (!status) {
     setIngestStatusText("No ingest history · Click to open Activity");
     return;
@@ -535,6 +543,15 @@ async function refreshIngestOverview() {
   } else {
     setIngestStatusText(`Last ingest ${status.state}: ${status.phase} · ${messages} messages · Click for details`);
   }
+}
+
+function formatBytes(value) {
+  let amount = Number(value);
+  for (const unit of ["B", "KiB", "MiB", "GiB", "TiB"]) {
+    if (amount < 1024 || unit === "TiB") return unit === "B" ? `${Math.trunc(amount)} B` : `${amount.toFixed(1)} ${unit}`;
+    amount /= 1024;
+  }
+  return `${value} B`;
 }
 
 function setIngestStatusText(text) {

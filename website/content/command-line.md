@@ -77,7 +77,7 @@ Never put a password in a command, an environment variable, or a file.
 | `ect human-contacts --archive ARCHIVE` | Likely correspondents with dates and counts |
 | `ect identities --archive ARCHIVE addresses` | List and edit name groupings |
 | `ect process --archive ARCHIVE` | Finish or resume processing saved mail |
-| `ect refresh-index --archive ARCHIVE` | Rebuild the search index |
+| `ect rebuild-index --archive ARCHIVE` | Rebuild the search index |
 | `ect compare-apple-mail --apple-mail ~/Library/Mail --archive ARCHIVE` | Compare an Apple Mail cache with the archive |
 | `ect extract-pdf-mail printed.pdf --output recovered.mboxrd` | Recover printed email from a PDF into a new MBOX for review |
 | `ect gui --archive ARCHIVE` | Open the desktop application on an archive |

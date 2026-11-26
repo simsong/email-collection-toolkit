@@ -46,6 +46,9 @@ GOOGLE_CHAT_SENDER = re.compile(
 )
 EMBEDDED_MBOX_ENVELOPE = re.compile(br"(?m)^>From [^\r\n]*\r?\n")
 HEADER_SEPARATOR = re.compile(br"\r?\n\r?\n")
+# Older ingests kept a source envelope (often mboxo-quoted as ">From ") as the
+# first line of the canonical bytes. It is not a header, so derived parses skip it.
+LEADING_ENVELOPE_LINE = re.compile(br"\A>*From [^\r\n]*(?:\r\n|\n|\r)")
 BODY_DATE_HEADER = re.compile(r"(?im)^[ \t>]*Date:[ \t]*(.+)$")
 
 
@@ -252,6 +255,15 @@ def decoded_header_bytes(value: bytes, declared_encoding: str | None = None) -> 
         decoded = decode_header_value(recovered.value)
         return DecodedHeaderValue(value=decoded.value, defect=decoded.defect or recovered.defect)
     return decode_header_value(text)
+
+
+def display_entity(raw: bytes) -> bytes:
+    """Return the RFC 5322 entity to parse, without a leading envelope line.
+
+    Canonical bytes are unchanged; Raw Source, exports and hashes use them.
+    """
+    match = LEADING_ENVELOPE_LINE.match(raw)
+    return raw if match is None else raw[match.end():]
 
 
 def decoded_message_header(raw: bytes, message: Message, name: str, occurrence: int = 0) -> str:

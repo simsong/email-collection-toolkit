@@ -143,8 +143,8 @@ from .writer_lock import ArchiveBusyError, WriterLease
 from .imap_state import initialize_state, record_download, refresh_observation
 
 DEFAULT_REPORT_TOP = 10
-REFRESH_INDEX_DEFAULT_WORKERS = half_cpus()
-REFRESH_INDEX_MAX_IN_FLIGHT_BYTES = 256 * 1024 * 1024
+REBUILD_INDEX_DEFAULT_WORKERS = half_cpus()
+REBUILD_INDEX_MAX_IN_FLIGHT_BYTES = 256 * 1024 * 1024
 CLAMAV_START_PHASE = "waiting for ClamAV startup"
 DISCOVERY_PHASE = "discovering sources"
 TOP_LINE_STYLE = "\x1b[37;44m"
@@ -355,69 +355,84 @@ class OverallProgress(BaseModel):
     eta: str
 
 
-class RefreshIndexProgress(BaseModel):
-    """A single, observable phase of the disposable-index rebuild."""
+class RebuildIndexProgress(BaseModel):
+    """One observable, byte-measured phase of the disposable-index rebuild.
+
+    Totals come from catalog record lengths and mailbox file sizes, which are
+    known before any message is read, so percent and ETA track bytes processed.
+    """
 
     phase: str
-    total: int
-    unit: str
+    total_bytes: int
     started_monotonic: float = Field(default_factory=time.monotonic)
-    completed: int = 0
+    completed_bytes: int = 0
+
+    @property
+    def percent(self) -> float:
+        return 100.0 if self.total_bytes == 0 else 100 * min(self.completed_bytes, self.total_bytes) / self.total_bytes
+
+    def eta(self, now: float) -> str:
+        completed = min(self.completed_bytes, self.total_bytes)
+        if completed >= self.total_bytes:
+            return "0s"
+        if completed == 0:
+            return "calculating"
+        elapsed = max(now - self.started_monotonic, 0.001)
+        return formatted_duration((self.total_bytes - completed) * elapsed / completed)
 
 
-def refresh_index_line(progress: RefreshIndexProgress, now: float, width: int = 24) -> str:
-    """Render bounded rebuild progress without relying on terminal controls."""
-    completed = min(progress.completed, progress.total)
-    percent = 100 if progress.total == 0 else 100 * completed / progress.total
+def rebuild_index_line(progress: RebuildIndexProgress, now: float, width: int = 24) -> str:
+    """Render bounded byte progress without relying on terminal controls."""
+    completed = min(progress.completed_bytes, progress.total_bytes)
     elapsed = max(now - progress.started_monotonic, 0.001)
-    if completed >= progress.total:
-        eta = "0s"
-    elif completed == 0:
-        eta = "calculating"
-    else:
-        eta = formatted_duration((progress.total - completed) * elapsed / completed)
-    filled = round(width * percent / 100)
+    filled = round(width * progress.percent / 100)
     bar = "#" * filled + "-" * (width - filled)
-    rate = completed / elapsed
     return (
-        f"{progress.phase}: [{bar}] {percent:5.1f}% {completed:,}/{progress.total:,} "
-        f"{progress.unit}  {rate:,.0f} {progress.unit}/s  ETA {eta}"
+        f"{progress.phase}: [{bar}] {progress.percent:5.1f}% {formatted_bytes(completed)} of "
+        f"{formatted_bytes(progress.total_bytes)}  {formatted_bytes(int(completed / elapsed))}/s  ETA {progress.eta(now)}"
     )
 
 
-class RefreshIndexReporter:
-    """Show low-noise, terminal-friendly progress for a refresh-index run."""
+class RebuildIndexReporter:
+    """Report rebuild progress to a terminal, or to a callback such as the GUI."""
 
-    def __init__(self, phase: str, total: int, unit: str) -> None:
-        self.progress = RefreshIndexProgress(phase=phase, total=total, unit=unit)
+    def __init__(self, phase: str, total_bytes: int,
+                 observer: Callable[[RebuildIndexProgress], None] | None = None) -> None:
+        self.progress = RebuildIndexProgress(phase=phase, total_bytes=total_bytes)
+        self.observer = observer
         self.tty = sys.stderr.isatty()
+        self.last_tenth: int | None = None
 
     def display(self, *, force: bool = False) -> None:
-        now = time.monotonic()
-        percent = self.progress.completed * 100 // max(self.progress.total, 1)
-        if not force and getattr(self, "last_percent", None) == percent:
+        tenth = int(self.progress.percent * 10)
+        if not force and self.last_tenth == tenth:
             return
-        self.last_percent = percent
-        line = refresh_index_line(self.progress, now)
+        self.last_tenth = tenth
+        if self.observer is not None:
+            self.observer(self.progress.model_copy())
+            return
+        if not force and not self.tty and tenth % 10:
+            return  # Logs get one line per whole percent; terminals redraw per tenth.
+        line = rebuild_index_line(self.progress, time.monotonic())
         if self.tty:
             sys.stderr.write(f"\r\x1b[2K{line}")
         else:
             print(line, file=sys.stderr)
         sys.stderr.flush()
 
-    def advance(self, amount: int = 1) -> None:
-        self.progress.completed += amount
+    def advance(self, byte_count: int) -> None:
+        self.progress.completed_bytes += byte_count
         self.display()
 
     def finish(self) -> None:
-        self.progress.completed = self.progress.total
+        self.progress.completed_bytes = self.progress.total_bytes
         self.display(force=True)
-        if self.tty:
+        if self.tty and self.observer is None:
             sys.stderr.write("\n")
             sys.stderr.flush()
 
 
-class RefreshIndexInterrupted(KeyboardInterrupt):
+class RebuildIndexInterrupted(KeyboardInterrupt):
     """Report whether Ctrl-C arrived before or after atomic search publication."""
 
     def __init__(self, published: bool) -> None:
@@ -425,7 +440,7 @@ class RefreshIndexInterrupted(KeyboardInterrupt):
         self.published = published
 
 
-class RefreshIndexWork(BaseModel):
+class RebuildIndexWork(BaseModel):
     """One immutable verified-MBOX read assigned to a refresh worker."""
 
     message_pk: int
@@ -435,7 +450,7 @@ class RefreshIndexWork(BaseModel):
     location: MboxLocation
 
 
-class PreparedRefreshIndexMessage(BaseModel):
+class PreparedRebuildIndexMessage(BaseModel):
     """The ordered worker result consumed by the sole SQLite writer."""
 
     message_pk: int
@@ -443,7 +458,7 @@ class PreparedRefreshIndexMessage(BaseModel):
     indexed: PreparedSearchMessage
 
 
-class RefreshIndexPublication:
+class RebuildIndexPublication:
     """Make the final paired derived-data publication uninterruptible."""
 
     def __enter__(self) -> None:
@@ -2776,16 +2791,16 @@ def report(args: argparse.Namespace) -> None:
     print_report(Path(args.archive), report_years(args.year), args.top)
 
 
-def prepare_refresh_index_message(
-    archive: Path, index_attachments: bool, work: RefreshIndexWork
-) -> PreparedRefreshIndexMessage:
+def prepare_rebuild_index_message(
+    archive: Path, index_attachments: bool, work: RebuildIndexWork
+) -> PreparedRebuildIndexMessage:
     """Verify and parse one canonical message away from the SQLite writer."""
     raw = read_verified_location(
         mbox_path(archive, work.filename),
         work.location,
         work.sha256,
     )
-    return PreparedRefreshIndexMessage(
+    return PreparedRebuildIndexMessage(
         message_pk=work.message_pk,
         date_utc=work.date_utc,
         indexed=prepare_search_message(raw, index_attachments, sha256=work.sha256),
@@ -2795,17 +2810,23 @@ def prepare_refresh_index_message(
 def rebuild_search_index(
     archive: Path,
     index_attachments: bool,
-    workers: int = REFRESH_INDEX_DEFAULT_WORKERS,
+    workers: int = REBUILD_INDEX_DEFAULT_WORKERS,
     *,
     writer_lease: WriterLease | None = None,
+    observer: Callable[[RebuildIndexProgress], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> None:
-    """Build and publish a replacement search database under the writer lease."""
+    """Build and publish a replacement search database under the writer lease.
+
+    ``observer`` receives byte progress instead of terminal output (the GUI).
+    ``should_stop`` is polled between messages; stopping discards the replacement.
+    """
     identity = os.path.normcase(str(archive.resolve(strict=True)))
     owned = writer_lease is None
     lease = writer_lease or WriterLease.acquire(
         archive,
         identity,
-        "refresh search index",
+        "rebuild search index",
         uuid4().hex,
         version("mailarchiver"),
     )
@@ -2814,14 +2835,16 @@ def rebuild_search_index(
             lease.release()
         raise ValueError("an acquired writer lease for this archive is required")
     try:
-        _rebuild_search_index(archive, index_attachments, workers)
+        _rebuild_search_index(archive, index_attachments, workers, observer, should_stop)
     finally:
         if owned:
             lease.release()
 
 
 def _rebuild_search_index(
-    archive: Path, index_attachments: bool, workers: int
+    archive: Path, index_attachments: bool, workers: int,
+    observer: Callable[[RebuildIndexProgress], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> None:
     temporary = archive / "search.sqlite3.tmp"
     temporary.unlink(missing_ok=True)
@@ -2848,11 +2871,13 @@ def _rebuild_search_index(
                 for path in sorted(mbox_directory(archive).glob("*.mbox"))
                 if not QUARANTINE_MAILBOX.fullmatch(path.name)
             ]
-            mailbox_progress = RefreshIndexReporter(
-                "Checking canonical mailboxes", int(expected_row[0]), "messages"
+            mailbox_progress = RebuildIndexReporter(
+                "Checking canonical mailboxes", sum(path.stat().st_size for path in mailboxes), observer
             )
             mailbox_progress.display(force=True)
             for path in mailboxes:
+                if should_stop is not None and should_stop():
+                    raise KeyboardInterrupt
                 box = PreservingMbox(path, factory=None, create=False)
                 try:
                     actual = len(box)
@@ -2863,7 +2888,7 @@ def _rebuild_search_index(
                     raise RuntimeError(
                         f"canonical MBOX/catalog count mismatch for {path.name}: {actual} records, {expected} catalogued"
                     )
-                mailbox_progress.advance(expected)
+                mailbox_progress.advance(path.stat().st_size)
             mailbox_progress.finish()
             rows = catalog.execute(
                 "SELECT messages.message_pk, messages.sha256, messages.date_utc, mbox_generations.filename, "
@@ -2874,32 +2899,42 @@ def _rebuild_search_index(
                 "WHERE messages.category IN (?, ?) ORDER BY mbox_generations.filename, locations.byte_offset",
                 SEARCH_CATEGORIES,
             )
+            total_row = catalog.execute(
+                "SELECT COALESCE(SUM(locations.byte_length), 0) FROM locations "
+                "JOIN messages ON messages.message_pk = locations.message_pk WHERE messages.category IN (?, ?)",
+                SEARCH_CATEGORIES,
+            ).fetchone()
+            assert total_row is not None
             catalog.execute("BEGIN")
             indexed = 0
-            message_progress = RefreshIndexReporter(
-                f"Refreshing search index ({workers} workers)", int(expected_row[0]), "messages"
+            message_progress = RebuildIndexReporter(
+                f"Rebuilding search index ({workers} workers)", int(total_row[0]), observer
             )
             message_progress.display(force=True)
             next_row = next(rows, None)
-            pending: deque[tuple[Future[PreparedRefreshIndexMessage], int]] = deque()
+            pending: deque[tuple[Future[PreparedRebuildIndexMessage], int]] = deque()
             in_flight_bytes = 0
-            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="refresh-index") as pool:
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="rebuild-index") as pool:
                 while next_row is not None or pending:
+                    if should_stop is not None and should_stop():
+                        for future, _length in pending:
+                            future.cancel()
+                        raise KeyboardInterrupt
                     while next_row is not None and len(pending) < workers:
                         message_pk, digest, date_utc, filename, offset, length = next_row
                         if QUARANTINE_MAILBOX.fullmatch(filename):
                             raise RuntimeError(f"searchable catalog message is stored in quarantine MBOX: {filename}")
-                        work = RefreshIndexWork(
+                        work = RebuildIndexWork(
                             message_pk=message_pk,
                             sha256=digest,
                             date_utc=date_utc,
                             filename=filename,
                             location=MboxLocation(byte_offset=offset, byte_length=length),
                         )
-                        if pending and in_flight_bytes + work.location.byte_length > REFRESH_INDEX_MAX_IN_FLIGHT_BYTES:
+                        if pending and in_flight_bytes + work.location.byte_length > REBUILD_INDEX_MAX_IN_FLIGHT_BYTES:
                             break
                         pending.append(
-                            (pool.submit(prepare_refresh_index_message, archive, index_attachments, work), work.location.byte_length)
+                            (pool.submit(prepare_rebuild_index_message, archive, index_attachments, work), work.location.byte_length)
                         )
                         in_flight_bytes += work.location.byte_length
                         next_row = next(rows, None)
@@ -2912,13 +2947,13 @@ def _rebuild_search_index(
                         (prepared.indexed.subject, prepared.message_pk, prepared.indexed.subject),
                     )
                     indexed += 1
-                    message_progress.advance()
+                    message_progress.advance(byte_length)
             if indexed != int(expected_row[0]):
                 raise RuntimeError(
                     f"catalog has {expected_row[0]} searchable messages but only {indexed} have canonical locations"
                 )
             message_progress.finish()
-            with RefreshIndexPublication():
+            with RebuildIndexPublication():
                 search.commit()
                 catalog.commit()
                 search.close()
@@ -2929,15 +2964,15 @@ def _rebuild_search_index(
     except KeyboardInterrupt as error:
         if catalog.in_transaction:
             catalog.rollback()
-        raise RefreshIndexInterrupted(published) from error
+        raise RebuildIndexInterrupted(published) from error
     finally:
         catalog.close()
         temporary.unlink(missing_ok=True)
 
 
-def refresh_index(args: argparse.Namespace) -> None:
+def rebuild_index(args: argparse.Namespace) -> None:
     print(
-        "refresh-index: Ctrl-C discards the incomplete replacement; the existing search index remains unchanged",
+        "rebuild-index: Ctrl-C discards the incomplete replacement; the existing search index remains unchanged",
         file=sys.stderr,
         flush=True,
     )
@@ -3014,14 +3049,15 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     contacts_parser.add_argument("--all", action="store_true", help="include all human header addresses, not only direct Contacts")
     contacts_parser.add_argument("--format", choices=("table", "tsv", "json"), default="table")
     contacts_parser.set_defaults(function=contact_list)
-    refresh_parser = commands.add_parser("refresh-index")
-    refresh_parser.add_argument("--index-attachments", action="store_true", help="include text attachments; PDF and Office extraction is planned")
-    refresh_parser.add_argument(
+    rebuild_parser = commands.add_parser(
+        "rebuild-index", help="rebuild the search index from the archive's MBOX files, without reimporting")
+    rebuild_parser.add_argument("--index-attachments", action="store_true", help="include text attachments; PDF and Office extraction is planned")
+    rebuild_parser.add_argument(
         "--workers",
         type=worker_argument,
         help="verified-message workers; override preferences (default: half CPUs; maximum: twice CPUs)",
     )
-    refresh_parser.set_defaults(function=refresh_index)
+    rebuild_parser.set_defaults(function=rebuild_index)
     for child in commands.choices.values():
         child.add_argument("--archive", type=Path, default=argparse.SUPPRESS,
                            help="archive directory; defaults to $MAIL_ARCHIVE_DIR")
@@ -3040,7 +3076,7 @@ def execute(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         args.function(args)
     except ContactInputError as error:
         parser.error(str(error))
-    except RefreshIndexInterrupted as error:
+    except RebuildIndexInterrupted as error:
         message = (
             "interrupted: the rebuilt search index was already published; no partial index exists"
             if error.published

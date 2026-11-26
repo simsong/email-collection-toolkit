@@ -29,7 +29,7 @@ import sys
 import tempfile
 import time
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
-from contextlib import contextmanager, nullcontext
+from contextlib import closing, contextmanager, nullcontext
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from importlib import import_module
@@ -61,7 +61,15 @@ from .release_versions import release_metadata
 from .sparkle import SparkleBackend, start_installed_updater
 from .macos_preferences import MacOSPreferences
 from .winsparkle import WinSparkleBackend
-from .__main__ import IngestInterrupted, IngestOutcome, IngestRequest, run_ingest
+from .__main__ import (
+    IngestInterrupted,
+    IngestOutcome,
+    IngestRequest,
+    RebuildIndexInterrupted,
+    RebuildIndexProgress,
+    rebuild_search_index,
+    run_ingest,
+)
 from .archive_validation import ValidationStopped, validate_archive
 from .archive_validation import write_report as write_validation_report
 from .application import (
@@ -71,12 +79,14 @@ from .application import (
     MultiMessageFormat,
     SearchWindow,
     SetupSelection,
+    configured_workers,
     validate_ingest_paths,
 )
 from .scanner import CLAMAV_DOWNLOAD_URL, UNSCANNED_WARNING, ScannerAvailability, scanner_availability
 from .configuration import GuiConfiguration, application_configuration
 from .gui_default_lists import DefaultListsApi
 from .gui_metadata import message_metadata
+from .sqlite_paths import sqlite_uri
 from .document_options import DocumentOptions, OwnerRulesState
 from .owner_rules import OwnerRules
 from .configuration_diagnostics import ConfigurationError
@@ -222,9 +232,20 @@ class PreviewRequest(BaseModel):
     message_pks: list[int]
 
 
+class IndexRebuildStatus(BaseModel):
+    """Byte progress of a running File > Rebuild Search Index, for the status line."""
+
+    phase: str
+    percent: float
+    completed_bytes: int
+    total_bytes: int
+    eta: str
+
+
 class GuiIngestOverview(BaseModel):
     status: IngestStatus | None = None
     active: bool = False
+    index_rebuild: IndexRebuildStatus | None = None
 
 
 class GuiIngestStatus(IngestStatus):
@@ -922,6 +943,16 @@ INGEST_BRIDGE_METHODS = (
 )
 
 
+def _search_index_has_attachments(archive: Path) -> bool:
+    """Keep a rebuild's attachment indexing the same as the index it replaces."""
+    try:
+        with closing(sqlite3.connect(sqlite_uri(archive / "search.sqlite3"), uri=True)) as search:
+            return search.execute(
+                "SELECT 1 FROM message_metadata WHERE attachment_fts_rowid IS NOT NULL LIMIT 1").fetchone() is not None
+    except sqlite3.Error:
+        return False
+
+
 class GuiApi:
     """Narrow API exposed to one webview window."""
 
@@ -1064,7 +1095,9 @@ class GuiApi:
         status = latest_ingest_status(self._archive()) if self.archive and _is_archive(self.archive) else None
         status = status.for_display() if status is not None else None
         active = bool(self.document and self.document.ingest_job) or bool(status and status.state == "running")
-        return GuiIngestOverview(status=status, active=active).model_dump(mode="json")
+        rebuild = (self.application.index_rebuild_status(self.document)
+                   if self.application is not None and self.document is not None else None)
+        return GuiIngestOverview(status=status, active=active, index_rebuild=rebuild).model_dump(mode="json")
 
     def open_ingest_window(self, status_id: str | None = None, imap_source_id: str | None = None) -> bool:
         """Open or focus the ingest browser shared by this archive document."""
@@ -1865,6 +1898,7 @@ class PyWebViewApplication:
         self._tasks: dict[Future[None], ApplicationTask] = {}
         self._import_futures: set[Future[None]] = set()
         self._writers: set[Event] = set()
+        self._index_rebuilds: dict[str, RebuildIndexProgress] = {}
         self._updates_started = False
         self._updating = False
         self._definition_updates = 0
@@ -2942,6 +2976,68 @@ class PyWebViewApplication:
 
         return self._submit_task("Revalidate archive", run) is not None
 
+    def index_rebuild_status(self, document: ArchiveDocument) -> IndexRebuildStatus | None:
+        with self._lock:
+            progress = self._index_rebuilds.get(document.descriptor.document_id)
+        if progress is None:
+            return None
+        return IndexRebuildStatus(phase=progress.phase, percent=round(progress.percent, 1),
+                                  completed_bytes=progress.completed_bytes, total_bytes=progress.total_bytes,
+                                  eta=progress.eta(time.monotonic()))
+
+    def rebuild_active_search_index(self) -> bool:
+        """File > Rebuild Search Index: replace search.sqlite3 from the canonical MBOX files.
+
+        Runs in the background under the archive writer lease; byte progress appears in
+        each search window's status line. The old index stays in use until the new one
+        is published atomically, and stopping (Quit) discards the replacement.
+        """
+        document = self.active_document()
+        if document is None or document.path is None:
+            return False
+        archive = document.path
+        label = document.display_path or archive
+        document_id = document.descriptor.document_id
+        if document.ingest_job is not None:
+            self.add_notice("warning", "Suspend the active import or processing before rebuilding the search index.")
+            return False
+        with self._lock:
+            if document_id in self._index_rebuilds:
+                self.add_notice("information", f"The search index of {label} is already being rebuilt.")
+                return False
+            self._index_rebuilds[document_id] = RebuildIndexProgress(phase="Preparing to rebuild search index", total_bytes=0)
+        self._status_changed()
+
+        def observe(progress: RebuildIndexProgress) -> None:
+            with self._lock:
+                self._index_rebuilds[document_id] = progress
+            self._status_changed()
+
+        def run() -> None:
+            try:
+                with self.writer_activity():
+                    rebuild_search_index(archive, _search_index_has_attachments(archive), configured_workers(),
+                                         observer=observe, should_stop=lambda: self._quitting)
+            except RebuildIndexInterrupted:
+                return
+            except (OSError, ValueError, RuntimeError, sqlite3.Error) as error:
+                self.add_notice("error", f"Could not rebuild the search index of {label}: {error}")
+                return
+            finally:
+                with self._lock:
+                    self._index_rebuilds.pop(document_id, None)
+                    window_ids = tuple(window_id for window_id, api in self._apis.items() if api.document is document)
+                if not self._quitting:
+                    self._refresh_search_windows(window_ids)
+                self._status_changed()
+            self.add_notice("information", f"Rebuilt the search index of {label}.")
+
+        if self._submit_task("Rebuild search index", run) is None:
+            with self._lock:
+                self._index_rebuilds.pop(document_id, None)
+            return False
+        return True
+
     def reveal_active_archive(self) -> bool:
         """Open the saved archive folder through the platform shell."""
         document = self.active_document()
@@ -3581,6 +3677,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
                           MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
                           MenuAction("Export Selected Messages…", application.export_selected_messages),
                           MenuAction("Revalidate Archive", application.revalidate_active_archive),
+                          MenuAction("Rebuild Search Index", application.rebuild_active_search_index),
                           MenuAction("Document Options…", application.open_document_options),
                           MenuAction("Customizable Default Lists…", application.open_default_lists),
                           MenuAction("Show Archive in Explorer", application.reveal_active_archive),
@@ -3600,6 +3697,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
             MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
             MenuAction("Export Selected Messages…", application.export_selected_messages),
             MenuAction("Revalidate Archive", application.revalidate_active_archive),
+            MenuAction("Rebuild Search Index", application.rebuild_active_search_index),
             MenuAction("Document Options…", application.open_document_options),
             MenuAction("Customizable Default Lists…", application.open_default_lists),
             MenuAction("Close", application.close_active_window),

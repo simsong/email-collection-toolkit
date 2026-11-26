@@ -104,8 +104,14 @@ both. Do not add daily counts together to get a total.
 **File → Reprocess Saved Mail…** rebuilds the search index, extracted text, and
 automatic name evidence from the archived messages. It can take a long time,
 and search may be incomplete until it finishes. Your own decisions, such as name
-groupings, are kept, and no mail is downloaded again. From the command line,
-`ect refresh-index` rebuilds only the search index.
+groupings, are kept, and no mail is downloaded again.
+
+**File → Rebuild Search Index** rebuilds only the search index, directly from
+the archive's mailbox files, without reimporting. Search keeps using the old
+index until the new one is finished. Progress, measured in bytes of mail
+processed, appears in the bar at the bottom of the search window. Quitting
+stops the rebuild and keeps the old index. From the command line,
+`ect rebuild-index` does the same and shows the same progress.
 
 ## Settings
 

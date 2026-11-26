@@ -9,6 +9,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 import sys
+import time
 from threading import Barrier, Event
 from time import monotonic
 from datetime import UTC, datetime, timedelta
@@ -88,6 +89,29 @@ def test_revalidate_menu_writes_report_and_opens_it(tmp_path: Path, monkeypatch:
         assert opened[0].suffix == ".html" and opened[0].is_file()
         assert "Archive validation report" in opened[0].read_text(encoding="utf-8")
         assert any("Validation of" in notice.message for notice in app.window_notices(None))
+    finally:
+        api.close()
+        app.shutdown()
+
+
+def test_rebuild_search_index_menu_replaces_index_with_byte_progress(tmp_path: Path) -> None:
+    """SEARCH: File > Rebuild Search Index rebuilds in the background and reports byte progress."""
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    before = (archive / "search.sqlite3").stat().st_ino
+    seen: list[dict[str, object]] = []
+    try:
+        assert app.rebuild_active_search_index()
+        deadline = time.monotonic() + 60
+        while not any("Rebuilt the search index" in notice.message for notice in app.window_notices(None)):
+            assert time.monotonic() < deadline, [notice.message for notice in app.window_notices(None)]
+            rebuild = api.ingest_overview()["index_rebuild"]
+            if rebuild is not None:
+                seen.append(rebuild)
+            time.sleep(0.01)
+        assert api.ingest_overview()["index_rebuild"] is None
+        assert (archive / "search.sqlite3").stat().st_ino != before
+        assert all(isinstance(item["total_bytes"], int) for item in seen)
     finally:
         api.close()
         app.shutdown()

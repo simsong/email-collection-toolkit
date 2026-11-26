@@ -743,7 +743,7 @@ filename, and normalized MIME type.
 Indexing parses each message once for FTS body text and attachment metadata;
 `--index-attachments` additionally writes decoded text attachments to
 `attachment_fts`.
-The tables are derived and are replaced together with FTS by `refresh-index`.
+The tables are derived and are replaced together with FTS by `rebuild-index`.
 
 `.eml` export writes the bytes returned by hash-verified direct retrieval.
 Finder dragging uses an `NSPasteboardItem` with exactly one explicitly supplied

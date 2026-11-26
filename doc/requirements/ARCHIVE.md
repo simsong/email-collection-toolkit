@@ -436,12 +436,14 @@ table also stores explicitly labeled non-email Google Chat identities.
 * Mailbag CSV uses CRLF record endings. Folded source headers used as CSV
   metadata are unfolded to single-line values; canonical message bytes are
   unchanged.
-* `refresh-index` rebuilds the disposable FTS database in a temporary file,
+* `rebuild-index` rebuilds the disposable FTS database in a temporary file,
   verifies every normal MBOX message against the catalog and the total
   searchable-message count, and replaces the prior index only after those
-  checks succeed. It visibly reports a progress bar, completion count, and
-  ETA weighted by catalogued message counts for mailbox verification and
-  message indexing. It announces before starting that `Ctrl-C` discards the
+  checks succeed. It visibly reports a progress bar, bytes done of the
+  known byte total, rate and ETA, measured in bytes, for mailbox verification
+  and message indexing. **File → Rebuild Search Index** runs the same rebuild
+  in the background and shows the same byte progress in the search window's
+  status line; quitting discards the replacement and keeps the old index. It announces before starting that `Ctrl-C` discards the
   incomplete replacement and retains the existing search index. Its
   `--workers` option defaults to the available CPU count (or two if it cannot
   be determined), and parallelizes bounded verified-MBOX read/hash/MIME work while

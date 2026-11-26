@@ -9,7 +9,7 @@ live in [plans](../plans/README.md); historical evidence does not validate this 
 
 Header parsing decodes and unfolds RFC 2047 Subject values before catalog and
 FTS insertion. `ect-search` displays that catalog value directly. The verified
-MBOX traversal in `refresh-index` rederives that catalog field while rebuilding
+MBOX traversal in `rebuild-index` rederives that catalog field while rebuilding
 FTS, so existing archives acquire newly supported legacy-header decoding without
 rewriting canonical mail.
 Its result formatter determines number width from the returned `message_pk`
@@ -79,7 +79,7 @@ source-preserving recovery path.
 
 ## Search schema and indexed projections
 
-`refresh-index` rebuilds from verified canonical MBOX locations without constructing
+`rebuild-index` rebuilds from verified canonical MBOX locations without constructing
 a production processor pipeline or resuming its saved queue. It atomically replaces
 the disposable index and excludes quarantine mail, including when ingestion is failed.
 `make test-ingest-recovery` checks that processing state and MBOX bytes stay unchanged.
@@ -88,7 +88,7 @@ the disposable index and excludes quarantine mail, including when ingestion is f
 does not use cross-database foreign keys. `create_search()` rejects unversioned
 or incompatible layouts. Ingest catches that specific condition, completes any
 pending publication recovery against a temporary current-layout index, and
-uses the same validated, atomic rebuild as `refresh-index` before starting
+uses the same validated, atomic rebuild as `rebuild-index` before starting
 workers. Its main FTS5 table includes an unindexed `sha256` column plus
 searchable headers and selected body text: `text/plain` first, otherwise rendered
 `text/html`, otherwise a safe single-part fallback. A second FTS5 table stores
@@ -110,13 +110,23 @@ attachment extraction is planned with per-format extractors and OCR in
 sandboxed workers, without Apache Tika or Java (#159, #163). Rebuild the
 index in a temporary database,
 validate row identities against `archive.sqlite3`, then atomically replace the
-old search database. Live indexing and `refresh-index` both exclude
+old search database. Live indexing and `rebuild-index` both exclude
 `INFECTED` and the reserved `MALFORMED` quarantine category; rebuild recognizes
 numbered quarantine MBOX filenames.
-`refresh-index` first renders terminal progress for the finite canonical-MBOX
-validation phase weighted by catalogued message counts, then renders
-message-count progress and an elapsed-rate ETA
-while building the replacement database. After committing, it closes the staging
+`rebuild-index` (CLI) and File → Rebuild Search Index (GUI) share
+`rebuild_search_index`. Progress is measured in bytes known before reading: the
+mailbox-validation phase totals the canonical MBOX file sizes and advances per
+file; the indexing phase totals catalogued `locations.byte_length` for searchable
+messages and advances by each record's length. `RebuildIndexReporter` draws a
+terminal bar (rate and ETA in bytes) or, given an observer, hands each tenth of a
+percent to the GUI, which shows it in the search window's bottom status line via
+`GuiIngestOverview.index_rebuild`. A `should_stop` poll between mailboxes and
+messages (the GUI passes Quit) discards the replacement like Ctrl-C. The GUI keeps
+the replaced index's attachment indexing, uses the Preferences worker count, holds
+the archive writer lease, refuses while an import runs, and refreshes the
+archive's search windows after publication. Indexing parses each message after
+`display_entity` drops a leading `>*From ` envelope line, so rebuilt previews,
+subjects and FTS text are correct for older ingests that stored one. After committing, it closes the staging
 SQLite connection before atomic replacement so Windows can rename the file.
 CLI permission errors retain macOS Full Disk Access guidance only on macOS;
 other hosts advise checking permissions and competing open-file handles.
@@ -125,7 +135,7 @@ as the live index; a `KeyboardInterrupt` rolls back catalog subject updates,
 removes the incomplete replacement, and reports that the existing index is
 unchanged. A bounded, ordered worker pool verifies source hashes and parses
 MIME content in parallel (all detected CPU cores by default, or two if the
-count is unavailable, configurable with `refresh-index --workers`); a sole main-thread SQLite writer retains stable
+count is unavailable, configurable with `rebuild-index --workers`); a sole main-thread SQLite writer retains stable
 catalog/update order and never shares a SQLite connection across threads.
 Ordinary `ect-search` listings and reports select only `Sent` and `Archive`;
 the authoritative catalog still retains every quarantine record.

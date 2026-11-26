@@ -30,11 +30,11 @@ from mailarchiver.__main__ import (
     ProgressReporter,
     ProgressUpdate,
     ProgressState,
-    RefreshIndexProgress,
+    RebuildIndexProgress,
     WorkerProgress,
     overall_line,
     overall_progress,
-    refresh_index_line,
+    rebuild_index_line,
     run_file_workers,
     start_ingest_scanner,
 )
@@ -101,32 +101,26 @@ def test_scan_lane_completion_restores_active_source_and_never_counts_scan_offse
     assert overall_progress(progress.state, time.monotonic()).bytes_done == 350
 
 
-def test_refresh_index_progress_has_a_bar_and_eta() -> None:
-    """Requirement: index rebuild makes its bounded remaining work visible."""
-    progress = RefreshIndexProgress(
-        phase="Refreshing search index",
-        total=100,
-        unit="messages",
+def test_rebuild_index_progress_has_a_bar_and_eta() -> None:
+    """Requirement: index rebuild reports bounded remaining work in bytes, with rate and ETA."""
+    progress = RebuildIndexProgress(
+        phase="Rebuilding search index",
+        total_bytes=4 * 1024 * 1024,
         started_monotonic=10,
-        completed=25,
+        completed_bytes=1024 * 1024,
     )
 
-    assert refresh_index_line(progress, now=20, width=8) == (
-        "Refreshing search index: [##------]  25.0% 25/100 messages  2 messages/s  ETA 30s"
+    assert rebuild_index_line(progress, now=20, width=8) == (
+        "Rebuilding search index: [##------]  25.0% 1.0 MiB of 4.0 MiB  102.4 KiB/s  ETA 30s"
     )
 
 
-def test_empty_refresh_index_progress_is_complete() -> None:
+def test_empty_rebuild_index_progress_is_complete() -> None:
     """Requirement: an empty index rebuild reports completion without a contradictory ETA."""
-    progress = RefreshIndexProgress(
-        phase="Refreshing search index",
-        total=0,
-        unit="messages",
-        started_monotonic=10,
-    )
+    progress = RebuildIndexProgress(phase="Rebuilding search index", total_bytes=0, started_monotonic=10)
 
-    assert refresh_index_line(progress, now=20, width=8) == (
-        "Refreshing search index: [########] 100.0% 0/0 messages  0 messages/s  ETA 0s"
+    assert rebuild_index_line(progress, now=20, width=8) == (
+        "Rebuilding search index: [########] 100.0% 0 B of 0 B  0 B/s  ETA 0s"
     )
 
 

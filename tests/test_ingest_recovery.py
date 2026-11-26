@@ -198,7 +198,7 @@ def test_encoded_reader_exhaustion_keeps_raw_export_and_existing_search_index(tm
     with pytest.raises(MimeReaderLimitError):
         prepare_search_message(raw, True)
     old_index = (archive / "search.sqlite3").read_bytes()
-    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index"],
+    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "rebuild-index"],
                             capture_output=True, text=True, check=False, timeout=30)
     assert result.returncode != 0 and "MIME reader" in result.stderr
     assert (archive / "search.sqlite3").read_bytes() == old_index
@@ -217,7 +217,7 @@ def test_repeated_opening_delimiters_keep_real_html_and_attachment_ids(tmp_path:
     archive, source = ingest(tmp_path, raw)
     for rebuild in (False, True):
         if rebuild:
-            cli(archive, "refresh-index")
+            cli(archive, "rebuild-index")
         with closing(sqlite3.connect(archive / "search.sqlite3")) as database:
             row = database.execute("SELECT content FROM message_fts").fetchone()
             assert row is not None and "realhtmltoken" in row[0]
@@ -645,7 +645,7 @@ def test_pending_ingest_failure_does_not_starve_archived_search_recovery(tmp_pat
 
 
 def test_index_repair_does_not_resume_pending_ingest(tmp_path: Path) -> None:
-    """SEARCH: atomic refresh-index repairs searchable canonical mail without touching the queue."""
+    """SEARCH: atomic rebuild-index repairs searchable canonical mail without touching the queue."""
     raw = HEADER + b"\r\nindependentrecoverytoken\r\n"
     archive, _source = ingest(tmp_path, raw)
     pending = tmp_path / "pending.eml"
@@ -654,7 +654,7 @@ def test_index_repair_does_not_resume_pending_ingest(tmp_path: Path) -> None:
     processing = (archive / "processing.sqlite3").read_bytes()
     mailbox = next(mbox_directory(archive).glob("*.mbox"))
     digest = hashlib.sha256(mailbox.read_bytes()).hexdigest()
-    cli(archive, "refresh-index", "--index-attachments")
+    cli(archive, "rebuild-index", "--index-attachments")
     with sqlite3.connect(archive / "search.sqlite3") as search:
         assert search.execute("SELECT count(*) FROM message_fts WHERE message_fts MATCH 'independentrecoverytoken'").fetchone() == (1,)
         assert search.execute("SELECT count(*) FROM message_metadata").fetchone() == (1,)

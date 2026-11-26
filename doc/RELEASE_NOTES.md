@@ -6,6 +6,20 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a103 — Rebuild Search Index
+
+- **File → Rebuild Search Index** rebuilds the search index from the archive's
+  mailbox files without reimporting. Progress appears in the search window's
+  bottom status line as percent, bytes done of the total, and time remaining.
+  Search keeps using the old index until the new one is complete; quitting
+  stops the rebuild and keeps the old index.
+- The command-line `ect refresh-index` is renamed `ect rebuild-index`. Its
+  progress is now measured in bytes rather than messages, so large and small
+  messages count for what they cost.
+- Rebuilding now indexes messages whose stored copy begins with a `>From `
+  envelope line from their real headers and body, which fixes their previews
+  and searchable text.
+
 ## 1.0.0a102 — readable enveloped messages, View Message Metadata
 
 - Messages whose stored copy begins with a `>From ` envelope line (about

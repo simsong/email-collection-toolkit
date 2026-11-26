@@ -189,13 +189,13 @@ ect review --archive collection.mailarchive
 ect processors --archive collection.mailarchive
 ect processing-status --archive collection.mailarchive
 ect process --archive collection.mailarchive --phase content
-ect refresh-index --archive collection.mailarchive
+ect rebuild-index --archive collection.mailarchive
 ```
 
 `process` resumes saved work. `--phase` is `ingest`, `content` (default), or `all`;
 `--max-jobs N` bounds a run; `--reprocess` explicitly queues a fresh generation.
-`refresh-index` verifies stored messages and replaces only the rebuildable search
-index. Both accept `--workers N`; `refresh-index --index-attachments` includes
+`rebuild-index` verifies stored messages and replaces only the rebuildable search
+index. Both accept `--workers N`; `rebuild-index --index-attachments` includes
 supported text attachments. Source acquisition requires `ect import`.
 
 ## Identities and Contacts

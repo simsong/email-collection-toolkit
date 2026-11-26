@@ -22,7 +22,8 @@ from tests.process_output import CapturedCommand, python_module
 
 from e2e_tests.eicar_fixture import write_eicar_emlx
 from mailarchiver.__main__ import (
-    REFRESH_INDEX_DEFAULT_WORKERS,
+    REBUILD_INDEX_DEFAULT_WORKERS,
+    formatted_bytes,
     nonnegative_integer,
     positive_integer,
     report_years,
@@ -292,7 +293,7 @@ def test_ingest_routes_preserves_and_indexes_messages(
         rebuilt.close()
 
     refreshed = subprocess.run(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index", "--workers", str(REFRESH_INDEX_DEFAULT_WORKERS)],
+        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "rebuild-index", "--workers", str(REBUILD_INDEX_DEFAULT_WORKERS)],
         check=False,
         capture_output=True,
         text=True,
@@ -321,7 +322,7 @@ def test_ingest_routes_preserves_and_indexes_messages(
     assert "Archive integrity verified." in verified.stdout
 
 
-def test_refresh_index_excludes_quarantine_mailboxes(tmp_path: Path) -> None:
+def test_rebuild_index_excludes_quarantine_mailboxes(tmp_path: Path) -> None:
     """Requirement: FTS rebuild excludes infected and malformed quarantine mail."""
     archive = tmp_path / "archive"
     archive.mkdir()
@@ -367,14 +368,14 @@ def test_refresh_index_excludes_quarantine_mailboxes(tmp_path: Path) -> None:
         catalog.close()
 
     refreshed = subprocess.run(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index", "--workers", "1"],
+        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "rebuild-index", "--workers", "1"],
         check=False,
         capture_output=True,
         text=True,
     )
 
     assert_success(refreshed)
-    assert "Refreshing search index (1 workers)" in refreshed.stderr
+    assert "Rebuilding search index (1 workers)" in refreshed.stderr
     search = sqlite3.connect(archive / "search.sqlite3")
     try:
         assert search.execute("SELECT sha256 FROM message_fts").fetchall() == [
@@ -391,7 +392,7 @@ def test_refresh_index_excludes_quarantine_mailboxes(tmp_path: Path) -> None:
         catalog.close()
 
 
-def test_refresh_index_preserves_prior_index_when_mbox_and_catalog_disagree(tmp_path: Path) -> None:
+def test_rebuild_index_preserves_prior_index_when_mbox_and_catalog_disagree(tmp_path: Path) -> None:
     """Requirement: FTS replacement fails closed unless every normal MBOX row is catalogued."""
     archive = tmp_path / "archive"
     mbox_directory(archive).mkdir(parents=True)
@@ -410,7 +411,7 @@ def test_refresh_index_preserves_prior_index_when_mbox_and_catalog_disagree(tmp_
     old_search.close()
 
     refreshed = subprocess.run(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index"],
+        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "rebuild-index"],
         check=False,
         capture_output=True,
         text=True,
@@ -424,8 +425,8 @@ def test_refresh_index_preserves_prior_index_when_mbox_and_catalog_disagree(tmp_
         search.close()
 
 
-def test_refresh_index_interrupt_retains_prior_search_index(tmp_path: Path) -> None:
-    """Requirement: Ctrl-C discards an uncommitted refresh-index replacement."""
+def test_rebuild_index_interrupt_retains_prior_search_index(tmp_path: Path) -> None:
+    """Requirement: Ctrl-C discards an uncommitted rebuild-index replacement."""
     archive = tmp_path / "archive"
     path = mbox_directory(archive) / "2024-Archive1.mbox"
     path.parent.mkdir(parents=True)
@@ -471,12 +472,12 @@ def test_refresh_index_interrupt_retains_prior_search_index(tmp_path: Path) -> N
     finally:
         old_search.close()
 
-    with CapturedCommand(python_module("mailarchiver", ["--archive", str(archive), "refresh-index"])) as command:
+    with CapturedCommand(python_module("mailarchiver", ["--archive", str(archive), "rebuild-index"])) as command:
         safety_notice = command.stderr.get(timeout=20).decode()
         assert "Ctrl-C discards the incomplete replacement" in safety_notice
         progress = command.stderr.get(timeout=20).decode()
         assert progress.startswith("Checking canonical mailboxes:")
-        assert "0/10 messages" in progress
+        assert f"0 B of {formatted_bytes(path.stat().st_size)}" in progress  # byte-measured, not per message
         assert "ETA calculating" in progress
         command.interrupt()
         result = command.finish(timeout=20)

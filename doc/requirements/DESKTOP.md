@@ -238,7 +238,7 @@ CPU ratios on the current machine and bound a migrated custom value to its cap.
 Apply choices to newly started or continued importing and saved-mail processing;
 do not resize an active pool. CLI `--workers N` takes precedence, leaves the saved
 choice unchanged and disables all worker preference controls, with the note
-`# workers set to {number} on command line`. Generic ingest, process, refresh-index
+`# workers set to {number} on command line`. Generic ingest, process, rebuild-index
 and standalone IMAP use the preference when their flag is omitted.
 
 Preferences also expose **Maximum IMAP connections per account**, default 8,
