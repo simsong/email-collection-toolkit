@@ -68,6 +68,31 @@ def wait_for_import(api: GuiApi) -> None:
     # Callers still assert durable completion, output and application notices.
 
 
+def test_revalidate_menu_writes_report_and_opens_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """DESKTOP: File > Revalidate Archive validates in the background and opens its HTML report."""
+    import mailarchiver.gui_app as gui_app
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    opened: list[Path] = []
+    done = Event()
+
+    def fake_open(path: Path) -> None:
+        # Platform "open" boundary only; validation and the report are real.
+        opened.append(path)
+        done.set()
+
+    monkeypatch.setattr(gui_app, "open_export", fake_open)
+    try:
+        assert app.revalidate_active_archive()
+        assert done.wait(30), "the validation report was not opened"
+        assert opened[0].suffix == ".html" and opened[0].is_file()
+        assert "Archive validation report" in opened[0].read_text(encoding="utf-8")
+        assert any("Validation of" in notice.message for notice in app.window_notices(None))
+    finally:
+        api.close()
+        app.shutdown()
+
+
 def test_opening_an_open_archive_raises_its_native_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """DESKTOP: File Open, Open Recent and Finder opens raise the archive's window rather than adding a copy."""
     archive = build_deferred_archive(tmp_path)

@@ -23,7 +23,7 @@ import math
 import re
 import sqlite3
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from email import policy
 from email.parser import BytesParser
@@ -32,7 +32,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from .layout import integrity_directory, mbox_directory
+from .layout import integrity_directory, integrity_path as integrity_path_for, mbox_directory
 from .mbox import IntegrityMessage, write_integrity_files
 from .standalone_verify import EXTRA_FILE_WARNING, INSTALLED_NAME
 from .storage_sync import durable_sync, replace_file, sync_directory
@@ -198,6 +198,20 @@ class MailbagCsvWriter:
         self.writer.writerow(row.values())
         self.rows += 1
 
+    def write_row(self, values: list[str]) -> None:
+        """Copy one row from the previous checkpoint for an unchanged MBOX."""
+        index = self.rows // MAILBAG_ROW_LIMIT
+        if self.output is None or self.rows % MAILBAG_ROW_LIMIT == 0:
+            self._close_current()
+            self._open(index)
+        folded = values[1].casefold()
+        if folded in self.identifiers:
+            raise ValueError(f"duplicate Mailbag-Message-ID: {values[1]}")
+        self.identifiers.add(folded)
+        assert self.writer is not None
+        self.writer.writerow(values)
+        self.rows += 1
+
     def _close_current(self) -> None:
         if self.output is None:
             return
@@ -335,6 +349,80 @@ def refresh_tag_manifest(archive: Path) -> None:
     _write_tag_manifest(archive, csv_paths)
 
 
+# Files modified this close to the previous checkpoint's start are reread anyway.
+CHECKPOINT_STAMP_MARGIN_NS = 2_000_000_000
+
+
+class _PreviousCheckpoint:
+    """What the last completed checkpoint recorded, for skipping unchanged MBOX files.
+
+    An MBOX is reused only when it was last modified before that checkpoint began,
+    its size, message count and SHA-256 agree across the catalog and the previous
+    payload manifest, its integrity tag exists, and the previous Mailbag CSV holds
+    exactly one row per message. Anything else is reread and reverified.
+    """
+
+    def __init__(self, archive: Path, catalog: sqlite3.Connection, stamp_ns: int,
+                 manifest: dict[str, str], csv_paths: list[Path]) -> None:
+        self.archive, self.catalog, self.stamp_ns, self.manifest = archive, catalog, stamp_ns, manifest
+        self._rows = self._read_rows(csv_paths)
+        self._pending: list[str] | None = next(self._rows, None)
+
+    @classmethod
+    def load(cls, archive: Path, catalog: sqlite3.Connection) -> _PreviousCheckpoint | None:
+        try:
+            info = (archive / BAG_INFO).read_text(encoding="utf-8").splitlines()
+            stamp = next(line.removeprefix("Bagging-Timestamp: ") for line in info
+                         if line.startswith("Bagging-Timestamp: "))
+            stamped = datetime.fromisoformat(stamp)
+            manifest = {}
+            for line in (archive / PAYLOAD_MANIFEST).read_text(encoding="utf-8").splitlines():
+                digest, _separator, name = line.partition("  ")
+                manifest[name] = digest
+        except (OSError, StopIteration, ValueError):
+            return None
+        if stamped.tzinfo is None or not (archive / TAG_MANIFEST).is_file():
+            return None
+        csv_paths = sorted(archive.glob("mailbag*.csv"), key=lambda path: (len(path.name), path.name))
+        stamp_ns = int(stamped.timestamp() * 1_000_000_000)
+        return cls(archive, catalog, stamp_ns, manifest, csv_paths)
+
+    @staticmethod
+    def _read_rows(paths: list[Path]) -> Iterator[list[str]]:
+        for index, path in enumerate(paths):
+            with path.open(encoding="utf-8", newline="") as source:
+                reader = csv.reader(source)
+                if index == 0 and next(reader, None) != list(MAILBAG_HEADERS):
+                    return
+                yield from reader
+
+    def _take_rows(self, filename: str) -> list[list[str]]:
+        """Advance the old CSV (in MBOX-name order) and return this file's rows."""
+        rows: list[list[str]] = []
+        while self._pending is not None and len(self._pending) == len(MAILBAG_HEADERS) and self._pending[3] < filename:
+            self._pending = next(self._rows, None)
+        while self._pending is not None and len(self._pending) == len(MAILBAG_HEADERS) and self._pending[3] == filename:
+            rows.append(self._pending)
+            self._pending = next(self._rows, None)
+        return rows
+
+    def reusable(self, path: Path, message_count: int) -> tuple[str, list[list[str]]] | None:
+        rows = self._take_rows(path.name)
+        stat = path.stat()
+        if stat.st_mtime_ns >= self.stamp_ns - CHECKPOINT_STAMP_MARGIN_NS or len(rows) != message_count:
+            return None
+        if not integrity_path_for(self.archive, path.name).is_file():
+            return None
+        row = self.catalog.execute(
+            "SELECT sha256, message_count, byte_count FROM mbox_generations WHERE filename = ?", (path.name,)
+        ).fetchone()
+        if row is None or not row[0] or row[1] != message_count or row[2] != stat.st_size:
+            return None
+        if self.manifest.get(_manifest_path(path, self.archive)) != row[0]:
+            return None
+        return str(row[0]), rows
+
+
 class CheckpointInterrupted(Exception):
     """A requested stop abandoned a checkpoint; the next completed import repairs it."""
 
@@ -345,17 +433,35 @@ def write_bag_checkpoint(
     packaged_at: datetime | None = None,
     *,
     should_stop: Callable[[], bool] | None = None,
+    full: bool = False,
 ) -> list[str]:
     """Publish fixity in dependency order; return warnings for untouched non-mail extras.
 
     ``should_stop`` is polled before each message; when it returns true the
     checkpoint stops with :class:`CheckpointInterrupted` before writing manifests,
     leaving the detectably stale state that an interrupted import already allows.
+    Unless ``full`` is set, MBOX files unmodified since the previous checkpoint
+    reuse its verified digests and CSV rows instead of being reread.
     """
+    started = datetime.now(UTC)
     initialize_bag(archive)
     count_row = catalog.execute("SELECT COUNT(*) FROM messages").fetchone()
     assert count_row is not None
+    previous = _PreviousCheckpoint.load(archive, catalog) if not full else None
     writer = MailbagCsvWriter(archive, int(count_row[0]))
+
+    def reuse(path: Path, message_count: int) -> str | None:
+        if previous is None:
+            return None
+        if should_stop is not None and should_stop():
+            raise CheckpointInterrupted("checkpoint stopped on request")
+        found = previous.reusable(path, message_count)
+        if found is None:
+            return None
+        digest, rows = found
+        for row in rows:
+            writer.write_row(row)
+        return digest
 
     def visit(filename: str, ordinal: int, message: IntegrityMessage) -> None:
         if should_stop is not None and should_stop():
@@ -363,13 +469,15 @@ def write_bag_checkpoint(
         writer.write(filename, ordinal, message)
 
     try:
-        mbox_digests = write_integrity_files(archive, catalog, visit)
+        mbox_digests = write_integrity_files(archive, catalog, visit, reuse)
         csv_paths = writer.finish()
     except BaseException:
         writer.abort()
         raise
     warnings: list[str] = []
     byte_count, file_count = _write_payload_manifest(archive, mbox_digests, warnings)
-    _write_bag_info(archive, byte_count, file_count, packaged_at or datetime.now(UTC))
+    # The timestamp is when this checkpoint began, so the next one can skip
+    # MBOX files that have not been modified since.
+    _write_bag_info(archive, byte_count, file_count, packaged_at or started)
     _write_tag_manifest(archive, csv_paths)
     return warnings

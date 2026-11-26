@@ -6,6 +6,21 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a101 — faster checkpoints, Revalidate Archive, MBOX export
+
+- Finishing an import, or recovering one that was interrupted, now rechecks
+  only the MBOX files modified since the last checkpoint. It used to reread
+  every message in the archive each time, which took a long time on a large
+  archive.
+- **File → Revalidate Archive** rereads every message and file on request and
+  opens an HTML report in the browser. The report lists every file in the
+  archive with its message count, how many validate, and how many are
+  redacted (none until redaction exists).
+- **File → Export Selected Messages…** saves the selection as an MBOX file
+  (default) or a ZIP of `.eml` files.
+- Dragging several messages out of a search window now produces one MBOX file
+  by default. **Preferences** can switch it back to a ZIP of `.eml` files.
+
 ## 1.0.0a100 — Activity window
 
 - Clicking the activity bar at the bottom of a search window opens the

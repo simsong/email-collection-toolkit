@@ -17,6 +17,7 @@ from webview.menu import MenuAction, MenuSeparator
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier, Event
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -458,7 +459,8 @@ def test_native_menus_route_through_the_application_controller(
     assert [menu.title for menu in menus] == ["File", "Window", "Help"]
     assert all(isinstance(item, (MenuAction, MenuSeparator)) for menu in menus for item in menu.items)
     assert [item.title for item in menus[0].items if isinstance(item, MenuAction)] == [
-        "New", "Open…", "Import…", "Reprocess Saved Mail…", "Document Options…", "Customizable Default Lists…",
+        "New", "Open…", "Import…", "Reprocess Saved Mail…", "Export Selected Messages…", "Revalidate Archive",
+        "Document Options…", "Customizable Default Lists…",
     ] + (["Show Archive in Explorer"] if sys.platform == "win32" else []) + ["Close"] + (
         ["Quit"] if sys.platform == "win32" else [])
     if sys.platform == "win32":
@@ -1530,3 +1532,94 @@ def test_encoded_attached_multipart_keeps_inventory_reader_and_export_ids(tmp_pa
     assert render_part(archive, 3, view.preferred_part_id).content == "parent body"
     assert base64.b64decode(attachment_content(archive, 3, 2).content_base64) == child
     assert base64.b64decode(attachment_content(archive, 3, 6).content_base64) == b"%PDF-original"
+
+
+def test_mbox_export_round_trips_each_message_in_order(tmp_path: Path) -> None:
+    """Requirement: File > Export Selected Messages can write one MBOX whose records unquote to the exact messages."""
+    import mailbox
+    from mailarchiver.gui_service import write_messages_mbox
+    from mailarchiver.mboxrd import unquote
+    archive = make_gui_archive(tmp_path)
+    destination = tmp_path / "export" / "messages.mbox"
+
+    write_messages_mbox(archive, [2, 1, 2], destination)
+
+    box = mailbox.mbox(destination, create=False)
+    try:
+        records = []
+        for key in box.iterkeys():
+            with box.get_file(key, from_=False) as record:
+                records.append(record.read())
+    finally:
+        box.close()
+    # Python's reader drops the record separator; mboxrd unquoting restores the stored bytes.
+    assert [unquote(record).rstrip(b"\n") for record in records] == [
+        MULTIPART_MESSAGE.rstrip(b"\n"), SIMPLE_MESSAGE.rstrip(b"\n")]
+
+
+@pytest.mark.parametrize(("suffix", "count"), [(".mbox", 2), (".zip", 2), (".eml", 1), (".zip", 1), ("", 2)])
+def test_menu_export_chooses_the_format_from_the_saved_name(tmp_path: Path, suffix: str, count: int) -> None:
+    """Requirement: the export dialog saves MBOX (default), a ZIP of messages, or one .eml."""
+    archive = make_gui_archive(tmp_path)
+    api = GuiApi(archive)
+    chosen = tmp_path / "out" / f"selection{suffix}"
+    chosen.parent.mkdir()
+
+    class Window:
+        # Native save-dialog boundary only; export writing is real.
+        offered: tuple[str, ...] = ()
+
+        def create_file_dialog(self, *_args, save_filename: str, file_types: tuple[str, ...], **_kwargs):
+            assert save_filename.endswith(".mbox")
+            self.offered = file_types
+            return str(chosen)
+
+    window = Window()
+    api.window = window
+    try:
+        written = Path(api.export_messages([1, 2][:count]) or "")
+    finally:
+        api.window = None
+        api.close()
+    assert ("Email message (*.eml)" in window.offered) == (count == 1)
+    expected = suffix if suffix else ".mbox"
+    assert written.suffix == expected and written.is_file()
+    if expected == ".zip":
+        with zipfile.ZipFile(written) as exported:
+            assert {exported.read(name) for name in exported.namelist()} == set([SIMPLE_MESSAGE, MULTIPART_MESSAGE][:count])
+    elif expected == ".eml":
+        assert written.read_bytes() == SIMPLE_MESSAGE
+    else:
+        assert written.read_bytes().startswith(b"From ")
+
+
+@pytest.mark.parametrize("preference", ["mbox", "zip"])
+def test_multi_message_drag_follows_the_preference(tmp_path: Path, preference: str) -> None:
+    """Requirement: dragging several messages exports MBOX by default, or a ZIP when preferred."""
+    from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
+    from mailarchiver.gui_app import PyWebViewApplication
+    archive = make_gui_archive(tmp_path)
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    assert controller.preferences.multi_message_drag_format == "mbox"
+    if preference == "zip":
+        controller.configure_drag_format("zip", strict=True)
+    assert ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json")).preferences \
+        .multi_message_drag_format == preference
+    application = PyWebViewApplication(controller)
+    api = GuiApi(archive, application=application, temporary_directory=tmp_path / "exports")
+    try:
+        assert api.status()["multi_message_drag_format"] == preference
+        exported = api.prepare_drag([1, 2])
+        with api._drag_export(exported["token"]) as path:
+            assert path.suffix == f".{preference}"
+            if preference == "zip":
+                assert zipfile.is_zipfile(path)
+            else:
+                assert path.read_bytes().startswith(b"From ")
+        single = api.prepare_drag([1])
+        assert single["filename"].endswith(".eml")
+    finally:
+        api.close()
+        application.shutdown()
+    with pytest.raises(ValueError):
+        controller.configure_drag_format(cast(Any, "tar"))

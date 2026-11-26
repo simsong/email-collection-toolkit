@@ -29,6 +29,13 @@ traceback. `make test-bagit` exercises installed-script output, quiet failures,
 default-directory selection, and real POSIX SIGINT. Existing archive-local
 copies retain their old behavior until refreshed by normal archive publication.
 
+`write_bag_checkpoint()` records the time the checkpoint began as
+`Bagging-Timestamp`; the next checkpoint's `_PreviousCheckpoint` reuses an MBOX
+whose modification time is at least two seconds earlier than that and whose
+catalog generation, payload-manifest digest, integrity tag and old CSV rows
+(streamed in MBOX-name order) all agree; `full=True` disables reuse.
+`archive_validation.validate_archive()` is the read-only full pass behind
+File → Revalidate Archive and `write_report()` renders its HTML.
 `write_bag_checkpoint()` streams catalog locations in MBOX byte order through
 `write_integrity_files()` (polling an optional `should_stop` per message and
 raising `CheckpointInterrupted` before any manifest is written; ingest skips

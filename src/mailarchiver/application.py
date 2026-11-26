@@ -54,6 +54,10 @@ class InvalidArchiveError(ValueError):
     """An archive path failed document validation or required crash recovery."""
 
 
+MultiMessageFormat = Literal["mbox", "zip"]
+MULTI_MESSAGE_FORMATS: tuple[MultiMessageFormat, ...] = ("mbox", "zip")
+
+
 class ApplicationPreferences(BaseModel):
     """Discardable, versioned state stored outside every archive."""
 
@@ -64,6 +68,8 @@ class ApplicationPreferences(BaseModel):
     automatic_update_checks: bool = True
     workers: WorkerPreferences = Field(default_factory=WorkerPreferences)
     imap_connections: ImapConnectionLimit = DEFAULT_IMAP_CONNECTIONS
+    # How dragging two or more messages out of a search window packages them.
+    multi_message_drag_format: MultiMessageFormat = "mbox"
 
 
 class ApplicationPreferencesStore:
@@ -494,6 +500,18 @@ class ApplicationController:
             if imap_connections is not None:
                 self._preferences.imap_connections = imap_connections
             self._preferences.version = APPLICATION_PREFERENCES_VERSION
+            self._write_preferences()
+            if strict and self.preference_error:
+                self._preferences = previous
+                raise OSError(self.preference_error)
+
+    def configure_drag_format(self, value: MultiMessageFormat, *, strict: bool = False) -> None:
+        """Save how dragging several messages packages them (MBOX or ZIP of .eml)."""
+        if value not in MULTI_MESSAGE_FORMATS:
+            raise ValueError(f"unknown multi-message drag format {value!r}")
+        with self._lock:
+            previous = self._preferences.model_copy(deep=True)
+            self._preferences.multi_message_drag_format = value
             self._write_preferences()
             if strict and self.preference_error:
                 self._preferences = previous

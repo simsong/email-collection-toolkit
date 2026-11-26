@@ -25,9 +25,11 @@ from .updates import (PREVIEW_STREAM_LABEL, RELEASE_STREAM_LABEL, UPDATE_STREAM_
                       UpdateChannel, UpdateService)
 from .worker_preferences import WorkerPreferences, WorkerSettings
 from .imap_preferences import validate_imap_connections
+from .application import MULTI_MESSAGE_FORMATS, MultiMessageFormat
 
 WORKERS_KEY = "workers"
 IMAP_CONNECTIONS_KEY = "imap_connections"
+DRAG_FORMAT_KEY = "multi_message_drag_format"
 PreferencesSave = Callable[[UpdateChannel, bool, WorkerPreferences | None, int | None], None]
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Preferences</title>
@@ -42,6 +44,9 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Preferences</t
 <section id="imap-section" hidden><h2>IMAP connections</h2>
 <label>Maximum IMAP connections per account <input id="imap-connections" type="number" min="1" max="15" step="1"></label>
 <p>Default: 8. Independent of processing workers. Applies when starting or continuing an import.</p></section>
+<section id="drag-section" hidden><h2>Dragging messages</h2>
+<label>When dragging several messages out of a search window, export them as
+<select id="drag-format"><option value="mbox">One MBOX file (default)</option><option value="zip">A ZIP of .eml files</option></select></label></section>
 <h2>Updates</h2><p id="version"></p>
 <label>Update stream <select id="channel"><option value="release">__RELEASE_STREAM_LABEL__</option><option value="preview">__PREVIEW_STREAM_LABEL__</option></select></label>
 <p>__UPDATE_STREAM_HELP__</p>
@@ -66,6 +71,8 @@ document.getElementById('workers-note').textContent=w.override_note;
 document.getElementById('workers-help').textContent=`1–${w.maximum} workers (at most twice ${w.cpus} CPUs). Applies when starting or continuing work.`;}
 if(s.imap_connections!==undefined){imapAvailable=true;document.getElementById('imap-section').hidden=false;
 document.getElementById('imap-connections').value=s.imap_connections;}
+if(s.multi_message_drag_format!==undefined){document.getElementById('drag-section').hidden=false;
+document.getElementById('drag-format').value=s.multi_message_drag_format;}
 document.getElementById('channel').value=s.channel;document.getElementById('automatic').checked=s.automatic_checks;
 ready=true;document.body.dataset.ready='true';}
 document.getElementById('version').textContent=`Version ${s.version} (build ${s.build || 'source'})`;
@@ -98,8 +105,10 @@ catch(error){closing=false;enabled.forEach(control=>{control.disabled=false;});i
 window.addEventListener('pywebviewready',()=>refresh().catch(showError));
 window.addEventListener('mailarchiver-status-changed',()=>refreshFresh().catch(showError));
 window.addEventListener('focus',()=>refreshFresh().catch(showError));
-document.querySelectorAll('input,select').forEach(control=>control.addEventListener('change',()=>{
+document.querySelectorAll('input,select:not(#drag-format)').forEach(control=>control.addEventListener('change',()=>{
 savePreferences().catch(()=>{});}));
+document.getElementById('drag-format').addEventListener('change',event=>{
+pywebview.api.save_drag_format(event.target.value).then(()=>{status.textContent='Settings saved.';},showError);});
 document.getElementById('check').onclick=async()=>{const revision=saveRevision+1;
 try{await savePreferences();if(revision!==saveRevision)return;await pywebview.api.check();await refreshFresh()}
 catch(error){if(revision===saveRevision)showError(error)}};
@@ -110,8 +119,12 @@ catch(error){if(revision===saveRevision)showError(error)}};
 class UpdatePreferencesApi:
     def __init__(self, service: UpdateService, save: Callable[[UpdateChannel, bool], None],
                  workers: Callable[[], WorkerSettings] | None = None, save_preferences: PreferencesSave | None = None,
-                 quitting: Callable[[], bool] = lambda: False, imap_connections: Callable[[], int] | None = None) -> None:
+                 quitting: Callable[[], bool] = lambda: False, imap_connections: Callable[[], int] | None = None,
+                 drag_format: Callable[[], str] | None = None,
+                 save_drag_format: Callable[[MultiMessageFormat], None] | None = None) -> None:
         self.window: Any = None
+        self._drag_format = drag_format
+        self._save_drag_format = save_drag_format
         self._close_ready = False
         self._quitting = quitting
         self._service = service
@@ -126,7 +139,15 @@ class UpdatePreferencesApi:
             state[WORKERS_KEY] = self._workers().model_dump(mode="json")
         if self._imap_connections is not None:
             state[IMAP_CONNECTIONS_KEY] = self._imap_connections()
+        if self._drag_format is not None and self._save_drag_format is not None:
+            state[DRAG_FORMAT_KEY] = self._drag_format()
         return state
+
+    def save_drag_format(self, value: str) -> bool:
+        if self._save_drag_format is None or value not in MULTI_MESSAGE_FORMATS:
+            raise ValueError("Invalid drag format")
+        self._save_drag_format("zip" if value == "zip" else "mbox")
+        return True
 
     def save(self, channel: str, automatic: bool, worker_mode: str | None = None, worker_count: int | None = None,
              imap_connections: int | None = None) -> bool:
@@ -184,12 +205,15 @@ class UpdatePreferencesApi:
 def show_windows_update_preferences(service: UpdateService, save: Callable[[UpdateChannel, bool], None],
                                    workers: Callable[[], WorkerSettings] | None = None, save_preferences: PreferencesSave | None = None,
                                    quitting: Callable[[], bool] = lambda: False,
-                                   imap_connections: Callable[[], int] | None = None) -> Any:
+                                   imap_connections: Callable[[], int] | None = None,
+                                   drag_format: Callable[[], str] | None = None,
+                                   save_drag_format: Callable[[MultiMessageFormat], None] | None = None) -> Any:
     from .gui_app import WindowBridge
 
-    api = UpdatePreferencesApi(service, save, workers, save_preferences, quitting, imap_connections)
+    api = UpdatePreferencesApi(service, save, workers, save_preferences, quitting, imap_connections,
+                               drag_format, save_drag_format)
     window = webview.create_window("Preferences", html=PAGE,
-        js_api=WindowBridge(api, ("state", "save", "check", "close_saved")), width=620, height=780)
+        js_api=WindowBridge(api, ("state", "save", "check", "close_saved", "save_drag_format")), width=620, height=860)
     if window is None:
         raise RuntimeError("Could not create Preferences window")
     api.window = window

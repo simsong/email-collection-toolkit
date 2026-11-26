@@ -282,8 +282,13 @@ def write_integrity_files(
     archive: Path,
     catalog: sqlite3.Connection,
     message_visitor: Callable[[str, int, IntegrityMessage], None] | None = None,
+    reuse: Callable[[Path, int], str | None] | None = None,
 ) -> dict[str, str]:
-    """Regenerate every MBOX integrity tag from catalog-verified bytes."""
+    """Regenerate MBOX integrity tags from catalog-verified bytes.
+
+    ``reuse(path, message_count)`` may return the MBOX's previously verified
+    SHA-256 to skip rereading a file unchanged since the last checkpoint.
+    """
     digests: dict[str, str] = {}
     for path in sorted(mbox_directory(archive).glob("*.mbox")):
         rows = catalog.execute(
@@ -299,6 +304,10 @@ def write_integrity_files(
         ).fetchone()
         assert count_row is not None
         message_count = int(count_row[0])
+        reused = reuse(path, message_count) if reuse is not None else None
+        if reused is not None:
+            digests[path.name] = reused
+            continue
 
         def messages(rows=rows, path=path):
             for ordinal, (message_id, raw_sha256, offset, length) in enumerate(rows, 1):

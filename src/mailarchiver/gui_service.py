@@ -23,6 +23,7 @@ import re
 import sqlite3
 import tempfile
 import zipfile
+from collections.abc import Callable
 from email import policy
 from email.message import Message
 from email.parser import BytesHeaderParser, BytesParser
@@ -51,6 +52,7 @@ from .mailsearch import (
     search_result_count,
     warm_search_vocabulary,
 )
+from .mbox import frame_message
 from .message import decoded_message_header
 from .mime_tree import MimeReaderLimitError, OriginalMimeParts, decoded_leaf_payload, original_part_payload, walk_mime
 from .plugin_api import SourceContainerMetadata
@@ -588,23 +590,55 @@ def write_message(archive: Path, message_pk: int, destination: Path) -> None:
     _write_bytes(destination, read_message_bytes(archive, message_pk))
 
 
-def write_messages_zip(archive: Path, message_pks: list[int], destination: Path) -> None:
-    """Atomically write exact RFC 5322 exports as a ZIP created for an explicit drag."""
-    unique = list(dict.fromkeys(message_pks))
-    if len(unique) < 2:
-        raise ValueError("a ZIP export requires at least two messages")
+def _publish_export(destination: Path, write: Callable[[Path], None]) -> None:
+    """Write an export beside its destination, then atomically put it in place."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent)
     temporary = Path(temporary_name)
     os.close(descriptor)
     try:
-        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as output:
-            for message_pk in unique:
-                output.writestr(export_filename(describe_message(archive, message_pk)), read_message_bytes(archive, message_pk))
+        write(temporary)
         with _EXPORT_PUBLICATION_LOCK:
             temporary.replace(destination)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def write_messages_zip(archive: Path, message_pks: list[int], destination: Path, *, minimum: int = 2) -> None:
+    """Atomically write exact RFC 5322 exports as a ZIP of .eml files.
+
+    Drags need two messages (one drags as .eml); an explicit export may ZIP one.
+    """
+    unique = list(dict.fromkeys(message_pks))
+    if len(unique) < max(1, minimum):
+        raise ValueError("a ZIP export requires at least two messages" if minimum >= 2 else "select a message to export")
+
+    def write(temporary: Path) -> None:
+        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as output:
+            for message_pk in unique:
+                output.writestr(export_filename(describe_message(archive, message_pk)), read_message_bytes(archive, message_pk))
+
+    _publish_export(destination, write)
+
+
+def write_messages_mbox(archive: Path, message_pks: list[int], destination: Path) -> None:
+    """Atomically write exact messages as one mboxrd file, in the order given.
+
+    Each record gets an envelope from its own dates (or keeps a leading From line)
+    and mboxrd quoting, so a reader's unquoting returns the original bytes.
+    """
+    unique = list(dict.fromkeys(message_pks))
+    if not unique:
+        raise ValueError("select at least one message to export")
+
+    def write(temporary: Path) -> None:
+        with temporary.open("wb") as output:
+            for message_pk in unique:
+                framed = frame_message(read_message_bytes(archive, message_pk))
+                output.write(framed if framed.endswith(b"\n") else framed + b"\n")
+                output.write(b"\n")
+
+    _publish_export(destination, write)
 
 
 def write_attachment(archive: Path, message_pk: int, part_id: int, destination: Path) -> None:

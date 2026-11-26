@@ -38,6 +38,7 @@ const state = new Proxy({
   fileDragSupported: false,
   nativeFileDrag: false,
   dragExports: new Map(),
+  multiMessageDragFormat: "mbox",
   dragPreparing: new Set(),
   dragEpoch: 0,
   previewUrl: null,
@@ -467,6 +468,7 @@ function resetArchiveView() {
 function applyStatus(status) {
   state.fileDragSupported = Boolean(status.file_drag_supported);
   state.nativeFileDrag = Boolean(status.native_file_drag);
+  state.multiMessageDragFormat = status.multi_message_drag_format === "zip" ? "zip" : "mbox";
   elements["message-file-well"].hidden = !state.fileDragSupported;
   elements["message-file-well"].draggable = state.fileDragSupported;
   state.highlightBackground = status.configuration.search_highlight_background;
@@ -2088,7 +2090,7 @@ function showMultipleMessageSelection() {
   title.textContent = `${count} messages selected.`;
   const detail = document.createElement("p");
   detail.textContent = state.fileDragSupported
-    ? `Drag the selected messages or the file icon to ${state.nativeFileDrag ? "Explorer" : "Finder"} to export a ZIP archive.`
+    ? `Drag the selected messages or the file icon to ${state.nativeFileDrag ? "Explorer" : "Finder"} to export ${multiMessageLabel()}, or use File → Export Selected Messages….`
     : "Select a single message to use Save Message.";
   elements["message-selection-summary"].replaceChildren(title, detail, elements["message-file-well"]);
   elements["message-selection-summary"].hidden = false;
@@ -2117,7 +2119,13 @@ function invalidateDragExports() {
 window.addEventListener("mailarchiver-exports-invalidated", invalidateDragExports);
 
 function dragExportKey(messagePks) {
-  return [...new Set(messagePks)].sort((left, right) => left - right).join(",");
+  // Several messages are packaged per the drag preference, so a changed preference prepares a new file.
+  const unique = [...new Set(messagePks)].sort((left, right) => left - right);
+  return `${unique.length > 1 ? state.multiMessageDragFormat : "eml"}:${unique.join(",")}`;
+}
+
+function multiMessageLabel() {
+  return state.multiMessageDragFormat === "zip" ? "a ZIP of messages" : "an MBOX file";
 }
 
 function updateMessageFileWell() {
@@ -2125,9 +2133,10 @@ function updateMessageFileWell() {
   if (!messagePks.length) return;
   const info = state.dragExports.get(dragExportKey(messagePks));
   const multiple = messagePks.length > 1;
-  elements["message-file-name"].textContent = info?.filename || (multiple ? `${messagePks.length} Messages.zip` : "Message.eml");
+  elements["message-file-name"].textContent = info?.filename
+    || (multiple ? `${messagePks.length} Messages.${state.multiMessageDragFormat}` : "Message.eml");
   const destination = state.nativeFileDrag ? "Explorer" : "Finder";
-  const action = multiple ? `Drag selected messages to ${destination} as a ZIP archive` : `Drag this message to ${destination}`;
+  const action = multiple ? `Drag selected messages to ${destination} as ${multiMessageLabel()}` : `Drag this message to ${destination}`;
   elements["message-file-well"].title = `${action}; the first drag prepares its temporary file`;
   elements["message-file-well"].setAttribute("aria-label", action);
 }
@@ -2252,5 +2261,10 @@ function byteSize(value) {
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
+window.setMultiMessageDragFormat = format => {
+  state.multiMessageDragFormat = format === "zip" ? "zip" : "mbox";
+  updateMessageFileWell();
+  if (state.resultSelection.size > 1) showMultipleMessageSelection();
+};
 window.addEventListener("mailarchiver-status-changed", () => { if (initialized) void refreshIngestOverview(); });
 if (window.pywebview?.api?.status) initialize();

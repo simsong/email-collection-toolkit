@@ -197,6 +197,14 @@ The archive lives on the encrypted laptop filesystem.  BorgBackup and
 Backblaze provide independent backup; archive-internal encryption is not a
 requirement.
 
+A routine checkpoint (after an import, or recovering an interrupted
+publication) rereads only MBOX files modified since the previous checkpoint
+began. An unmodified MBOX keeps its previously verified SHA-256, integrity tag
+and Mailbag CSV rows when its size, message count and digest agree across the
+catalog and the previous payload manifest; anything else is reread and
+reverified. Whole-archive rereading happens only when the user asks for it
+(**File → Revalidate Archive**, `ect verify`).
+
 Each new BagIt checkpoint records the installed application version as
 `Mailbag-Agent-Version`. Existing historical bags are not rewritten merely
 because a new software version is installed.

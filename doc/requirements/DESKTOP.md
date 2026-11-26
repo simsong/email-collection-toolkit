@@ -588,8 +588,17 @@ visible rows; preview work is requested when a row is painted. Result rows
 disable native text selection. A single selected row opens its message; modifier
 clicks select multiple rows and replace the message with a selected-message count.
 Dragging a selected row or the message-file icon uses the same export path: one
-message becomes an `.eml`, and multiple messages become a ZIP whose entries
-preserve their RFC 5322 bytes. Dragging an unselected row exports that row alone.
+message becomes an `.eml`, and multiple messages become one mboxrd MBOX file
+(the default) or, per the **Preferences** drag setting, a ZIP of `.eml` files;
+both preserve each message's RFC 5322 bytes. **File → Export Selected
+Messages…** saves the selection through a save dialog as MBOX (the default),
+a ZIP of `.eml` files, or, for one message, an `.eml`, chosen by the file type.
+**File → Revalidate Archive** rereads every catalogued message and every file
+listed in the BagIt manifests without writing to the archive, then writes an
+HTML report to the system temporary directory and opens it in the default
+browser. The report lists every file in the archive with its size, manifest
+result, and, for each MBOX, its message count, how many validate against their
+recorded SHA-256, and how many are redacted (always zero until redaction exists). Dragging an unselected row exports that row alone.
 Message HTML links and recognized `http`, `https`, or `mailto` links in rendered
 plain-text parts are never opened directly. Hovering an allowed destination
 shows its complete destination in the bottom status bar. Clicking it presents
@@ -680,7 +689,7 @@ same drag implementation, which creates that copy only when a drag starts, never
 while browsing, selecting, or hovering
 over a result. Because the pywebview bridge is asynchronous, the first drag
 prepares the disposable file and the next drag copies the actual `.eml` file to
-Finder, Explorer or the Desktop. Multiple messages transfer as an actual ZIP file. Neither
+Finder, Explorer or the Desktop. Multiple messages transfer as an actual MBOX or ZIP file. Neither
 operation may create a `.fileloc`/`.webloc` shortcut or expose link/text URL drag
 representations supplied by the application. The application explicitly writes
 only `public.file-url` on macOS or native `FileDrop` on Windows, the modern file-path transfer type; macOS may add its own

@@ -37,7 +37,13 @@ deleted.
 - Verify the archive after each import, after every copy, and from time to time
   while it is stored.
 
-To verify, stop any import and run:
+In the app, choose **File → Revalidate Archive**. It rereads every message
+and file, then opens a report in your browser that lists every file in the
+archive, how many messages each MBOX holds, and how many of them validate.
+Imports themselves only recheck MBOX files that changed since the last import,
+so finishing an import stays quick on a large archive.
+
+From a terminal, stop any import and run:
 
 ```sh
 ect verify collection.mailarchive

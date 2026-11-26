@@ -73,6 +73,11 @@ name agree.
 The bottom of each message lists where it is stored in the archive and every
 source where it was found. **Save Message…** saves an exact `.eml` copy.
 
+To export several messages, select them and choose **File → Export Selected
+Messages…**. Save as an MBOX file (the default) or a ZIP of `.eml` files. You
+can also drag selected messages to Finder or Explorer; they arrive as one MBOX
+file unless you choose a ZIP under **Preferences**.
+
 ## Attachment text
 
 Turn on **Search attachments** to include plain-text, HTML, and RTF

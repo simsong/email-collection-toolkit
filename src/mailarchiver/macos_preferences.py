@@ -19,6 +19,9 @@ from typing import Any
 from .updates import PREVIEW_STREAM_LABEL, RELEASE_STREAM_LABEL, UPDATE_STREAM_HELP, UpdateChannel, UpdateService
 from .worker_preferences import WORKER_MODES, WorkerPreferences, WorkerSettings
 from .imap_preferences import DEFAULT_IMAP_CONNECTIONS, MAX_IMAP_CONNECTIONS, validate_imap_connections
+from .application import MULTI_MESSAGE_FORMATS, MultiMessageFormat
+
+DRAG_FORMAT_TITLES = ("One MBOX file (default)", "A ZIP of .eml files")
 
 MODULE_KEY = "__module__"
 PROTOCOLS_KEY = "protocols"
@@ -62,8 +65,10 @@ def preferences_delegate() -> Any:
 class MacOSPreferences:
     """Own native controls, validation and a reusable preferences window."""
 
-    def __init__(self, service: UpdateService, save: Callable[[UpdateChannel, bool, WorkerPreferences | None, int], None]) -> None:
-        self.service, self.save = service, save
+    def __init__(self, service: UpdateService, save: Callable[[UpdateChannel, bool, WorkerPreferences | None, int], None],
+                 save_drag_format: Callable[[MultiMessageFormat], None] | None = None) -> None:
+        self.service, self.save, self.save_drag_format = service, save, save_drag_format
+        self.saved_drag_format: MultiMessageFormat = "mbox"
         self.workers: WorkerSettings
         self.saved: tuple[UpdateChannel, bool, WorkerPreferences | None, int] | None = None
         appkit = import_module("AppKit")
@@ -72,7 +77,7 @@ class MacOSPreferences:
         self.delegate = preferences_delegate().alloc().init()
         self.delegate.pane = self
         self.window = appkit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            ((0, 0), (580, 740)), appkit.NSWindowStyleMaskTitled | appkit.NSWindowStyleMaskClosable |
+            ((0, 0), (580, 820)), appkit.NSWindowStyleMaskTitled | appkit.NSWindowStyleMaskClosable |
             appkit.NSWindowStyleMaskMiniaturizable, appkit.NSBackingStoreBuffered, False)
         self.window.setReleasedWhenClosed_(False)
         self.window.setTitle_("Preferences")
@@ -85,24 +90,30 @@ class MacOSPreferences:
             view.addSubview_(control)
             return control
 
-        self.version = label("", 688)
-        label("Maximum number of workers", 640)
+        self.version = label("", 768)
+        label("Maximum number of workers", 720)
         prototype = appkit.NSButtonCell.alloc().init()
         prototype.setButtonType_(appkit.NSRadioButton)
         self.choices = appkit.NSMatrix.alloc().initWithFrame_mode_prototype_numberOfRows_numberOfColumns_(
-            ((24, 528), (300, 96)), appkit.NSRadioModeMatrix, prototype, 3, 1)
+            ((24, 608), (300, 96)), appkit.NSRadioModeMatrix, prototype, 3, 1)
         self.choices.setCellSize_((300, 28))
         self.choices.setIntercellSpacing_((0, 4))
         self.choices.setAccessibilityIdentifier_("worker-mode")
         self.choices.setTarget_(self.delegate)
         self.choices.setAction_("changed:")
         view.addSubview_(self.choices)
-        self.count = appkit.NSTextField.alloc().initWithFrame_(((340, 528), (150, 28)))
+        self.count = appkit.NSTextField.alloc().initWithFrame_(((340, 608), (150, 28)))
         self.count.setAccessibilityIdentifier_("worker-count")
         self.count.setDelegate_(self.delegate)
         view.addSubview_(self.count)
-        self.note = label("", 460, 56)
+        self.note = label("", 540, 56)
         self.note.setAccessibilityIdentifier_("worker-note")
+        label("When dragging several messages out of a search window, export them as", 500)
+        self.drag_format = appkit.NSPopUpButton.alloc().initWithFrame_pullsDown_(((24, 464), (300, 28)), False)
+        self.drag_format.addItemsWithTitles_(list(DRAG_FORMAT_TITLES))
+        self.drag_format.setTarget_(self.delegate)
+        self.drag_format.setAction_("changed:")
+        view.addSubview_(self.drag_format)
         label("Maximum IMAP connections per account", 420)
         self.imap_count = appkit.NSTextField.alloc().initWithFrame_(((340, 388), (150, 28)))
         self.imap_count.setAccessibilityIdentifier_("imap-connections")
@@ -128,7 +139,8 @@ class MacOSPreferences:
         self.check.setAccessibilityIdentifier_("check-updates")
         view.addSubview_(self.check)
 
-    def show(self, workers: WorkerSettings, imap_connections: int = DEFAULT_IMAP_CONNECTIONS) -> None:
+    def show(self, workers: WorkerSettings, imap_connections: int = DEFAULT_IMAP_CONNECTIONS,
+             drag_format: MultiMessageFormat = "mbox") -> None:
         """Reuse an open pane; refresh saved choices each time a closed pane reopens."""
         if self.window.isVisible():
             self.window.deminiaturize_(None)
@@ -144,6 +156,8 @@ class MacOSPreferences:
         self.count.setStringValue_(str(min(workers.preferences.custom_count, workers.maximum)))
         self.count.setEnabled_(workers.command_line is None)
         self.imap_count.setStringValue_(str(imap_connections))
+        self.saved_drag_format = drag_format
+        self.drag_format.selectItemAtIndex_(MULTI_MESSAGE_FORMATS.index(drag_format))
         self.channel.selectItemAtIndex_(int(status.channel == "preview"))
         self.automatic.setState_(int(status.automatic_checks))
         self.saved = (status.channel, status.automatic_checks,
@@ -178,6 +192,10 @@ class MacOSPreferences:
                 if self.saved is None or value[:2] != self.saved[:2]:
                     self.service.configure(channel, bool(self.automatic.state()))
                 self.saved = value
+            drag_format = MULTI_MESSAGE_FORMATS[max(0, self.drag_format.indexOfSelectedItem())]
+            if self.save_drag_format is not None and drag_format != self.saved_drag_format:
+                self.save_drag_format(drag_format)
+                self.saved_drag_format = drag_format
             self.note.setStringValue_(self.worker_note())
             return True
         except (OSError, ValueError, RuntimeError) as error:

@@ -62,10 +62,13 @@ from .sparkle import SparkleBackend, start_installed_updater
 from .macos_preferences import MacOSPreferences
 from .winsparkle import WinSparkleBackend
 from .__main__ import IngestInterrupted, IngestOutcome, IngestRequest, run_ingest
+from .archive_validation import ValidationStopped, validate_archive
+from .archive_validation import write_report as write_validation_report
 from .application import (
     ApplicationController,
     ArchiveDocument,
     IngestJob,
+    MultiMessageFormat,
     SearchWindow,
     SetupSelection,
     validate_ingest_paths,
@@ -105,6 +108,7 @@ from .gui_service import (
     warm_search,
     write_attachment,
     write_message,
+    write_messages_mbox,
     write_messages_zip,
 )
 from .ingest_status import (
@@ -205,6 +209,7 @@ class GuiStatus(BaseModel):
     file_drag_supported: bool = sys.platform in {"darwin", "win32"}
     native_file_drag: bool = sys.platform == "win32"
     write_available: bool = True
+    multi_message_drag_format: MultiMessageFormat = "mbox"
     configuration: GuiConfiguration
     notices: list[ApplicationNotice] = Field(default_factory=list)
     archive_status_messages: list[str] = Field(default_factory=list)
@@ -1014,6 +1019,7 @@ class GuiApi:
             untitled=self.document.descriptor.untitled if self.document else self.archive is None,
             generation=self.document.generation if self.document else 0,
             opened_in_new_window=opened_in_new_window,
+            multi_message_drag_format=self._multi_message_format(),
             configuration=application_configuration().gui,
             notices=self.application.window_notices(self.search_window.window_id if self.search_window else None)
                 if self.application else [],
@@ -1456,6 +1462,46 @@ class GuiApi:
             write_attachment(self._archive(), message_pk, part_id, destination)
         return str(destination)
 
+    def _multi_message_format(self) -> MultiMessageFormat:
+        if self.application is None:
+            return "mbox"
+        return self.application.controller.preferences.multi_message_drag_format
+
+    def export_messages(self, message_pks: list[int]) -> str | None:
+        """File > Export Selected Messages: save as MBOX (default), a ZIP of .eml files, or one .eml."""
+        unique = list(dict.fromkeys(message_pks))
+        if not unique:
+            raise ValueError("Select one or more messages to export.")
+        archive = self._archive()
+        if len(unique) == 1:
+            stem = export_filename(describe_message(archive, unique[0])).removesuffix(".eml")
+        else:
+            stem = f"Email Collection Toolkit Messages ({len(unique)})"
+        types = ["MBOX mailbox (*.mbox)", "ZIP of messages (*.zip)"]
+        if len(unique) == 1:
+            types.append("Email message (*.eml)")
+        if self.e2e_directory is not None:
+            destination = self.e2e_directory / f"exported-{stem}.mbox"
+        else:
+            selected = self.window.create_file_dialog(
+                webview.FileDialog.SAVE, directory=str(Path.home() / "Desktop"),
+                save_filename=f"{stem}.mbox", file_types=tuple(types))
+            if not selected:
+                return None
+            destination = dialog_paths(selected)[0]
+        suffix = destination.suffix.casefold()
+        if suffix not in {".mbox", ".zip", ".eml"} or (suffix == ".eml" and len(unique) > 1):
+            destination = destination.with_name(destination.name + ".mbox")
+            suffix = ".mbox"
+        with self.application.writer_activity() if self.application else nullcontext():
+            if suffix == ".eml":
+                write_message(archive, unique[0], destination)
+            elif suffix == ".zip":
+                write_messages_zip(archive, unique, destination, minimum=1)
+            else:
+                write_messages_mbox(archive, unique, destination)
+        return str(destination)
+
     def prepare_drag(self, message_pks: list[int]) -> dict[str, str]:
         """Prepare one explicit native file drag without proactively exporting mail."""
         with self._drag_lock:
@@ -1470,9 +1516,12 @@ class GuiApi:
                 view = describe_message(archive, unique[0])
                 destination = directory / export_filename(view)
                 write_message(archive, unique[0], destination)
-            else:
+            elif self._multi_message_format() == "zip":
                 destination = directory / f"Email Collection Toolkit Messages ({len(unique)}).zip"
                 write_messages_zip(archive, unique, destination)
+            else:
+                destination = directory / f"Email Collection Toolkit Messages ({len(unique)}).mbox"
+                write_messages_mbox(archive, unique, destination)
             token = FILE_DRAGS.register(destination)
             self._drag_tokens.add(token)
             return DragExport(filename=destination.name, token=token).model_dump()
@@ -1947,7 +1996,8 @@ class PyWebViewApplication:
                 window = show_windows_update_preferences(self.updates,
                     lambda channel, automatic: self.controller.configure_updates(channel, automatic, strict=True),
                     self.worker_settings, self.save_preferences, lambda: self._quitting,
-                    lambda: self.controller.preferences.imap_connections)
+                    lambda: self.controller.preferences.imap_connections,
+                    lambda: self.controller.preferences.multi_message_drag_format, self.save_drag_format)
                 self._windows_preferences_window = window
 
                 def closed(*_args: object) -> None:
@@ -1958,8 +2008,10 @@ class PyWebViewApplication:
                 self._refresh_menus()
             else:
                 if self._preferences_window is None:
-                    self._preferences_window = MacOSPreferences(self.updates, self.save_preferences)
-                self._preferences_window.show(self.worker_settings(), self.controller.preferences.imap_connections)
+                    self._preferences_window = MacOSPreferences(self.updates, self.save_preferences, self.save_drag_format)
+                preferences = self.controller.preferences
+                self._preferences_window.show(self.worker_settings(), preferences.imap_connections,
+                                              preferences.multi_message_drag_format)
         except (OSError, ValueError) as error:
             self.add_notice("warning", f"Could not save preferences: {error}")
             return
@@ -1968,6 +2020,23 @@ class PyWebViewApplication:
 
     def worker_settings(self) -> WorkerSettings:
         return WorkerSettings(preferences=self.controller.preferences.workers, command_line=self._workers_override)
+
+    def save_drag_format(self, value: MultiMessageFormat) -> None:
+        """Persist the multi-message drag format and tell open search windows."""
+        self.controller.configure_drag_format(value, strict=True)
+        windows = [api.window for api in self._search_apis() if api.window is not None]
+        script = f"window.setMultiMessageDragFormat?.({json.dumps(value)});"
+
+        def deliver() -> None:
+            # Off the caller's thread: the macOS preferences pane calls this on the main
+            # thread, where waiting for WebKit's script completion would deadlock.
+            for window in windows:
+                try:
+                    window.run_js(script)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    logging.getLogger(__name__).debug("Drag format delivery failed", exc_info=True)
+
+        Thread(target=deliver, name="drag-format", daemon=True).start()
 
     def save_preferences(self, channel: UpdateChannel, automatic: bool, workers: WorkerPreferences | None,
                          imap_connections: int | None = None) -> None:
@@ -2823,6 +2892,51 @@ class PyWebViewApplication:
         document = self.active_document()
         return self.open_ingest_window(document) if document is not None else False
 
+    def export_selected_messages(self) -> bool:
+        """File > Export Selected Messages…: save the active window's selection as MBOX or ZIP."""
+        api = self.active_api()
+        if api is None or api.window is None or api.document is None or api.document.path is None:
+            return False
+        window_id = api.search_window.window_id if api.search_window else None
+        try:
+            selected = api.window.evaluate_js("selectedDragMessagePks()") or []
+            destination = api.export_messages([int(value) for value in selected])
+        except (OSError, ValueError, TypeError) as error:
+            self.add_notice("warning", f"Could not export messages: {error}", window_id=window_id)
+            return False
+        if destination is None:
+            return False
+        self.add_notice("information", f"Exported {len(selected):,} message{'s' if len(selected) != 1 else ''} to {destination}",
+                        window_id=window_id)
+        return True
+
+    def revalidate_active_archive(self) -> bool:
+        """File > Revalidate Archive: reread every message, then open an HTML report in the browser."""
+        document = self.active_document()
+        if document is None or document.path is None:
+            return False
+        archive = document.path
+        label = document.display_path or archive
+        note = " Manifests may differ while an import is running." if document.ingest_job is not None else ""
+        self.add_notice("information", f"Revalidating {label}. The report opens in your browser when it finishes.{note}")
+
+        def run() -> None:
+            try:
+                report = validate_archive(archive, should_stop=lambda: self._quitting)
+                path = write_validation_report(report)
+                open_export(path)
+            except ValidationStopped:
+                return
+            except (OSError, ValueError, sqlite3.Error) as error:
+                self.add_notice("error", f"Could not revalidate {label}: {error}")
+                return
+            severity: Literal["information", "warning"] = "warning" if report.problems else "information"
+            summary = (f"{report.validated:,} of {report.messages:,} messages validated"
+                       + (f"; {report.problems:,} files with problems" if report.problems else ""))
+            self.add_notice(severity, f"Validation of {label} finished: {summary}. Report: {path}")
+
+        return self._submit_task("Revalidate archive", run) is not None
+
     def reveal_active_archive(self) -> bool:
         """Open the saved archive folder through the platform shell."""
         document = self.active_document()
@@ -3460,6 +3574,8 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
         return [
             Menu("File", [*file_items, MenuAction("Import…", application.import_active_document),
                           MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
+                          MenuAction("Export Selected Messages…", application.export_selected_messages),
+                          MenuAction("Revalidate Archive", application.revalidate_active_archive),
                           MenuAction("Document Options…", application.open_document_options),
                           MenuAction("Customizable Default Lists…", application.open_default_lists),
                           MenuAction("Show Archive in Explorer", application.reveal_active_archive),
@@ -3477,8 +3593,10 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
         (
             MenuAction("Import…", application.import_active_document),
             MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
+            MenuAction("Export Selected Messages…", application.export_selected_messages),
+            MenuAction("Revalidate Archive", application.revalidate_active_archive),
             MenuAction("Document Options…", application.open_document_options),
-                          MenuAction("Customizable Default Lists…", application.open_default_lists),
+            MenuAction("Customizable Default Lists…", application.open_default_lists),
             MenuAction("Close", application.close_active_window),
         )
     )
