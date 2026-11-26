@@ -137,7 +137,7 @@ def check_document_path(window: webview.Window, path: Path | None) -> None:
             assert label.stringValue() == f"({APPLICATION_VERSION})"
             bounds = label.convertRect_toView_(label.bounds(), None)
             assert bounds.origin.x > native.frame().size.width / 2, bounds
-            if " — Ingests — " in window.title:
+            if " — Activity — " in window.title:
                 frame = native.contentView().superview()
                 bitmap = frame.bitmapImageRepForCachingDisplayInRect_(frame.bounds())
                 frame.cacheDisplayInRect_toBitmapImageRep_(frame.bounds(), bitmap)
@@ -154,7 +154,7 @@ def check_document_path(window: webview.Window, path: Path | None) -> None:
 
 
 def check_ingest_wake_refresh(application: PyWebViewApplication, ingest: webview.Window) -> None:
-    """Desktop: a workspace wake reaches the open Ingests bridge without focus."""
+    """Desktop: a workspace wake reaches the open Activity bridge without focus."""
     native = ingest.native
     assert native is not None
     hidden = Event()
@@ -164,7 +164,7 @@ def check_ingest_wake_refresh(application: PyWebViewApplication, ingest: webview
         hidden.set()
 
     AppHelper.callAfter(order_out)
-    assert hidden.wait(5), "Ingests window did not order out"
+    assert hidden.wait(5), "Activity window did not order out"
     assert evaluate_async(ingest, """(async () => {
         await refreshHistory();
         const original = pywebview.api.history;
@@ -734,7 +734,7 @@ def main() -> None:
             evaluate_async(options, "refreshOptions().then(() => true)")
             assert not options.evaluate_js("document.getElementById('changed').hidden")
             assert application.open_ingest_window(document)
-            ingest = next(window for window in webview.windows if " — Ingests — " in window.title)
+            ingest = next(window for window in webview.windows if " — Activity — " in window.title)
             assert ingest.events.loaded.wait(10), "Ingest bridge failed to load"
             check_document_path(ingest, document.display_path)
             evaluate_async(ingest, "refreshHistory().then(() => true)")

@@ -41,8 +41,8 @@ def controller(tmp_path: Path) -> ApplicationController:
     return ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
 
 
-def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_path: Path) -> None:
-    """Quit stops the shared ingest service, preserves committed bytes, and permits manual restart."""
+def test_gui_stop_keeps_partial_import_and_reimport_has_no_duplicates(tmp_path: Path) -> None:
+    """Quit stops the shared ingest service at once, preserves committed bytes, and permits manual restart."""
     source = tmp_path / "source.mbox"
     digests = set()
     with source.open("wb") as output:
@@ -98,7 +98,9 @@ def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_
     assert len(errors) == 1 and isinstance(errors[0], IngestInterrupted)
     assert read_ingest_history(archive).statuses[0].state == "interrupted"
     with phase("verify-partial-archive"):
-        assert not verify_archive(archive)
+        # Stopping skips the whole-archive checksum refresh; the stale checkpoint is
+        # detectable, and the resumed import below writes a valid one.
+        assert verify_archive(archive)
     with sqlite3.connect(archive / "archive.sqlite3") as catalog:
         partial = catalog.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
     assert 0 < partial < len(digests)
@@ -536,7 +538,7 @@ def test_quit_keeps_active_import_document_alive(tmp_path: Path) -> None:
 
 
 def test_child_window_keeps_document_routing_without_search_windows(tmp_path: Path) -> None:
-    """Requirement: an Ingests window continues routing actions after searches close."""
+    """Requirement: an Activity window continues routing actions after searches close."""
     from mailarchiver.gui_app import PyWebViewApplication
 
     application = controller(tmp_path)

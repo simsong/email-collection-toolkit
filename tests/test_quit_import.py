@@ -173,7 +173,9 @@ entrypoint="plugin:create_plugin"
         if source_kind == "api":
             assert (tmp_path / "requested-0").exists()
             assert not (tmp_path / "requested-1").exists()
-        assert not verify_archive(archive)
+        # Stopping skips the whole-archive checksum refresh so Suspend/Quit are immediate;
+        # the stale checkpoint is detectable, and the next completed import repairs it.
+        assert verify_archive(archive)
         run_ingest(request, terminal=False)
         with sqlite3.connect(archive / "archive.sqlite3") as catalog:
             assert {row[0] for row in catalog.execute("SELECT sha256 FROM messages")} == {

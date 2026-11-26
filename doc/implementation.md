@@ -20,7 +20,7 @@ than a second change log. Platform acceptance is stated alongside its evidence.
 ## Shared boundaries
 
 - IMAP credential checks authenticate without mailbox access or archive writes;
-  the search notice opens the Ingests password dialog for the rejected account.
+  the search notice opens the Activity password dialog for the rejected account.
   Replacement passwords are tested before saving. Account acquisition uses
   a saved per-account limit (default 8, range 1–15) and cancellable capacity backoff while retaining the
   full processing worker pool. Interrupted sessions retry with fresh TLS and
@@ -51,7 +51,7 @@ than a second change log. Platform acceptance is stated alongside its evidence.
   when the last source finishes.
   Failure deadlines remain explicit; readiness must be observed.
   The pinned SDK's API replies are posted to the native view without a second
-  synchronous acknowledgement; Ingests bounds its own reply waits.
+  synchronous acknowledgement; Activity bounds its own reply waits.
   A shared lifecycle controller handles macOS and Windows sleep/wake and network
   events, feeding desktop status and active IMAP recovery without starting a new import.
   The estimator tracks unfinished unknown-size containers separately from known

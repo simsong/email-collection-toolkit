@@ -82,7 +82,7 @@ ect imap --archive collection.mailarchive --source SOURCE_ID --set-password
 
 Checks need only the archive's existing `config.yaml` and may run while an import
 holds the writer lease. `--set-password` needs an interactive terminal and exactly
-one selected account. Ingests offers **Update IMAP Password…** while no import is
+one selected account. Activity offers **Update IMAP Password…** while no import is
 active. Rejected replacements retain the old password; saving never starts an
 import. Errors include a sanitized server reason; credential-only checks return 75 for
 temporary connection/rate limits. Imports stay running and retry after 1, 2, 4,

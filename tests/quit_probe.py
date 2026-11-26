@@ -246,7 +246,7 @@ def main() -> None:
                     results.append(value)
                     done.set()
 
-                expression = "refreshHistory().then(() => true)" if " — Ingests — " in native_window.title else "refresh().then(() => true)"
+                expression = "refreshHistory().then(() => true)" if " — Activity — " in native_window.title else "refresh().then(() => true)"
                 native_window.evaluate_js(expression, callback=received)
                 assert done.wait(10) and results == [True], "Native status read did not finish"
             if mode == "native-overlay":

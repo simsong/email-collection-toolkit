@@ -20,7 +20,7 @@ pywebview delivers scalar and Promise results through its Promise-only callback.
 The real native run checks numeric, false, null and Promise results before reader
 operations, verifies pywebview's direct scalar return separately, and requires
 synchronous errors and rejected Promises to retain their diagnostics through a
-typed result envelope. Its direct background import opens Ingests explicitly before checking
+typed result envelope. Its direct background import opens Activity explicitly before checking
 that window's version and capturing its frame.
 Name-linkage fixtures use the canonical byte-preserving MBOX writer rather than
 the unadapted Windows stdlib writer, avoiding newline-induced hash mismatches.
@@ -496,8 +496,8 @@ mailbox-only queries as well as text queries.
 
 Document identity, publication and closure follow the [desktop review requirements](../requirements/VALIDATION.md#pr-review-validation-follow-up).
 
-An Ingests child window retains document routing after all search windows close.
-New Search and Ingests use that document directly; Import creates a new search
+An Activity child window retains document routing after all search windows close.
+New Search and Activity use that document directly; Import creates a new search
 owner when needed.
 
 Integrity hash-standard versions must be JSON integers. The standalone verifier

@@ -1,12 +1,12 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Exercise saved failure diagnostics through the actual Ingests browser interface.
+# Exercise saved failure diagnostics through the actual Activity browser interface.
 # Synthetic imports and snapshots provide source context and version attribution.
 # Historical versions must survive viewing under a different application version.
 # Legacy snapshots remain readable without inventing missing producer metadata.
 # Assertions inspect visible text and ensure history reads never rewrite evidence.
 # No test accesses personal mail, credentials or a real canonical archive.
 
-"""Requirement: local failure evidence is readable in the real Ingests interface."""
+"""Requirement: local failure evidence is readable in the real Activity interface."""
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path

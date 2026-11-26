@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import signal
+import re
 import sqlite3
 import subprocess
 import sys
@@ -287,6 +288,21 @@ def test_ingest_history_ui_end_to_end(built_archive: BuiltArchive, page: Page) -
     page.wait_for_selector(".history-row")
     assert page.locator(".history-row").count() == 1
     assert "Completed" in page.locator(".history-row").inner_text()
+    # Finished runs sit under "Past Activity"; with nothing in progress there is no rule above it.
+    expect(page.locator("#history-list > *").first).to_have_text("Past Activity")
+    expect(page.locator(".history-divider.after-current")).to_have_count(0)
+    # A run in progress leads the list, separated from past runs by a rule and the label.
+    page.evaluate("""() => {
+      statuses = [{...statuses[0], status_id: "current-run", state: "running"}, ...statuses];
+      render();
+    }""")
+    children = page.locator("#history-list > *")
+    expect(children).to_have_count(3)
+    expect(children.nth(0)).to_have_class(re.compile(r"history-row"))
+    expect(children.nth(1)).to_have_class("history-divider after-current")
+    expect(children.nth(1)).to_have_text("Past Activity")
+    expect(children.nth(2)).to_contain_text("completed")
+    page.evaluate("""() => { statuses = statuses.slice(1); render(); }""")
     tables = page.locator(".worker-table")
     expect(tables).to_have_count(2)
     for table in tables.all():

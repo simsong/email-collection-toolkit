@@ -27,7 +27,7 @@ outer traceback, before any exception-chain section. Merely having an IMAP sourc
 does not hide a PST, finalization or ambiguous-origin timeout.
 History, search overview and About apply this read-only projection. Other failures,
 including finalization failures with a nested timeout, retain their diagnostics.
-Ingests renders the timeout label, a yellow circle with a horizontal dash and saved
+Activity renders the timeout label, a yellow circle with a horizontal dash and saved
 progress without a finalizing ETA. Persistent status files remain unchanged.
 `make test-timeout-presentation` covers old snapshots, true failures and real TLS
 pause/resume through the browser.
@@ -36,8 +36,8 @@ Cocoa menu refresh installs one identified `NSTitlebarAccessoryViewController`
 with `NSLayoutAttributeRight` on each titled application window. Its label uses
 the immutable launch `APPLICATION_VERSION` in parentheses and leaves the native
 title and represented URL intact. Native lifecycle acceptance checks Search,
-Ingests, About and Untitled labels, right alignment and absence of duplicates,
-and captures the synthetic Ingests frame including its title bar. Windows menu
+Activity, About and Untitled labels, right alignment and absence of duplicates,
+and captures the synthetic Activity frame including its title bar. Windows menu
 refresh adds one right-aligned version label and caption suffix, including utility
 and Preferences windows. **Show Archive in Explorer** opens the active saved
 archive folder through the Windows shell. Each window's document-menu availability
@@ -118,7 +118,7 @@ IMAP accounts from local configuration without keyring or network access; missin
 or invalid configuration falls back to an unavailable-account label. Raw
 `source_roots` and saved history files retain their resumable locators.
 Expected configuration problems also populate typed history warnings and the
-Ingests warning banner. A per-window warning cache logs each changed condition
+Activity warning banner. A per-window warning cache logs each changed condition
 once, without validator frames or configuration values; history remains read-only.
 
 `gui_processing.unfinished_work` groups typed unfinished run snapshots by source,
@@ -271,8 +271,8 @@ It returns without a synchronous dialog or waiting for import futures on Cocoa's
 main thread. Controller tests cover lease/signal preservation. Native lifecycle
 tests close the original search, query its sibling and verify a responsive
 last-window veto while the app lock is held and all command workers are busy. The Window menu
-routes to the active archive's shared Ingests child window and enumerates every
-About, search, and Ingests window. **Window → New Search Window** creates another
+routes to the active archive's shared Activity child window and enumerates every
+About, search, and Activity window. **Window → New Search Window** creates another
 view of the active archive; the macOS adapter disables it without an active
 saved archive search window and refreshes on native focus changes.
 A narrow macOS adapter refreshes pywebview's
@@ -289,7 +289,7 @@ issues 73, 72, 74, and 75 respectively.
 **File → Reprocess Saved Mail…** captures the active search/document and runs
 its confirmation as a tracked command. Accepting launches the existing writer-
 leased service with reprocess enabled, content processing enabled and no source
-roots or ingest traversal; the Ingests window shows progress. Cancellation does
+roots or ingest traversal; the Activity window shows progress. Cancellation does
 not write. Rootless runs and interruption saves retain the preceding source
 request and separately store current processing overrides. Processing-only CLI/GUI
 continuation and inventory discovery prefer those overrides. Continue Import selects
@@ -315,7 +315,7 @@ documents; argparse and the Finder delegate retain their existing roles.
 same isolated diagnostics as the packaged app and rejects unexpected startup
 errors. The native application probe also checks startup notices and opens its
 fixture through the document-open delegate.
-The Ingests bridge exposes **Import Directory…** for its bound document. It
+The Activity bridge exposes **Import Directory…** for its bound document. It
 reuses that document's search window (or opens one to own the job) and runs the
 normal confirmed import workflow.
 The UI refreshes import availability on application/status events and prevents repeated clicks while dialogs are open.
@@ -379,7 +379,7 @@ directories so existing archives remain selectable. `SetupSelection` compares fo
 (including Cocoa Unicode and case aliases) before
 any archive initialization. Start import opens a valid existing destination or
 creates an empty one, reuses its search owner on retry, and passes the chosen
-root into the existing confirmed import workflow. A started job opens Ingests
+root into the existing confirmed import workflow. A started job opens Activity
 and hides setup after clearing its selections. The webview stays alive to
 receive the bridge reply; destroying it inside that call would strand a reply
 thread at exit. Cancel (also Escape) requests Quit on a background thread without
@@ -500,7 +500,7 @@ once from installed metadata and shared with About/title bars, so editable
 reinstalls cannot relabel a later failure. Missing legacy versions display
 **(version unavailable)**; history reading preserves the original JSON.
 Both the status-line action and the native
-**Window → Ingests** menu route through a per-document singleton window owner: an existing
+**Window → Activity…** menu route through a per-document singleton window owner: an existing
 window is restored and ordered to the front, while a closed one is recreated
 with its own normal close box. A running snapshot remains live while its producer PID is alive. After that
 process disappears and the five-second abandonment deadline has expired it is
@@ -1051,7 +1051,7 @@ saved request and acquires a new writer lease; it does not quit or abort jobs.
 Availability follows actual unfinished source/content work, including deferred
 work after a completed latest run, and remains disabled for an active writer.
 IMAP connection interruption uses the same saved-request path with a distinct
-`paused` status and informational notice. Ingests labels its existing continuation
+`paused` status and informational notice. Activity labels its existing continuation
 button **Resume** for the latest paused run and displays its network reason in
 the phase caption. Paused status circles use the amber pause symbol.
 
@@ -1169,7 +1169,7 @@ and invalidated drag exports replace their Map so observers are awakened even
 when an unselected row's export changes no visible DOM. The real reader/export
 driver exercises that path through actual temporary EML files and copy-only tokens.
 
-`coordination.js` shares one pending status Promise per About/Ingests/options
+`coordination.js` shares one pending status Promise per About/Activity/options
 page. Concurrent refresh callers join actual settlement; `fresh()` joins older
 work before reading post-command state. Windows Preferences similarly coalesces
 state reads and waits for a fresh post-Check snapshot. Existing generation/edit guards remain responsible for preserving
@@ -1202,7 +1202,7 @@ It preserves ordinary evaluations and Promise callbacks, including their native
 errors and 15-second failure deadline. One-way replies do not create a waiting
 Python future; the page's Promise resolution establishes actual delivery. Closed
 windows discard queued replies, including a Close that races native dispatch.
-Ingests removes expired reply callbacks, and late delivery skips a removed callback.
+Activity removes expired reply callbacks, and late delivery skips a removed callback.
 `DesktopLifecycle` owns the common sleep, wake, network and status handlers and
 one `ImapTransport` for each application on macOS and Windows. Native adapters
 pass OS path-query lambdas to these handlers; interface availability remains a
@@ -1218,7 +1218,7 @@ without taking the application lock on Cocoa's main thread. Callback exceptions
 are contained; close serializes with callbacks, rejects queued OS queries and
 removes observers, run-loop sources, native power registration and static .NET
 delegates. An unavailable native subscription logs a warning while the common timed retry policy remains.
-Ingests coalesces reads with any in-flight refresh and clears its history error
+Activity coalesces reads with any in-flight refresh and clears its history error
 after a successful reply. Explicit Suspend and Quit stay authoritative.
 `make test-desktop-lifecycle` checks host and Windows type definitions and
 exercises common cancellation/disposal and native Cocoa notifications. A focused
@@ -1234,7 +1234,7 @@ actual native power registration, registered callback dispatch for suspend and
 both resume types, .NET network delegates against real interface queries, and
 cleanup. It runs in branch CI on Windows; synthetic callbacks do not establish reception of physical sleep,
 wake or interface changes, or installed MSIX acceptance.
-Ingests bounds status/control reply waits at 15 seconds and reports an unconfirmed
+Activity bounds status/control reply waits at 15 seconds and reports an unconfirmed
 outcome before reading fresh status. Commands are never automatically repeated;
 password validation retains its existing lifetime and cancellation safeguards.
 `make test-native-replies` checks real Cocoa API exchanges while rejecting the
@@ -1243,7 +1243,7 @@ redundant synchronous acknowledgement, plus a browser-level lost control reply.
 ## IMAP run coverage
 
 Additive `saved_workers` and `concurrent_processing` snapshot fields keep saved-content
-lane updates apart from source/scanner updates. Ingests renders both groups and source
+lane updates apart from source/scanner updates. Activity renders both groups and source
 statistics during overlap. The overlap flag requires active work in both groups;
 saved-only and source-only phases have their own labels. Both terminal formats
 also show saved lanes. Historical files retain their previous presentation.
@@ -1255,7 +1255,7 @@ is introduced.
 
 Unknown-byte source inventory reports ETA unavailable while partitions remain;
 finishing known byte input may still report finalizing before its checkpoint.
-Ingests shows run-specific message count, earliest/latest IMAP INTERNALDATE values
+Activity shows run-specific message count, earliest/latest IMAP INTERNALDATE values
 in UTC and year counts before the workers table. The coverage table uses intrinsic
 widths for both columns. The range uses source IMAP INTERNALDATE, not header dates or download times.
 Separate acquisition counters exclude attached-message extraction and saved processing.

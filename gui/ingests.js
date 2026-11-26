@@ -227,12 +227,26 @@ async function controlImport(method) {
 function render(errors = []) {
   byId("history-count").textContent = `${integer(statuses.length)} run${statuses.length === 1 ? "" : "s"}`;
   const list = byId("history-list");
-  list.replaceChildren(...statuses.map(historyRow));
+  // Runs still in progress (running or waiting to resume) lead the newest-first list;
+  // everything after them sits under a "Past Activity" divider.
+  const current = statuses.findIndex(status => !["running", "paused"].includes(status.state));
+  const split = current === -1 ? statuses.length : current;
+  const rows = statuses.map(historyRow);
+  if (split < statuses.length) rows.splice(split, 0, pastActivityDivider(split > 0));
+  list.replaceChildren(...rows);
   const errorBox = byId("history-errors");
   errorBox.hidden = errors.length === 0;
   errorBox.textContent = errors.map(error => `${error.filename}: ${error.detail}`).join("\n");
   const selected = statuses.find(status => status.status_id === selectedStatusId);
   renderDetail(selected || null);
+}
+
+function pastActivityDivider(afterCurrent) {
+  const divider = document.createElement("div");
+  divider.className = `history-divider${afterCurrent ? " after-current" : ""}`;
+  divider.setAttribute("role", "presentation");
+  divider.textContent = "Past Activity";
+  return divider;
 }
 
 function historyRow(status) {

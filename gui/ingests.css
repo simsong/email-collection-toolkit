@@ -29,6 +29,8 @@ body { display: flex; flex-direction: column; }
 #import-directory { grid-column: 1 / -1; justify-self: start; }
 #import-control-status { grid-column: 1 / -1; margin: 0; font-size: 12px; }
 .history-row { display: grid; grid-template-columns: 22px 1fr; gap: 8px; width: 100%; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--border); text-align: left; background: transparent; }
+.history-divider { padding: 10px 12px 4px; color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+.history-divider.after-current { border-top: 1px solid CanvasText; }
 .history-row:hover { background: color-mix(in srgb, AccentColor 10%, transparent); }
 .history-row.selected { background: var(--selection); }
 .state-dot { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 22px; width: 22px; height: 22px; border-radius: 50%; background: #666; color: white; font-size: 16px; font-weight: 800; line-height: 1; }

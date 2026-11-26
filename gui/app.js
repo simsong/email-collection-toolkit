@@ -506,7 +506,7 @@ async function refreshIngestOverview() {
   line.className = `ingest-status-line no-print${status ? ` ${status.state}` : ""}`;
   line.dataset.statusId = status?.status_id || "";
   if (!status) {
-    setIngestStatusText("No ingest history · Click to open Ingests");
+    setIngestStatusText("No ingest history · Click to open Activity");
     return;
   }
   const messages = Number(status.processed_messages).toLocaleString();

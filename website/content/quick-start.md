@@ -38,7 +38,7 @@ The application reads MBOX files (including Google Takeout), Maildir folders,
 
 ## 3. Watch progress
 
-The **Ingests** window shows what is being read and how far along it is. Large
+The **Activity** window shows what is being read and how far along it is. Large
 collections take a while. You can choose **Suspend Import** at any time and
 **Continue Import** later, even after quitting. Messages already saved are not
 read again.

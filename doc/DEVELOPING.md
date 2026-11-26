@@ -102,7 +102,7 @@ opt-in. They do not run in CI.
 | `test-quit` | | Process exit, message-boundary stops, recovery |
 
 `make test-native-replies PYTEST_ARGS='--browser-channel chrome'` runs a disposable
-Cocoa reply probe and Ingests browser regressions, including lost status and
+Cocoa reply probe and Activity browser regressions, including lost status and
 Suspend/Resume replies. It uses synthetic state only and requires an unlocked
 macOS desktop; Windows WebView2 acceptance remains separate.
 

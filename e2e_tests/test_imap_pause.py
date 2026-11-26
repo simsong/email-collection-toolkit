@@ -1,5 +1,5 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Verify IMAP pause and resume through the shipped Ingests browser interface.
+# Verify IMAP pause and resume through the shipped Activity browser interface.
 # A real TLS proxy stalls or disconnects traffic to a disposable pymap server.
 # Synthetic mail traverses production acquisition, checkpoints and search indexing.
 # Restart the application before clicking Resume to exercise durable recovery.

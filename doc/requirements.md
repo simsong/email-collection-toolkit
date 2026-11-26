@@ -49,9 +49,9 @@ does not establish that every platform or release gate has passed.
   Verified working inputs stay in place while processors read them. Cleanup
   preserves working objects whose bytes fail SHA-256 verification.
   Failure deadlines remain explicit; readiness must be observed.
-  Native API replies use one-way delivery; lost Ingests replies display an unknown
+  Native API replies use one-way delivery; lost Activity replies display an unknown
   outcome without retrying a command or marking the import failed.
-  Desktop wake refreshes Ingests, and route changes wake pending IMAP reconnects.
+  Desktop wake refreshes Activity, and route changes wake pending IMAP reconnects.
   Unfinished unknown-size acquisition reports ETA unavailable, including mixed
   local and remote runs. Source counts and dates exclude promoted attachments.
   IMAP run details show

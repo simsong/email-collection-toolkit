@@ -23,6 +23,7 @@ import math
 import re
 import sqlite3
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from email import policy
 from email.parser import BytesParser
@@ -334,18 +335,35 @@ def refresh_tag_manifest(archive: Path) -> None:
     _write_tag_manifest(archive, csv_paths)
 
 
+class CheckpointInterrupted(Exception):
+    """A requested stop abandoned a checkpoint; the next completed import repairs it."""
+
+
 def write_bag_checkpoint(
     archive: Path,
     catalog: sqlite3.Connection,
     packaged_at: datetime | None = None,
+    *,
+    should_stop: Callable[[], bool] | None = None,
 ) -> list[str]:
-    """Publish fixity in dependency order; return warnings for untouched non-mail extras."""
+    """Publish fixity in dependency order; return warnings for untouched non-mail extras.
+
+    ``should_stop`` is polled before each message; when it returns true the
+    checkpoint stops with :class:`CheckpointInterrupted` before writing manifests,
+    leaving the detectably stale state that an interrupted import already allows.
+    """
     initialize_bag(archive)
     count_row = catalog.execute("SELECT COUNT(*) FROM messages").fetchone()
     assert count_row is not None
     writer = MailbagCsvWriter(archive, int(count_row[0]))
+
+    def visit(filename: str, ordinal: int, message: IntegrityMessage) -> None:
+        if should_stop is not None and should_stop():
+            raise CheckpointInterrupted("checkpoint stopped on request")
+        writer.write(filename, ordinal, message)
+
     try:
-        mbox_digests = write_integrity_files(archive, catalog, writer.write)
+        mbox_digests = write_integrity_files(archive, catalog, visit)
         csv_paths = writer.finish()
     except BaseException:
         writer.abort()

@@ -635,6 +635,31 @@ def macos_owner_rules(destination: Path, defaults: OwnerRules) -> OwnerRules | N
     return result.result()
 
 
+def _raise_activity_window(window: Any, status_id: str | None, imap_source_id: str | None) -> None:
+    """Raise an existing Activity window, then deliver its selection off this thread.
+
+    On macOS run_js waits for WebKit's completion handler, which a background or
+    busy page may never deliver; running it before show() left the window hidden.
+    """
+    window.restore()
+    window.show()
+    scripts = [script for value, script in (
+        (status_id, f"window.selectIngest?.({json.dumps(status_id)});"),
+        (imap_source_id, f"window.requestImapPassword?.({json.dumps(imap_source_id)});"),
+    ) if value is not None]
+    if not scripts:
+        return
+
+    def deliver() -> None:
+        for script in scripts:
+            try:
+                window.run_js(script)
+            except Exception:  # pylint: disable=broad-exception-caught
+                logging.getLogger(__name__).debug("Activity window script failed", exc_info=True)
+
+    Thread(target=deliver, name="activity-select", daemon=True).start()
+
+
 def _ingest_window_parameters(status_id: str | None, imap_source_id: str | None) -> list[tuple[str, str]]:
     return [(key, value) for key, value in (("status", status_id), ("imap_password", imap_source_id))
             if value is not None]
@@ -1044,18 +1069,13 @@ class GuiApi:
             api = self._ingest_window_api
             if api is not None and api.window is not None:
                 api.archive = self.archive
-                if status_id is not None:
-                    api.window.run_js(f"window.selectIngest({json.dumps(status_id)});")
-                if imap_source_id is not None:
-                    api.window.run_js(f"window.requestImapPassword?.({json.dumps(imap_source_id)});")
-                api.window.restore()
-                api.window.show()
+                _raise_activity_window(api.window, status_id, imap_source_id)
                 return True
             api = IngestWindowApi(self.archive)
             parameters = _ingest_window_parameters(status_id, imap_source_id)
             selected = f"?{urlencode(parameters)}" if parameters else ""
             window = webview.create_window(
-                "Email Collection Toolkit — Ingests",
+                "Email Collection Toolkit — Activity",
                 str(GUI_DIRECTORY / f"ingests.html{selected}"),
                 js_api=WindowBridge(api, INGEST_BRIDGE_METHODS),
                 width=1050,
@@ -2376,7 +2396,7 @@ class PyWebViewApplication:
         return self._import_document(api) if api is not None else False
 
     def import_directory(self, document: ArchiveDocument, anchor: Any) -> bool:
-        """Use the Ingests window's document, independently of the active search window."""
+        """Use the Activity window's document, independently of the active search window."""
         if document.path is None or document.ingest_job is not None:
             return False
         api = next((item for item in self._search_apis() if item.document is document), None)
@@ -2675,7 +2695,7 @@ class PyWebViewApplication:
         if isinstance(error, ImapPaused):
             notice("information", f"Import paused for {document.display_path}: {error}")
         elif isinstance(error, IngestInterrupted):
-            notice("information", f"Import suspended for {document.display_path}; use Continue Import in Ingests to resume.")
+            notice("information", f"Import suspended for {document.display_path}; use Continue Import in Activity to resume.")
         elif error is None:
             notice("information", f"Import completed for {document.display_path}")
         elif isinstance(error, ImapAuthenticationError):
@@ -2929,7 +2949,7 @@ class PyWebViewApplication:
             if reused is None:
                 api = IngestWindowApi(document.path, application=self, document=document)
                 window = webview.create_window(
-                    f"{APPLICATION_NAME} — Ingests — {document.display_path}",
+                    f"{APPLICATION_NAME} — Activity — {document.display_path}",
                     self.asset_url(
                         "ingests.html",
                         _ingest_window_parameters(status_id, imap_source_id),
@@ -2961,12 +2981,7 @@ class PyWebViewApplication:
                 window.events.shown += lambda *_args: set_macos_document_path(window, document.display_path)
                 set_macos_document_path(window, document.display_path)
         if reused is not None:
-            if status_id is not None:
-                reused.run_js(f"window.selectIngest({json.dumps(status_id)});")
-            if imap_source_id is not None:
-                reused.run_js(f"window.requestImapPassword?.({json.dumps(imap_source_id)});")
-            reused.restore()
-            reused.show()
+            _raise_activity_window(reused, status_id, imap_source_id)
             return True
         self._refresh_menus()
         return True
@@ -3043,7 +3058,7 @@ class PyWebViewApplication:
             name = document.display_path.name if document.display_path else "Untitled"
             items.append(
                 MenuAction(
-                    f"{name} — Ingests",
+                    f"{name} — Activity",
                     lambda uid=api.window.uid: self.focus_window(uid),
                 )
             )
@@ -3451,7 +3466,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
                           MenuAction("Close", application.close_active_window),
                           MenuSeparator(), MenuAction("Quit", application.request_quit)]),
             Menu("Window", [MenuAction("New Search Window", application.new_search_window),
-                            MenuAction("Ingests", application.open_active_ingest_window),
+                            MenuAction("Activity…", application.open_active_ingest_window),
                             *application.window_menu_items()]),
             Menu("Help", [*help_items, MenuSeparator(), MenuAction("About", application.create_about_window),
                           MenuAction("Check for Program Updates", application.updates.check),
@@ -3472,7 +3487,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
         Menu(
             "Window",
             [MenuAction("New Search Window", application.new_search_window),
-             MenuAction("Ingests", application.open_active_ingest_window), *application.window_menu_items()],
+             MenuAction("Activity…", application.open_active_ingest_window), *application.window_menu_items()],
         ),
         Menu("Help", help_items),
     ]

@@ -23,7 +23,7 @@ origin of a timeout in a mixed-source run. A real failure
 that merely contains a timeout in its exception chain must remain a failure.
 
 Show the launch application version in parentheses at the top right of native
-application windows, including Search, Ingests, About and Preferences. macOS uses
+application windows, including Search, Activity, About and Preferences. macOS uses
 the title bar; Windows uses its native menu bar and includes it in the caption. Preserve
 custom titles and the native document-path menu. Repeated activation must not
 add duplicate version labels; later editable installs must not relabel a running
@@ -299,7 +299,7 @@ any setup dialog is pending. Reject equal or nested source/destination folders,
 including symlink, Unicode, and case aliases, before creating or opening a
 destination. Start
 import reuses the selected root without asking for it again, retains owner email rule
-setup and antivirus confirmation, and opens the Ingests progress window after
+setup and antivirus confirmation, and opens the Activity progress window after
 starting the worker. Cancellation of import settings keeps the setup choices available for retry.
 A **Cancel** button beside Start import (also Escape) quits the application.
 The Cancel action itself must not create an archive, start import, or write
@@ -367,23 +367,26 @@ local files or directories, owner names, explicit final
 confirmation, and starts the same typed ingest service used by the CLI on a
 worker thread. ClamAV has an explicit opt-out; the DMG bundles the engine and
 project definitions, while development uses a local library and `etc/clamdb/`. Missing library
-or configuration files produce a warning banner in the Ingests window and
+or configuration files produce a warning banner in the Activity window and
 macOS source picker. Scanner unavailability introduces no extra approval or
 manual-review gate: import proceeds with scanner-error evidence and metadata
 defects. An optional installation link opens the application release page without
 installing software or starting a service. Startup errors likewise record evidence
 and continue. About displays scanner and definition availability, date, age and
 refresh status; explicit unscanned imports retain their warning in history.
-The Ingests window provides **Import Directory…**, bound to its own archive even
+The Activity window provides **Import Directory…**, bound to its own archive even
 when another archive is active. It opens the source picker directly, then
 uses the same owner-names setup, confirmation, and writer lease as File Import.
 The button is disabled during an import or while its dialogs are pending.
 Archive checkpoint progress reads **Verifying archived messages and saving
 checksums**, describing local preservation work without implying online publication.
 The same window offers **Suspend Import** for its own active archive and
-**Continue Import** for interrupted or failed work. Suspension is cooperative:
-show that current work is finishing until its checkpoints are saved and the
-writer lease is released. Do not quit or cancel saved jobs. Retain accepted
+**Continue Import** for interrupted or failed work. Suspension is cooperative
+but prompt: show that current work is finishing until the current message and
+source checkpoints are saved and the writer lease is released. Suspend and Quit
+do not wait for the whole-archive checksum refresh, which rereads every
+archived message; a refresh already under way stops at the next message.
+Continue Import or the next completed import writes current manifests. Do not quit or cancel saved jobs. Retain accepted
 settings even if suspension precedes processing initialization, so reopening
 the archive can continue. Resume must preserve bytes and source idempotence.
 Network-interrupted IMAP runs display **paused** with a pause symbol and a
@@ -461,7 +464,7 @@ the writer lease. Only its last search window refuses Close until import finishe
 or suspends; the close callback returns promptly and explains that Quit suspends
 import and exits the program, including the ⌘ Q shortcut on macOS.
 Other archives and child windows remain independently closeable. The Window menu
-lists the About, search, and Ingests windows and brings a selected window forward.
+lists the About, search, and Activity windows and brings a selected window forward.
 
 `ect-search` is a read-only command-line consumer of both databases.  It
 accepts ordinary full-text terms plus `any:ADDRESS`, `from:ADDRESS`,
@@ -621,11 +624,14 @@ body text; for HTML it also copies the displayed message subject and headers.
 The bottom of the main GUI contains a clickable ingest-status line. During a
 run it shows live completion, message count, active/configured workers, and ETA;
 otherwise it summarizes the latest run. Clicking it opens a separate native
-Ingests window with its own close box. The **Window → Ingests** menu opens the
+Activity window with its own close box. The **Window → Activity…** menu opens the
 same window. That window browses every retained status file and shows the
 selected run's aggregate statistics, sources, failure detail, and all worker
-threads. If it is already visible, either action brings it to the front and
-selects the requested run instead of creating a duplicate window.
+threads. Runs in progress (running or paused) lead the list; a thin rule and a
+**Past Activity** label separate them from finished runs, and the label heads
+the list when nothing is in progress. If the window is already open, either
+action brings it to the front first and then selects the requested run, so a
+slow page reply cannot leave it hidden, instead of creating a duplicate window.
 
 The GUI lists every non-attachment `text/plain` and `text/html` MIME part and
 allows the user to select among them. When multiple HTML parts exist, it opens
@@ -884,7 +890,7 @@ acceptance checks actual File/Window/Help headings and Close enabled state.
 
 ## Status ordering and cleanup deadlines
 
-Slow status replies must not overlap and regress About, Ingests, document options
+Slow status replies must not overlap and regress About, Activity, document options
 or Windows Preferences. A refresh after an import/update command must read state
 after any older request finishes.
 HTML message layout follows actual animation frames, document/font/load events
@@ -896,11 +902,11 @@ Native JavaScript replies must settle on completion, execution error, window Clo
 or a failure deadline. A closed webview must not leave its caller blocked forever;
 synchronous native evaluations must not wait on their own UI thread.
 Python-to-page API replies must not wait synchronously for a redundant native
-acknowledgement. Ingests status and Suspend/Resume requests have a 15-second
+acknowledgement. Activity status and Suspend/Resume requests have a 15-second
 reply deadline. A missing reply reports an unconfirmed outcome, releases refresh
 ownership and permits a fresh status read; it must not replay a command, classify
 the import as failed, or enable password editing while login validation is pending.
-On macOS and Windows, wake and network configuration changes refresh Ingests without a focus
+On macOS and Windows, wake and network configuration changes refresh Activity without a focus
 change. A successful status refresh clears its own earlier error and preserves
 command errors.
 On macOS and Windows, an IMAP connection blocked by network availability or captive portal sign-in
@@ -922,7 +928,7 @@ source activity while sampling the exact remaining count at shutdown.
 
 Unknown-byte source inventory reports ETA unavailable while partitions remain;
 finishing known byte input may still report finalizing before its checkpoint.
-Ingests shows run-specific message count, earliest/latest IMAP INTERNALDATE values
+Activity shows run-specific message count, earliest/latest IMAP INTERNALDATE values
 in UTC and year counts before the workers table. The Year and Messages columns
 size to their contents. The range uses source IMAP INTERNALDATE, not header dates or download times.
 Separate acquisition counters exclude attached-message extraction and saved processing.

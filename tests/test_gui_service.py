@@ -468,7 +468,7 @@ def test_native_menus_route_through_the_application_controller(
         antivirus_action = menus[2].items[-2]
         assert isinstance(antivirus_action, MenuAction)
         assert antivirus_action.function == application.check_antivirus_updates
-    assert [item.title for item in menus[1].items if isinstance(item, MenuAction)] == ["New Search Window", "Ingests"]
+    assert [item.title for item in menus[1].items if isinstance(item, MenuAction)] == ["New Search Window", "Activity…"]
     for action in menus[1].items:
         assert isinstance(action, MenuAction)
         assert not action.function()

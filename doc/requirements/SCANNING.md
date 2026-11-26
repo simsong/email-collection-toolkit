@@ -133,7 +133,7 @@ recorded in THIRD_PARTY_NOTICES.md.
   they cannot bypass these preview limits. These local diagnostics may contain
   private mail; they are not public telemetry. A failure between messages identifies the container without
   attributing it to the previously yielded message. Persist the same detail in
-  the run catalog and Ingests status, without changing source or canonical mail.
+  the run catalog and Activity status, without changing source or canonical mail.
   An unexpected parser failure preserves earlier published messages, closes
   resources, refreshes the BagIt/Mailbag checkpoint for committed MBOX changes, and leaves a
   rerunnable error observation containing the source cursor (and numeric offset

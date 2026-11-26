@@ -30,7 +30,9 @@ default-directory selection, and real POSIX SIGINT. Existing archive-local
 copies retain their old behavior until refreshed by normal archive publication.
 
 `write_bag_checkpoint()` streams catalog locations in MBOX byte order through
-`write_integrity_files()` and
+`write_integrity_files()` (polling an optional `should_stop` per message and
+raising `CheckpointInterrupted` before any manifest is written; ingest skips
+the checkpoint entirely for an interrupted run and rolls back an abandoned one) and
 uses each catalogued raw SHA-256 to verify mboxrd decoding and resolve legacy
 mboxo `>From ` ambiguity. It then
 atomically writes deterministic JSON control records followed by the TSV table.
@@ -134,7 +136,7 @@ integrity tags and manifests. Ordinary duplicate-skipping reimport is not repair
 
 `ingest_diagnostics` adds exception notes at local `MailObject` validation and
 worker processing boundaries, then formats the complete traceback into both
-`ingest_runs.detail` and status JSON `failure_detail`, displayed by Ingests.
+`ingest_runs.detail` and status JSON `failure_detail`, displayed by Activity.
 Pydantic field errors retain their underlying validator traceback when available.
 Validation summaries and chained tracebacks omit Pydantic input values, relying
 on the bounded previews for input evidence.

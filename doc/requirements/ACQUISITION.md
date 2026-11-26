@@ -58,7 +58,7 @@ archive initialization, a writer lease, database access, or any local writes.
 It must work while the archive writer is busy and must never prompt to replace a
 credential. `--set-password` is a separate interactive operation: validate a hidden
 replacement before saving only that account's native-vault item, without importing.
-Ingests offers the same test-before-save replacement through **Update IMAP Password**
+Activity offers the same test-before-save replacement through **Update IMAP Password**
 when no import is active. Failed validation retains the old stored password.
 The search window's IMAP authentication error also offers **Update IMAP Credentials**
 alongside its collapse and dismiss controls. It opens the same dialog with the
@@ -150,7 +150,7 @@ Suspend or Quit to interrupt that wait immediately.
 The CLI exhausts its short retry budget into a **paused** run, including host-down
 socket errors where the platform exposes them. Retain committed progress and accepted
 settings, release the connection and writer lease, and offer **Resume**
-in Ingests. Resume reconnects and downloads missing checkpoints without repeating
+in Activity. Resume reconnects and downloads missing checkpoints without repeating
 committed bodies. Incomplete literals must never become successful checkpoints.
 The CLI reports the pause and exits 75 (temporary interruption); rerunning resumes.
 Authentication rejection, TLS verification and invalid-response errors remain failures.

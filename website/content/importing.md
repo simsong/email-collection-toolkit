@@ -63,12 +63,12 @@ original sources.
 
 ## Watching progress
 
-The **Ingests** window lists every import with its sources, counts, workers,
-and any failures. Open it from **Window → Ingests** or by clicking the status
+The **Activity** window lists every import with its sources, counts, workers,
+and any failures. Open it from **Window → Activity…** or by clicking the status
 line. **Import Directory…** in that window starts another import.
 
 Downloads and saved-message processing can run at the same time after unfinished
-ingest recovery. Ingests shows their worker groups separately, so a saved-mail
+ingest recovery. Activity shows their worker groups separately, so a saved-mail
 backlog does not have to finish before new downloads begin.
 
 The download details show the number of messages downloaded in this run, their
@@ -104,7 +104,7 @@ everything already archived.
 
 IMAP imports on macOS and Windows wait through sleep, connectivity loss and
 captive portal sign-in, retesting the server every 2½ minutes using a fresh
-session. Ingests shows the waiting status while saved progress is retained.
+session. Activity shows the waiting status while saved progress is retained.
 Complete the network sign-in when needed. **Suspend Import** remains available
 during the wait. Messages already saved are not downloaded again.
 

@@ -45,7 +45,7 @@ class ImapAuthenticationError(ValueError):
         self.detail = detail
         super().__init__(f"IMAP authentication failed for {account.username} on {account.server}:{account.port}: "
                          f"{detail}. The stored password has not been changed. "
-                         "Use Update IMAP Password in Ingests or --set-password to validate a replacement.")
+                         "Use Update IMAP Password in Activity or --set-password to validate a replacement.")
 
 
 def _response_detail(error: imaplib.IMAP4.error) -> str:

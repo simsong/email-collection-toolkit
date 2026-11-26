@@ -309,7 +309,7 @@ A successful build does not establish these manual checks.
 - Install and launch without Python or a checkout. Confirm About shows the new
   version and commit, the application icon/name, and the registered processors.
   Open the processor graph and inspect MIME extraction's possible output types.
-- Check the launch version in parentheses at the top right of Search, Ingests,
+- Check the launch version in parentheses at the top right of Search, Activity,
   About and Preferences. Reopening must not duplicate the label. Use File > Show
   Archive in Explorer to locate the active saved archive folder.
 - Drag one message and multiple messages to Explorer. The first gesture prepares

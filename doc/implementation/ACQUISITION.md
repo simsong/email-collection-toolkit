@@ -409,7 +409,7 @@ acquisition. It requires an existing `config.yaml`, reads native-vault credentia
 and uses sequential `ImapSession(authentication_only=True)` sessions. These stop
 after LOGIN/SASL PLAIN, before post-login capability negotiation or mailbox access.
 `--set-password` requires an interactive terminal and exactly one selected account;
-the Ingests password form calls the same session mode and saves only after success.
+the Activity password form calls the same session mode and saves only after success.
 Login errors retain a control-free, bounded server reply after redacting password,
 escaped password and base64 credential forms. Temporary capacity/rate refusals in
 the greeting, login or initial CAPABILITY/ENABLE exchange raise `ImapServerBusy`; the
@@ -443,9 +443,9 @@ instance capabilities; the concurrency-key scheduler applies it per account with
 reducing the configured processing worker pool. `make test-imap-auth`
 covers real TLS replies, automatic retry, cancellation, credential-only
 immutability, replacement safety, connection counts and the shipped browser form.
-Both desktop Ingests entry points expose the same explicit bridge methods used by
+Both desktop Activity entry points expose the same explicit bridge methods used by
 the browser recovery test. An authentication failure carries the source ID in
-the search notice. The notice action opens Ingests or refreshes the existing
+the search notice. The notice action opens Activity or refreshes the existing
 window before opening the password dialog for that account. The dialog locks account/password controls,
 rejects duplicate submission and blocks native cancel/Escape while its Test and Save call is pending and restores ordinary cancellation afterward. Initial discovery rejection saves the accepted source
 request before pipeline creation, allowing password repair and Continue Import
@@ -455,14 +455,14 @@ uses `await_activity` with cancellation futures and the existing native console
 notification, including discovery on the CLI main thread. `SyncReporter` reads
 current status phases and emits changed retry reasons/delays independently of
 unchanged download totals. Retry phases retain up to600 printable characters in
-status, while the terminal dashboard keeps its normal short labels. Ingests history treats unreadable account configuration
+status, while the terminal dashboard keeps its normal short labels. Activity history treats unreadable account configuration
 as an unavailable account list while retaining saved status records.
 The shared `configuration_diagnostics.ConfigurationError` summarizes archive and
 installation schema, YAML and access problems without
 raw values or chained validator exceptions, with printable single-line messages
 and repair guidance naming the affected file. CLI entry points print the complete
 repair message and stop cleanly; expected configuration diagnostics omit traceback
-frames. Ingests exposes the warning visibly and logs it once per changed condition.
+frames. Activity exposes the warning visibly and logs it once per changed condition.
 `read_plugin_configuration` checks built-in setting schemas after merging layers and
 identifies the layer supplying an invalid value. Production startup checks all selected
 processor namespaces before processing, after any explicit replay invalidation so stale

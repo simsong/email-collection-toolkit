@@ -6,6 +6,21 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a100 — Activity window
+
+- Clicking the activity bar at the bottom of a search window opens the
+  Activity window again. When it was already open, the window waited for its
+  page to answer before coming forward, and could stay hidden.
+- Window → Ingests is now **Window → Activity…**, and the window is titled
+  Activity.
+- Suspend Import takes effect right away. Suspending used to wait for a
+  checksum refresh of the whole archive, which rereads every message and takes
+  a long time on a large archive. Checksums are now refreshed by Continue
+  Import or the next import that finishes, and `verify_mail_archive.py` reports
+  them as out of date until then.
+- In the Activity window, runs in progress are separated from finished runs
+  by a thin rule and a **Past Activity** label.
+
 ## 1.0.0a99 — reopening an open archive brings it to the front
 
 - File → Open, Open Recent, and opening an archive from Finder now bring the

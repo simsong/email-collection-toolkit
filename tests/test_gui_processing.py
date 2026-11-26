@@ -105,6 +105,47 @@ def test_opening_an_open_archive_raises_its_native_window(tmp_path: Path, monkey
         app.shutdown()
 
 
+def test_status_line_click_raises_activity_window_even_when_its_page_is_slow(tmp_path: Path) -> None:
+    """DESKTOP: clicking the activity bar raises an open Activity window before selecting its run."""
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    blocked, release = Event(), Event()
+
+    class ActivityWindow:
+        # Native-window protocol boundary only: run_js blocks like WebKit awaiting a busy page.
+        uid = "activity-fixture"
+        raised = 0
+        raised_before_script = -1
+
+        def restore(self) -> None:
+            pass
+
+        def show(self) -> None:
+            self.raised += 1
+
+        def run_js(self, script: str) -> None:
+            assert "selectIngest" in script
+            self.raised_before_script = self.raised
+            blocked.set()
+            release.wait(10)
+
+    native = ActivityWindow()
+    assert api.document is not None
+    activity = IngestWindowApi(archive, application=app, document=api.document)
+    activity.set_window(native)
+    app._ingest_apis[api.document.descriptor.document_id] = activity
+    try:
+        assert app.open_ingest_window(api.document, "some-status")
+        assert blocked.wait(5), "the selection was not delivered"
+        assert native.raised == native.raised_before_script == 1
+    finally:
+        release.set()
+        app._ingest_apis.clear()
+        activity.close()
+        api.close()
+        app.shutdown()
+
+
 @pytest.mark.parametrize("child", [False, True])
 def test_status_observers_follow_document_and_child_ownership(tmp_path: Path, child: bool) -> None:
     """DESKTOP: real watches survive a child owner and are joined before repeated reopen accumulates resources."""

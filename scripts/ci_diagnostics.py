@@ -29,7 +29,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 import pytest
 
-PROFILE_TESTS = ("test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates",
+PROFILE_TESTS = ("test_gui_stop_keeps_partial_import_and_reimport_has_no_duplicates",
                  "test_ost_cli_directory_ingest_and_search")
 DIRECTORY_OPTION = "--ci-diagnostics-dir"
 TEST_OPTION = "--ci-diagnostics-test"

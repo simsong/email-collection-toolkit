@@ -180,3 +180,29 @@ def test_validator_rejects_root_level_legacy_mbox(tmp_path: Path) -> None:
     errors = verify_archive(archive)
 
     assert "unsupported root-level legacy archive output: old-layout.mbox" in errors
+
+
+def test_requested_stop_abandons_checkpoint_before_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ARCHIVE: Suspend/Quit can abandon a checkpoint before manifests; the next checkpoint repairs it."""
+    from mailarchiver.bagit import CheckpointInterrupted
+    from tests import generate_bagit_fixture
+    polls: list[int] = []
+
+    def stop_now() -> bool:
+        polls.append(1)
+        return True
+
+    def interrupted_then_complete(archive: Path, catalog, packaged_at=None) -> list[str]:
+        # Runs inside the fixture generator, so the catalog describes real archived messages.
+        with pytest.raises(CheckpointInterrupted):
+            write_bag_checkpoint(archive, catalog, packaged_at, should_stop=stop_now)
+        catalog.rollback()
+        assert polls == [1]
+        assert not (archive / "manifest-sha256.txt").exists()
+        assert not (archive / "tagmanifest-sha256.txt").exists()
+        return write_bag_checkpoint(archive, catalog, packaged_at, should_stop=lambda: False)
+
+    monkeypatch.setattr(generate_bagit_fixture, "write_bag_checkpoint", interrupted_then_complete)
+    archive = tmp_path / "bag"
+    generate_bagit_fixture.generate(archive)
+    assert verify_archive(archive) == []

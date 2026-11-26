@@ -57,6 +57,7 @@ from .imap_preferences import ImapConnectionLimit
 from .imap_transport import ImapTransport
 from .worker_preferences import half_cpus, worker_argument
 from .archive_integrity import ArchiveIntegrityWarning, MailbagArchiveIntegrityControls
+from .bagit import CheckpointInterrupted
 from .archive_path import add_archive_argument, require_archive
 from .contacts import contacts, load_owner_addresses, print_contacts
 from .document_options import DocumentOptions, read_owner_names
@@ -1629,8 +1630,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         raise
     progress_started = False
 
-    def checkpoint_archive() -> None:
-        for event in archive_integrity.checkpoint(archive_reference, catalog):
+    def checkpoint_archive(should_stop: Callable[[], bool] | None = None) -> None:
+        for event in archive_integrity.checkpoint(archive_reference, catalog, should_stop=should_stop):
             if isinstance(event, ArchiveIntegrityWarning) and event.message not in outcome.warnings:
                 outcome.warnings.append(event.message)
                 print(f"Warning: {safe_status_text(event.message)}", file=sys.stderr)
@@ -2612,10 +2613,21 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         )
         catalog.commit()
         integrity_error: Exception | None = None
-        if boxes or succeeded or interrupted or pause_reason:
+        checkpoint_deferred = interrupted
+        if interrupted:
+            # Suspend and Quit must take effect at once. The checkpoint rereads every
+            # archived message, which takes minutes to hours on a large archive;
+            # an interrupted archive is not promised current manifests, and the
+            # next completed import or Continue Import writes them.
+            options.write_detected(catalog, owners, writer_lease)
+        elif boxes or succeeded or pause_reason:
             try:
-                checkpoint_archive()
+                checkpoint_archive(should_stop=lambda: stop_event is not None and stop_event.is_set())
                 catalog.commit()
+                options.write_detected(catalog, owners, writer_lease)
+            except CheckpointInterrupted:
+                catalog.rollback()
+                checkpoint_deferred = True
                 options.write_detected(catalog, owners, writer_lease)
             except Exception as error:
                 logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
@@ -2624,6 +2636,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     failure_detail = format_failure(error)
                 else:
                     print(f"integrity refresh also failed: {error}", file=sys.stderr)
+        if checkpoint_deferred:
+            print("Checksums not refreshed: the import was stopped. Continue Import or the next "
+                  "completed import refreshes them.", file=sys.stderr)
         if integrity_error is not None:
             result = "failed"
             catalog.execute(
