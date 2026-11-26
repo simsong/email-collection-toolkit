@@ -212,6 +212,8 @@ class StartupResult(BaseModel):
 
     windows: list[SearchWindow]
     errors: list[str] = Field(default_factory=list)
+    # Existing search windows to raise because their archive was already open.
+    focused: list[SearchWindow] = Field(default_factory=list)
 
 
 def application_preferences_path() -> Path:
@@ -553,6 +555,34 @@ class ApplicationController:
             self._forget_recent(path)
             raise
 
+    def existing_search_window(self, document: ArchiveDocument) -> SearchWindow | None:
+        """Return the window Open should raise for an already-open archive.
+
+        Prefer the active window when it shows this document, otherwise the
+        most recently created one, so reopening never spawns a duplicate.
+        """
+        with self._lock:
+            active = self._windows.get(self._active_window_id or "")
+            if active is not None and active.document_id == document.descriptor.document_id:
+                return active
+            return next(
+                (window for window in reversed(self._windows.values())
+                 if window.document_id == document.descriptor.document_id),
+                None,
+            )
+
+    def open_document_window(self, path: Path, *, recent: bool = False) -> tuple[SearchWindow, bool]:
+        """Open an archive for File Open or an OS open event.
+
+        Returns the window to show and whether it is new. An archive that
+        already has a search window reuses (and activates) that window.
+        """
+        document = self.open_recent_document(path) if recent else self.open_document(path)
+        existing = self.existing_search_window(document)
+        if existing is not None:
+            return self.activate_window(existing.window_id), False
+        return self.new_search_window(document), True
+
     def new_search_window(self, document: ArchiveDocument | None = None) -> SearchWindow:
         target = document or self.active_document
         if target is None:
@@ -649,13 +679,18 @@ class ApplicationController:
 
     def handle_open_documents(self, paths: tuple[Path, ...]) -> StartupResult:
         windows: list[SearchWindow] = []
+        focused: list[SearchWindow] = []
         errors: list[str] = []
         for path in paths:
             try:
-                windows.append(self.new_search_window(self.open_document(path)))
+                window, created = self.open_document_window(path)
             except InvalidArchiveError as error:
                 errors.append(str(error))
-        return StartupResult(windows=windows, errors=errors)
+                continue
+            target = windows if created else focused
+            if window not in windows and window not in focused:
+                target.append(window)
+        return StartupResult(windows=windows, errors=errors, focused=focused)
 
     def startup(self, explicit_paths: tuple[Path, ...] = (), *, new: bool = False) -> StartupResult:
         errors = [self.preference_error] if self.preference_error else []

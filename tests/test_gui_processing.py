@@ -68,6 +68,43 @@ def wait_for_import(api: GuiApi) -> None:
     # Callers still assert durable completion, output and application notices.
 
 
+def test_opening_an_open_archive_raises_its_native_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """DESKTOP: File Open, Open Recent and Finder opens raise the archive's window rather than adding a copy."""
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+
+    class NativeWindow:
+        # Native-window protocol boundary only; the controller and application routing are real.
+        uid = "open-archive-fixture"
+
+        def __init__(self) -> None:
+            self.raised = 0
+
+        def restore(self) -> None:
+            pass
+
+        def show(self) -> None:
+            self.raised += 1
+
+    native = NativeWindow()
+    assert api.search_window is not None
+    api.window = native
+    app._apis[api.search_window.window_id] = api
+    monkeypatch.setattr(app, "create_search_window",
+                        lambda *_args, **_kwargs: pytest.fail("an open archive must not get a second window"))
+    try:
+        assert app.open_document(archive) is api
+        assert app.open_recent_document(archive)
+        assert app.handle_open_documents((archive,)) == []
+        assert native.raised == 3
+        assert api.document is not None and api.document.window_ids == (api.search_window.window_id,)
+    finally:
+        app._apis.clear()
+        api.window = None
+        api.close()
+        app.shutdown()
+
+
 @pytest.mark.parametrize("child", [False, True])
 def test_status_observers_follow_document_and_child_ownership(tmp_path: Path, child: bool) -> None:
     """DESKTOP: real watches survive a child owner and are joined before repeated reopen accumulates resources."""

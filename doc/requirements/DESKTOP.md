@@ -277,9 +277,12 @@ window, child window, or ingest operation uses it.
 Every search window has a lifetime-stable document binding and independent
 query, sort, selection, mailbox-filter, and geometry state. **New Search
 Window** in the **Window** menu attaches another window to the active document;
-it is disabled when no saved archive search window is active. **Open** and an
-operating-system open event create a window for the requested document; they
-must not silently retarget an existing search window.
+it is disabled when no saved archive search window is active. **Open**, **Open
+Recent**, and an operating-system open event create a window for the requested
+document only when it has none; when the archive (or any alias of it) already
+has a search window, they bring that window to the front instead of opening a
+second copy, preferring the active window. They must not silently retarget a
+search window of a different archive.
 
 Startup opens explicit document paths first, otherwise the last valid archive.
 When neither is available, show a single setup window with all three numbered

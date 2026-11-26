@@ -6,6 +6,12 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a99 — reopening an open archive brings it to the front
+
+- File → Open, Open Recent, and opening an archive from Finder now bring the
+  archive's existing window to the front when it is already open, instead of
+  opening a second copy. Window → New Search Window still opens another view.
+
 ## 1.0.0a98 — fast single-word search on legacy indexes
 
 - The scan of the full-text vocabulary for words whose spelling changes under

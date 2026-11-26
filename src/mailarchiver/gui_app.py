@@ -2714,14 +2714,23 @@ class PyWebViewApplication:
             return False
 
     def open_document(self, path: Path, *, recent: bool = False) -> GuiApi:
-        document = (
-            self.controller.open_recent_document(path)
-            if recent
-            else self.controller.open_document(path)
-        )
-        api = self.create_search_window(self.controller.new_search_window(document))
+        """Open an archive, raising its existing search window if it has one."""
+        session, created = self.controller.open_document_window(path, recent=recent)
+        api = self.create_search_window(session) if created else self._raise_search_window(session)
         if self._reader_window is not None:
             self._reader_window.hide()
+        return api
+
+    def _raise_search_window(self, session: SearchWindow) -> GuiApi:
+        """Bring an already-open archive's search window to the front."""
+        with self._lock:
+            api = self._apis.get(session.window_id)
+        if api is None or api.window is None:
+            # The logical window has no native window yet; give it one.
+            return self.create_search_window(session)
+        api.window.restore()
+        api.window.show()
+        self.activate_window(session.window_id)
         return api
 
     def open_recent_document(self, path: Path) -> bool:
@@ -2736,6 +2745,8 @@ class PyWebViewApplication:
         result = self.controller.handle_open_documents(paths)
         for session in result.windows:
             self.create_search_window(session)
+        for session in result.focused:
+            self._raise_search_window(session)
         for error in result.errors:
             self.add_notice("error", error)
         return result.errors

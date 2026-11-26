@@ -145,6 +145,35 @@ def test_confirmed_quit_stops_every_document_without_releasing_active_leases(tmp
                 state.finish_ingest(document.descriptor.document_id, document.ingest_job.operation_id, published=False)
 
 
+def test_reopening_an_open_archive_raises_its_window_instead_of_duplicating(tmp_path: Path) -> None:
+    """Requirement: Open and OS open events on an already-open archive reuse its search window."""
+    archive = make_archive(tmp_path / "archive")
+    other = make_archive(tmp_path / "other")
+    application = controller(tmp_path)
+
+    first, created = application.open_document_window(archive)
+    assert created
+    elsewhere, _ = application.open_document_window(other)
+    assert application.active_window == elsewhere
+
+    again, created = application.open_document_window(archive / ".." / archive.name)
+    assert not created and again == first
+    assert application.active_window == first
+    document = application.document(first.document_id)
+    assert document.window_ids == (first.window_id,)
+
+    result = application.handle_open_documents((archive, other, archive))
+    assert result.windows == [] and result.errors == []
+    assert [window.window_id for window in result.focused] == [first.window_id, elsewhere.window_id]
+
+    # New Search Window remains the explicit way to get a second view.
+    application.new_search_window(document)
+    assert len(document.window_ids) == 2
+    application.close_window(first.window_id)
+    reopened, created = application.open_document_window(archive)
+    assert not created and reopened.window_id in document.window_ids
+
+
 def test_same_archive_reuses_document_while_search_windows_remain_independent(tmp_path: Path) -> None:
     """Requirement: path aliases share one document while each search window owns its state."""
     archive = make_archive(tmp_path / "archive")

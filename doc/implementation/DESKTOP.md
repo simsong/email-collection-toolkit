@@ -277,7 +277,11 @@ view of the active archive; the macOS adapter disables it without an active
 saved archive search window and refreshes on native focus changes.
 A narrow macOS adapter refreshes pywebview's
 process menu when window or ingest state changes and disables the Close item
-when the controller would refuse it. `handle_open_documents` and
+when the controller would refuse it. `open_document_window` resolves Open,
+Open Recent and OS open events: it reuses the document's active (else newest)
+search window and reports it in `StartupResult.focused`, which the host raises
+with `restore()`/`show()`; only a document without a window gets a new one.
+`handle_open_documents` and
 `reopen` are stable host entry points for the extension/activation work in
 issue 76. Windows shell work and frozen application/installers remain owned by
 issues 73, 72, 74, and 75 respectively.
