@@ -2,7 +2,7 @@
 
 # Customizable Default Lists
 
-Use **File → Customizable Default Lists…** to select a list, edit its YAML,
+Use **Default Lists…** (next to **Preferences…** in the application menu on macOS, and in the Help menu on Windows) to select a list, edit its YAML,
 and save or reset it. The same validated service supplies the GUI and processors.
 The editor shows the source, revision and exact application/personal file paths.
 Invalid values and stale revisions are rejected; Reload discards unsaved text.

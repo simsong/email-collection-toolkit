@@ -76,68 +76,83 @@ class MacOSPreferences:
         self.screen = parent.screen() if parent is not None else appkit.NSScreen.mainScreen()
         self.delegate = preferences_delegate().alloc().init()
         self.delegate.pane = self
+        # A compact two-column form: right-aligned section labels, controls on the
+        # right, small secondary notes under their control. Rows run top-down from y=0.
+        width, height, left, column, control_width = 560, 478, 20, 176, 364
         self.window = appkit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            ((0, 0), (580, 820)), appkit.NSWindowStyleMaskTitled | appkit.NSWindowStyleMaskClosable |
+            ((0, 0), (width, height)), appkit.NSWindowStyleMaskTitled | appkit.NSWindowStyleMaskClosable |
             appkit.NSWindowStyleMaskMiniaturizable, appkit.NSBackingStoreBuffered, False)
         self.window.setReleasedWhenClosed_(False)
         self.window.setTitle_("Preferences")
         self.window.setDelegate_(self.delegate)
         view = self.window.contentView()
+        small = appkit.NSFont.systemFontOfSize_(appkit.NSFont.smallSystemFontSize())
 
-        def label(text: str, y: int, height: int = 24) -> Any:
-            control = appkit.NSTextField.wrappingLabelWithString_(text)
-            control.setFrame_(((24, y), (532, height)))
+        def frame(x: int, top: int, w: int, h: int) -> tuple[tuple[int, int], tuple[int, int]]:
+            return ((x, height - top - h), (w, h))
+
+        def add(control: Any, x: int, top: int, w: int, h: int) -> Any:
+            control.setFrame_(frame(x, top, w, h))
             view.addSubview_(control)
             return control
 
-        self.version = label("", 768)
-        label("Maximum number of workers", 720)
+        def heading(text: str, top: int) -> Any:
+            control = add(appkit.NSTextField.labelWithString_(text), left, top + 3, column - left - 8, 18)
+            control.setAlignment_(appkit.NSTextAlignmentRight)
+            return control
+
+        def note(text: str, top: int, h: int) -> Any:
+            control = add(appkit.NSTextField.wrappingLabelWithString_(text), column, top, control_width, h)
+            control.setFont_(small)
+            control.setTextColor_(appkit.NSColor.secondaryLabelColor())
+            return control
+
+        self.version = note("", 16, 16)
+        heading("Workers:", 44)
         prototype = appkit.NSButtonCell.alloc().init()
         prototype.setButtonType_(appkit.NSRadioButton)
         self.choices = appkit.NSMatrix.alloc().initWithFrame_mode_prototype_numberOfRows_numberOfColumns_(
-            ((24, 608), (300, 96)), appkit.NSRadioModeMatrix, prototype, 3, 1)
-        self.choices.setCellSize_((300, 28))
-        self.choices.setIntercellSpacing_((0, 4))
+            frame(column, 44, 160, 66), appkit.NSRadioModeMatrix, prototype, 3, 1)
+        self.choices.setCellSize_((160, 20))
+        self.choices.setIntercellSpacing_((0, 3))
         self.choices.setAccessibilityIdentifier_("worker-mode")
         self.choices.setTarget_(self.delegate)
         self.choices.setAction_("changed:")
         view.addSubview_(self.choices)
-        self.count = appkit.NSTextField.alloc().initWithFrame_(((340, 608), (150, 28)))
+        self.count = add(appkit.NSTextField.alloc().initWithFrame_(frame(0, 0, 0, 0)), column + 80, 87, 56, 22)
         self.count.setAccessibilityIdentifier_("worker-count")
         self.count.setDelegate_(self.delegate)
-        view.addSubview_(self.count)
-        self.note = label("", 540, 56)
+        self.note = note("", 114, 30)
         self.note.setAccessibilityIdentifier_("worker-note")
-        label("When dragging several messages out of a search window, export them as", 500)
-        self.drag_format = appkit.NSPopUpButton.alloc().initWithFrame_pullsDown_(((24, 464), (300, 28)), False)
+        heading("IMAP connections:", 156)
+        self.imap_count = add(appkit.NSTextField.alloc().initWithFrame_(frame(0, 0, 0, 0)), column, 156, 56, 22)
+        self.imap_count.setAccessibilityIdentifier_("imap-connections")
+        self.imap_count.setDelegate_(self.delegate)
+        note(f"Per account. 1–{MAX_IMAP_CONNECTIONS}; default {DEFAULT_IMAP_CONNECTIONS}. Independent of workers; "
+             "applies when starting or continuing an import.", 182, 30)
+        heading("Drag messages as:", 224)
+        self.drag_format = add(appkit.NSPopUpButton.alloc().initWithFrame_pullsDown_(frame(0, 0, 0, 0), False),
+                               column - 3, 222, 230, 26)
         self.drag_format.addItemsWithTitles_(list(DRAG_FORMAT_TITLES))
         self.drag_format.setTarget_(self.delegate)
         self.drag_format.setAction_("changed:")
-        view.addSubview_(self.drag_format)
-        label("Maximum IMAP connections per account", 420)
-        self.imap_count = appkit.NSTextField.alloc().initWithFrame_(((340, 388), (150, 28)))
-        self.imap_count.setAccessibilityIdentifier_("imap-connections")
-        self.imap_count.setDelegate_(self.delegate)
-        view.addSubview_(self.imap_count)
-        label(f"1–{MAX_IMAP_CONNECTIONS}; default {DEFAULT_IMAP_CONNECTIONS}. Independent of processing workers.\n"
-              "Applies when starting or continuing an import.", 330, 48)
-        label("Updates", 300)
-        self.channel = appkit.NSPopUpButton.alloc().initWithFrame_pullsDown_(((24, 260), (532, 28)), False)
+        note("When dragging several messages out of a search window.", 250, 16)
+        separator = add(appkit.NSBox.alloc().initWithFrame_(frame(0, 0, 0, 0)), left, 280, width - 2 * left, 1)
+        separator.setBoxType_(appkit.NSBoxSeparator)
+        heading("Updates:", 296)
+        self.channel = add(appkit.NSPopUpButton.alloc().initWithFrame_pullsDown_(frame(0, 0, 0, 0), False),
+                           column - 3, 294, 300, 26)
         self.channel.addItemsWithTitles_([RELEASE_STREAM_LABEL, PREVIEW_STREAM_LABEL])
         self.channel.setTarget_(self.delegate)
         self.channel.setAction_("changed:")
-        view.addSubview_(self.channel)
-        self.automatic = appkit.NSButton.checkboxWithTitle_target_action_(
-            "Check when the application opens", self.delegate, "changed:")
-        self.automatic.setFrame_(((24, 224), (532, 28)))
-        view.addSubview_(self.automatic)
-        label(f"Downloading and installation always require confirmation.\n{UPDATE_STREAM_HELP}", 150, 64)
-        self.detail = label("", 70, 72)
+        self.automatic = add(appkit.NSButton.checkboxWithTitle_target_action_(
+            "Check when the application opens", self.delegate, "changed:"), column, 326, control_width, 20)
+        note(f"Downloading and installation always require confirmation. {UPDATE_STREAM_HELP}", 352, 44)
+        self.detail = note("", 400, 30)
         self.detail.setAccessibilityIdentifier_("update-status")
-        self.check = appkit.NSButton.buttonWithTitle_target_action_("Check for Program Updates", self.delegate, "checkUpdates:")
-        self.check.setFrame_(((24, 24), (220, 32)))
+        self.check = add(appkit.NSButton.buttonWithTitle_target_action_(
+            "Check for Program Updates", self.delegate, "checkUpdates:"), column - 6, 436, 210, 28)
         self.check.setAccessibilityIdentifier_("check-updates")
-        view.addSubview_(self.check)
 
     def show(self, workers: WorkerSettings, imap_connections: int = DEFAULT_IMAP_CONNECTIONS,
              drag_format: MultiMessageFormat = "mbox") -> None:
@@ -148,7 +163,7 @@ class MacOSPreferences:
             return
         self.workers = workers
         status = self.service.status
-        self.version.setStringValue_(f"You are running {status.version} (build {status.build or 'source checkout'}).")
+        self.version.setStringValue_(f"Version {status.version} ({status.build or 'source checkout'})")
         for index, title in enumerate((f"Half the CPUs ({workers.half})", f"All CPUs ({workers.cpus})", "Custom")):
             self.choices.cellAtRow_column_(index, 0).setTitle_(title)
         self.choices.selectCellAtRow_column_(WORKER_MODES.index(workers.preferences.mode), 0)
@@ -176,8 +191,8 @@ class MacOSPreferences:
 
     def worker_note(self) -> str:
         return self.workers.override_note or (
-            f"1–{self.workers.maximum} workers (at most twice {self.workers.cpus} CPUs).\n"
-            "Changes save automatically and apply when starting or continuing work.")
+            f"1–{self.workers.maximum} (at most twice {self.workers.cpus} CPUs). "
+            "Changes save automatically and apply when work starts or continues.")
 
     def commit(self) -> bool:
         """Persist valid controls, leaving invalid input and failed writes visible."""
@@ -207,6 +222,6 @@ class MacOSPreferences:
         checked = status.last_checked.astimezone().strftime("%Y-%m-%d %H:%M %Z") if status.last_checked else "Not yet"
         detail = status.detail
         if not status.available and status.phase == "unavailable" and not getattr(sys, "frozen", False):
-            detail = "In-app updates require the installed macOS app. This is a source checkout."
+            detail = "In-app updates need the installed app; this is a source checkout."
         self.detail.setStringValue_(f"Last checked: {checked}\n{detail}")
         self.check.setEnabled_(status.available and status.phase not in {"checking", "installing"})

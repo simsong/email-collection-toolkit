@@ -362,7 +362,7 @@ window; see [processing](PROCESSING.md#registered-processor-graph).
 **File → New** asks for a new or empty permanent `.mailarchive` destination
 before creating its blank search window. It initializes BagIt, both databases,
 and operational status state, and refuses to overwrite an existing archive or
-nonempty invalid directory. **File → Import…** collects one or more supported
+nonempty invalid directory. **File → Import Mail…** collects one or more supported
 local files or directories, owner names, explicit final
 confirmation, and starts the same typed ingest service used by the CLI on a
 worker thread. ClamAV has an explicit opt-out; the DMG bundles the engine and
@@ -593,6 +593,13 @@ message becomes an `.eml`, and multiple messages become one mboxrd MBOX file
 both preserve each message's RFC 5322 bytes. **File → Export Selected
 Messages…** saves the selection through a save dialog as MBOX (the default),
 a ZIP of `.eml` files, or, for one message, an `.eml`, chosen by the file type.
+The File menu is grouped by separators: the archive file (New, Open…, Open
+Recent); mail in and out of it and its settings (Import Mail…, Export Selected
+Messages…, Document Options…); whole-archive maintenance (Reprocess Saved Mail…,
+Rebuild Search Index, Revalidate Archive, and on Windows Show Archive in
+Explorer); then Close. Application settings are not in File: **Default Lists…**
+follows **Preferences…** in the macOS application menu and the Windows Help menu.
+Validate with `tests/test_gui_service.py::test_native_menus_route_through_the_application_controller`.
 **File → Revalidate Archive** rereads every catalogued message and every file
 listed in the BagIt manifests without writing to the archive, then writes an
 HTML report to the system temporary directory and opens it in the default

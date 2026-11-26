@@ -170,6 +170,8 @@ NSTerminateLater: int
 NSModalPanelRunLoopMode: str
 NSDeviceRGBColorSpace: str
 NSTextAlignmentCenter: int
+NSTextAlignmentRight: int
+NSBoxSeparator: int
 NSFontAttributeName: str
 NSForegroundColorAttributeName: str
 NSParagraphStyleAttributeName: str
@@ -200,6 +202,10 @@ class NSView:
     def setIdentifier_(self, value: str) -> None: ...
     def identifier(self) -> str | None: ...
     def subviews(self) -> list[Any]: ...
+
+class NSBox(NSView):
+    def setBoxType_(self, value: int) -> None: ...
+    def setFrame_(self, frame: Rect) -> None: ...
 
 class NSTextField(NSView):
     @classmethod
@@ -311,6 +317,8 @@ class NSMutableParagraphStyle:
     def setAlignment_(self, alignment: int) -> None: ...
 
 class NSFont:
+    @classmethod
+    def smallSystemFontSize(cls) -> float: ...
     @classmethod
     def boldSystemFontOfSize_(cls, size: float) -> Self: ...
     @classmethod

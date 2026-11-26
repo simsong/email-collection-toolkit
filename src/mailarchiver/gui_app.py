@@ -3064,7 +3064,7 @@ class PyWebViewApplication:
             editor = DefaultListsApi(archive, identity=document.descriptor.identity if document and archive else '',
                 version=application_metadata().version, writer_activity=self.writer_activity)
             window = webview.create_window(
-                f"{APPLICATION_NAME} — Customizable Default Lists" + (f" — {archive}" if archive else ""),
+                f"{APPLICATION_NAME} — Default Lists" + (f" — {archive}" if archive else ""),
                 self.asset_url("default-lists.html"), js_api=WindowBridge(editor, ("catalog", "load", "update")),
                 width=800, height=820, min_size=(600, 560), menu=self.menu())
             if window is None:
@@ -3560,6 +3560,7 @@ class PyWebViewApplication:
             app_menu = menu.itemAtIndex_(0).submenu()
             for offset, (title, action, key) in enumerate((
                 ("Preferences…", "showUpdatePreferences:", ","),
+                ("Default Lists…", "showDefaultLists:", ""),
                 ("Check for Program Updates", "checkForUpdates:", ""),
                 ("Check for Anti-Virus Updates", "checkForAntivirusUpdates:", ""),
             ), 1):
@@ -3671,38 +3672,33 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
         for title, url in HELP_LINKS
     ]
     help_items.append(MenuAction("License", application.show_license))
+    # File groups: the archive file itself; what goes in and out of it; whole-archive
+    # maintenance; then Close. Application settings live with Preferences….
+    file_items.append(MenuSeparator())
+    file_items.extend((
+        MenuAction("Import Mail…", application.import_active_document),
+        MenuAction("Export Selected Messages…", application.export_selected_messages),
+        MenuAction("Document Options…", application.open_document_options),
+        MenuSeparator(),
+        MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
+        MenuAction("Rebuild Search Index", application.rebuild_active_search_index),
+        MenuAction("Revalidate Archive", application.revalidate_active_archive),
+    ))
+    if sys.platform == "win32":
+        file_items.append(MenuAction("Show Archive in Explorer", application.reveal_active_archive))
+    file_items.extend((MenuSeparator(), MenuAction("Close", application.close_active_window)))
     if sys.platform == "win32":
         return [
-            Menu("File", [*file_items, MenuAction("Import…", application.import_active_document),
-                          MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
-                          MenuAction("Export Selected Messages…", application.export_selected_messages),
-                          MenuAction("Revalidate Archive", application.revalidate_active_archive),
-                          MenuAction("Rebuild Search Index", application.rebuild_active_search_index),
-                          MenuAction("Document Options…", application.open_document_options),
-                          MenuAction("Customizable Default Lists…", application.open_default_lists),
-                          MenuAction("Show Archive in Explorer", application.reveal_active_archive),
-                          MenuAction("Close", application.close_active_window),
-                          MenuSeparator(), MenuAction("Quit", application.request_quit)]),
+            Menu("File", [*file_items, MenuSeparator(), MenuAction("Quit", application.request_quit)]),
             Menu("Window", [MenuAction("New Search Window", application.new_search_window),
                             MenuAction("Activity…", application.open_active_ingest_window),
                             *application.window_menu_items()]),
             Menu("Help", [*help_items, MenuSeparator(), MenuAction("About", application.create_about_window),
                           MenuAction("Check for Program Updates", application.updates.check),
                           MenuAction("Check for Anti-Virus Updates", application.check_antivirus_updates),
-                          MenuAction("Preferences…", application.show_update_preferences)]),
+                          MenuAction("Preferences…", application.show_update_preferences),
+                          MenuAction("Default Lists…", application.open_default_lists)]),
         ]
-    file_items.extend(
-        (
-            MenuAction("Import…", application.import_active_document),
-            MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
-            MenuAction("Export Selected Messages…", application.export_selected_messages),
-            MenuAction("Revalidate Archive", application.revalidate_active_archive),
-            MenuAction("Rebuild Search Index", application.rebuild_active_search_index),
-            MenuAction("Document Options…", application.open_document_options),
-            MenuAction("Customizable Default Lists…", application.open_default_lists),
-            MenuAction("Close", application.close_active_window),
-        )
-    )
     return [
         Menu("File", file_items),
         Menu(
@@ -3793,6 +3789,13 @@ def install_desktop_events(application: PyWebViewApplication) -> None:
 
         def showUpdatePreferences_(self, _sender):
             application.show_update_preferences()
+
+        def showDefaultLists_(self, _sender):
+            # Off Cocoa's main thread: pywebview window creation waits on it.
+            def open_lists() -> None:
+                application.open_default_lists()
+
+            application._submit_task("Default lists", open_lists)
 
         def checkForUpdates_(self, _sender):
             application.updates.check()

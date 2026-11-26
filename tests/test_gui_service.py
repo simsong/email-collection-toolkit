@@ -458,16 +458,22 @@ def test_native_menus_route_through_the_application_controller(
 
     assert [menu.title for menu in menus] == ["File", "Window", "Help"]
     assert all(isinstance(item, (MenuAction, MenuSeparator)) for menu in menus for item in menu.items)
-    assert [item.title for item in menus[0].items if isinstance(item, MenuAction)] == [
-        "New", "Open…", "Import…", "Reprocess Saved Mail…", "Export Selected Messages…", "Revalidate Archive",
-        "Rebuild Search Index", "Document Options…", "Customizable Default Lists…",
-    ] + (["Show Archive in Explorer"] if sys.platform == "win32" else []) + ["Close"] + (
-        ["Quit"] if sys.platform == "win32" else [])
+    separator = "—"
+    file_titles = [item.title if isinstance(item, MenuAction) else separator for item in menus[0].items]
+    explorer = ["Show Archive in Explorer"] if sys.platform == "win32" else []
+    quit_items = [separator, "Quit"] if sys.platform == "win32" else []
+    # File menu groups: archive file; mail in/out and its options; maintenance; Close.
+    assert file_titles == [
+        "New", "Open…", separator,
+        "Import Mail…", "Export Selected Messages…", "Document Options…", separator,
+        "Reprocess Saved Mail…", "Rebuild Search Index", "Revalidate Archive", *explorer, separator,
+        "Close", *quit_items,
+    ]
     if sys.platform == "win32":
         assert [item.title for item in menus[2].items if isinstance(item, MenuAction)] == [
             "Community Forum", "Contact Support", "User Manual", "Source Code", "License",
-            "About", "Check for Program Updates", "Check for Anti-Virus Updates", "Preferences…"]
-        antivirus_action = menus[2].items[-2]
+            "About", "Check for Program Updates", "Check for Anti-Virus Updates", "Preferences…", "Default Lists…"]
+        antivirus_action = menus[2].items[-3]
         assert isinstance(antivirus_action, MenuAction)
         assert antivirus_action.function == application.check_antivirus_updates
     assert [item.title for item in menus[1].items if isinstance(item, MenuAction)] == ["New Search Window", "Activity…"]

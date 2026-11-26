@@ -118,7 +118,7 @@ stops the rebuild and keeps the old index. From the command line,
 - **Archive settings** live in the archive's `config.yaml`. Besides owner rules
   and IMAP accounts, `mbox_max_bytes` sets the size at which MBOX files roll
   over. The default is 3.75 GiB.
-- **File → Customizable Default Lists…** edits owner-rule templates, reply-address
+- **Default Lists…**, next to **Preferences…**, edits owner-rule templates, reply-address
   patterns, contact filters, and the search highlight color. The
   [list reference](https://github.com/simsong/email-collection-toolkit/blob/main/doc/CUSTOMIZABLE_DEFAULT_LISTS.md)
   describes each list.

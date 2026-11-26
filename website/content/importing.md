@@ -25,7 +25,7 @@ Files the program does not recognize are listed and skipped.
 ## Import with the application
 
 1. Open or create an archive. **File → New** creates one in an empty folder.
-2. Choose **File → Import…** and select files or folders. A folder includes
+2. Choose **File → Import Mail…** and select files or folders. A folder includes
    everything below it.
 3. Review your owner addresses (below), then confirm the sources and
    destination.

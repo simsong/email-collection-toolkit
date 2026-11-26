@@ -6,6 +6,17 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a104 — File menu and Preferences tidy-up
+
+- The File menu is grouped with dividers: New, Open…, Open Recent; then
+  **Import Mail…** (was Import…), Export Selected Messages…, Document Options…;
+  then Reprocess Saved Mail…, Rebuild Search Index, Revalidate Archive; then Close.
+- **Customizable Default Lists…** is now **Default Lists…**, an application
+  setting next to **Preferences…** (application menu on macOS, Help menu on
+  Windows).
+- The macOS Preferences window is about half as tall: labels on the left,
+  controls on the right, and short notes in small type under each control.
+
 ## 1.0.0a103 — Rebuild Search Index
 
 - **File → Rebuild Search Index** rebuilds the search index from the archive's

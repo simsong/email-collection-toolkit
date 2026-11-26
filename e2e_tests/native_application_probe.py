@@ -664,7 +664,7 @@ def main() -> None:
             # A personal list editor is a standalone window: Command-W must be
             # enabled even though it is not registered as an archive child.
             assert application.open_default_lists(personal=True)
-            lists = next(window for window in webview.windows if window.title.endswith(" — Customizable Default Lists"))
+            lists = next(window for window in webview.windows if window.title.endswith(" — Default Lists"))
             assert lists.events.loaded.wait(10), "List editor bridge failed to load"
             evaluate_async(lists, "waitForDomState(() => !document.getElementById('save').disabled, 'list editor readiness').then(() => true)")
             assert lists.evaluate_js("document.getElementById('list').options.length") == 8
@@ -698,7 +698,7 @@ def main() -> None:
             assert application.close_active_window()
             assert lists.events.closed.wait(5)
             assert application.open_default_lists(api.document)
-            lists = next(window for window in webview.windows if " — Customizable Default Lists — " in window.title)
+            lists = next(window for window in webview.windows if " — Default Lists — " in window.title)
             assert lists.events.loaded.wait(10)
             evaluate_async(lists, "waitForDomState(() => !document.getElementById('save').disabled, 'list editor readiness').then(() => true)")
             lists.evaluate_js("document.getElementById('list').value = 'reply-addresses'; document.getElementById('scope').value = 'archive'")
