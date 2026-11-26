@@ -2,7 +2,7 @@
 
 [project]
 name = "mailarchiver"
-version = "1.0.0a105"
+version = "1.0.0a106"
 description = "Personal MBOX archive normalizer"
 requires-python = ">=3.12"
 license = "GPL-2.0-only"
@@ -89,6 +89,9 @@ constraint-dependencies = ["setuptools>=84.1.0", "brotli>=1.2.1", "brotlicffi>=1
 testpaths = ["tests"]
 addopts = "-ra"
 pythonpath = ["."]
+markers = [
+    "slow: real-service or whole-archive tests excluded from the quick CI tier (make test-quick)",
+]
 
 [tool.pylint."messages control"]
 disable = ["C", "R", "W", "no-member"]

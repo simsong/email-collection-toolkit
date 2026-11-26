@@ -26,6 +26,9 @@ from mailarchiver.standalone_verify import verify_archive
 from tests.test_cli_processing import cli, configure
 from scripts.ci_diagnostics import phase
 
+# Real services, subprocesses or whole imports: run in the full CI tier only (make check-tests).
+pytestmark = pytest.mark.slow
+
 ROOT = Path(__file__).resolve().parents[1]
 OST = ROOT / "tests/fixtures/pff/sample.ost"
 PST = ROOT / "rust/mct-importer/tests/fixtures/mail.pst"

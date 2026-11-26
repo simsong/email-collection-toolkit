@@ -37,6 +37,9 @@ from mailarchiver.mbox import MboxLocation, add_message, read_verified_location
 from mailarchiver.source_volume import METADATA_CURRENT_MOUNT_PATH
 from mailarchiver.standalone_verify import semantic_bytes
 
+# Real services, subprocesses or whole imports: run in the full CI tier only (make check-tests).
+pytestmark = pytest.mark.slow
+
 TEST_DATA = Path(__file__).parent / "data"
 LIBRARY_ENV = "MAILARCHIVER_CLAMAV_LIBRARY"
 

@@ -62,6 +62,9 @@ from mailarchiver.plugin_api import MailContainer, MailObject, PluginContext, Pr
 
 from tests.imap_fixture import DisposableImap, FixtureKeyring, ImapFault, InterruptibleImap, Utf8Imap
 
+# Real services, subprocesses or whole imports: run in the full CI tier only (make check-tests).
+pytestmark = pytest.mark.slow
+
 SSL_CERT_FILE_ENV = "SSL_CERT_FILE"
 ACCEPTANCE_SUCCESS_KEY = "successful"
 

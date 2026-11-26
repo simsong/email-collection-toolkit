@@ -6,6 +6,7 @@
 # Install only beneath this checkout, preserving licenses and CVD certificates.
 # Verify native linkage before exporting the application's existing overrides.
 # CI, candidate validation and release packaging share this Makefile entry point.
+# An already installed runtime (an ordinary-CI cache) is verified, not rebuilt.
 set -euo pipefail
 
 [[ "$(uname -s)" == Darwin ]] || { echo 'This target requires macOS.' >&2; exit 1; }
@@ -17,47 +18,52 @@ clamav="$root/clamav-$clamav_version"
 mkdir -p "$root/downloads"
 work=$(mktemp -d "$root/build.XXXXXX")
 trap 'rm -rf "$work"' EXIT
-cd "$work"
-jobs=$(sysctl -n hw.logicalcpu)
-if (( jobs > 8 )); then jobs=8; fi
+if [[ -x "$clamav/bin/freshclam" && -f "$clamav/lib/libclamav.dylib" && -f "$openssl/lib/libcrypto.3.dylib" ]]; then
+    # A restored CI cache: skip the build; the checks below still verify linkage.
+    echo "Reusing pinned OpenSSL $openssl_version and ClamAV $clamav_version from $root"
+else
+    cd "$work"
+    jobs=$(sysctl -n hw.logicalcpu)
+    if (( jobs > 8 )); then jobs=8; fi
 
-download() {
-    local url=$1 digest=$2 archive="$root/downloads/$3"
-    if [[ ! -f "$archive" ]]; then
-        curl --fail --location --retry 3 --output "$archive.partial" "$url"
-        mv "$archive.partial" "$archive"
-    fi
-    printf '%s  %s\n' "$digest" "$archive" | shasum -a 256 -c -
-    tar -xzf "$archive" -C "$work"
-}
+    download() {
+        local url=$1 digest=$2 archive="$root/downloads/$3"
+        if [[ ! -f "$archive" ]]; then
+            curl --fail --location --retry 3 --output "$archive.partial" "$url"
+            mv "$archive.partial" "$archive"
+        fi
+        printf '%s  %s\n' "$digest" "$archive" | shasum -a 256 -c -
+        tar -xzf "$archive" -C "$work"
+    }
 
-download "https://github.com/openssl/openssl/releases/download/openssl-$openssl_version/openssl-$openssl_version.tar.gz" \
-    9bffaa1ad1e07b354c21bd3324ec02fa15579f45a7d0494b3e74bc449b7333ef "openssl-$openssl_version.tar.gz"
-download "https://github.com/Cisco-Talos/clamav/releases/download/clamav-$clamav_version/clamav-$clamav_version.tar.gz" \
-    1af1117a228f1b5bc7fa91a0dabc37848a99e7d25188e9be8043332ce721dfd3 "clamav-$clamav_version.tar.gz"
+    download "https://github.com/openssl/openssl/releases/download/openssl-$openssl_version/openssl-$openssl_version.tar.gz" \
+        9bffaa1ad1e07b354c21bd3324ec02fa15579f45a7d0494b3e74bc449b7333ef "openssl-$openssl_version.tar.gz"
+    download "https://github.com/Cisco-Talos/clamav/releases/download/clamav-$clamav_version/clamav-$clamav_version.tar.gz" \
+        1af1117a228f1b5bc7fa91a0dabc37848a99e7d25188e9be8043332ce721dfd3 "clamav-$clamav_version.tar.gz"
 
-(
-    cd "$work/openssl-$openssl_version"
-    ./Configure --prefix="$openssl" --openssldir="$openssl/ssl" --libdir=lib shared no-tests
-    make -j"$jobs"
-    make install_sw
-    install -m 644 LICENSE.txt "$openssl/LICENSE.txt"
-)
+    (
+        cd "$work/openssl-$openssl_version"
+        ./Configure --prefix="$openssl" --openssldir="$openssl/ssl" --libdir=lib shared no-tests
+        make -j"$jobs"
+        make install_sw
+        install -m 644 LICENSE.txt "$openssl/LICENSE.txt"
+    )
 
-export OPENSSL_DIR="$openssl" OPENSSL_LIB_DIR="$openssl/lib" OPENSSL_INCLUDE_DIR="$openssl/include"
-export OPENSSL_NO_VENDOR=1 CARGO_BUILD_JOBS="$jobs"
-export PKG_CONFIG_PATH="$openssl/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-cmake -S "$work/clamav-$clamav_version" -B "$work/clamav-build" -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$clamav" \
-    -DOPENSSL_ROOT_DIR="$openssl" -DOPENSSL_INCLUDE_DIR="$openssl/include" \
-    -DOPENSSL_CRYPTO_LIBRARY="$openssl/lib/libcrypto.3.dylib" \
-    -DOPENSSL_SSL_LIBRARY="$openssl/lib/libssl.3.dylib" \
-    -DAPP_CONFIG_DIRECTORY="$clamav/etc/clamav" -DCVD_CERTS_DIRECTORY="$clamav/etc/clamav/certs" \
-    -DENABLE_JSON_SHARED=ON -DENABLE_STATIC_LIB=OFF -DENABLE_TESTS=OFF \
-    -DENABLE_MILTER=OFF -DENABLE_MAN_PAGES=OFF -DENABLE_EXAMPLES=OFF
-cmake --build "$work/clamav-build" --parallel "$jobs"
-cmake --install "$work/clamav-build"
-install -m 644 "$work/clamav-$clamav_version/COPYING.txt" "$clamav/COPYING.txt"
+    export OPENSSL_DIR="$openssl" OPENSSL_LIB_DIR="$openssl/lib" OPENSSL_INCLUDE_DIR="$openssl/include"
+    export OPENSSL_NO_VENDOR=1 CARGO_BUILD_JOBS="$jobs"
+    export PKG_CONFIG_PATH="$openssl/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    cmake -S "$work/clamav-$clamav_version" -B "$work/clamav-build" -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$clamav" \
+        -DOPENSSL_ROOT_DIR="$openssl" -DOPENSSL_INCLUDE_DIR="$openssl/include" \
+        -DOPENSSL_CRYPTO_LIBRARY="$openssl/lib/libcrypto.3.dylib" \
+        -DOPENSSL_SSL_LIBRARY="$openssl/lib/libssl.3.dylib" \
+        -DAPP_CONFIG_DIRECTORY="$clamav/etc/clamav" -DCVD_CERTS_DIRECTORY="$clamav/etc/clamav/certs" \
+        -DENABLE_JSON_SHARED=ON -DENABLE_STATIC_LIB=OFF -DENABLE_TESTS=OFF \
+        -DENABLE_MILTER=OFF -DENABLE_MAN_PAGES=OFF -DENABLE_EXAMPLES=OFF
+    cmake --build "$work/clamav-build" --parallel "$jobs"
+    cmake --install "$work/clamav-build"
+    install -m 644 "$work/clamav-$clamav_version/COPYING.txt" "$clamav/COPYING.txt"
+fi
 
 [[ "$("$openssl/bin/openssl" version)" == "OpenSSL $openssl_version "* ]]
 for library in "$clamav/lib/libclamav.dylib" "$clamav/lib/libfreshclam.dylib"; do

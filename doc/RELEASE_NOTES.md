@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a106 — faster CI
+
+- Ordinary pushes now run a quick test tier (`make check-quick-tests`) that
+  leaves out tests marked `slow`; the full suite runs for commits containing
+  `[full-ci]` or `[release-ci]` and for a manual full workflow run.
+- Ordinary CI reuses a cached ClamAV/OpenSSL build; release workflows still
+  build it from source.
+
 ## 1.0.0a105 — one Reprocess Saved Mail command
 
 - **File → Reprocess Saved Mail…** and the new `ect reprocess` replace both the

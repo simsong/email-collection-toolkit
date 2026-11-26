@@ -31,7 +31,8 @@ launch or build commit and discloses local changes.
 
 1. Merge the release changes to `main` through review.
 2. Opt a branch into signed installer checks with `[release-ci]` in the commit
-   message. `make release-candidate-base APPCAST=...` authenticates the
+   message. That commit also runs the full test suite (`make check-tests`,
+   including tests marked `slow`); ordinary pushes run only the quick tier. `make release-candidate-base APPCAST=...` authenticates the
    published feed, and `make release-candidate-feed APPCAST=...` signs and
    verifies a candidate feed without creating a release or tag.
 3. Run the [Windows installer checklist](#windows-installer-checklist) on the

@@ -30,6 +30,9 @@ from mailarchiver.writer_lock import WriterLease
 from tests.process_output import assert_process_exited
 
 
+# Real services, subprocesses or whole imports: run in the full CI tier only (make check-tests).
+pytestmark = pytest.mark.slow
+
 def run_quit_probe(root: Path, mode: str) -> float:
     """Bound the child externally too, so a regressed quit cannot hang pytest."""
     with (root / "stdout").open("w+") as output, (root / "stderr").open("w+") as errors:

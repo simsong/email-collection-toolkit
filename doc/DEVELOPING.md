@@ -54,6 +54,7 @@ Run any CLI command from the checkout with `uv run --locked ect COMMAND`. Set
 | `make gui ARGS='...'` | Run the desktop from the checkout |
 | `make check` | Ruff and Pylint, then ty and Pyright, then Rust, license and website checks, then both test suites |
 | `make check-static`, `make check-tests` | The static half and the test half; CI runs them as parallel jobs |
+| `make check-quick`, `make check-quick-tests`, `make test-quick` | The same without tests marked `slow` (real ClamAV/IMAP/PST runs and whole-import end-to-end, recovery and quit modules, and the Rust corpus import). Ordinary CI pushes run `check-quick-tests`; `[full-ci]` or `[release-ci]` in the commit message, or a manual "Run workflow" with full selected, runs `check-tests` |
 | `make ruff`, `make lint`, `make types` | Individual static checks. Ruff must pass with zero diagnostics |
 | `make test`, `make test-e2e` | Unit suite and end-to-end suite |
 | `make benchmark-import` | Time a synthetic import; see [below](#performance-benchmark) |

@@ -25,6 +25,9 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from corpus_verify import verify  # noqa: E402
 from perf_corpus import CorpusManifest, generate  # noqa: E402
 
+# Real services, subprocesses or whole imports: run in the full CI tier only (make check-tests).
+pytestmark = pytest.mark.slow
+
 BIN = Path(sys.executable).parent  # the environment's installed ect-* entry points
 
 

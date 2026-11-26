@@ -285,6 +285,22 @@ check-tests:
 	$(MAKE) test-e2e
 	$(MAKE) website-check
 
+# Quick tier for ordinary CI pushes: every test except those marked `slow` (real
+# antivirus/IMAP/PST runs, whole-import end-to-end and recovery modules, and the
+# Rust corpus import). Release candidates ([release-ci]) and [full-ci] run check-tests.
+.PHONY: check-quick check-quick-tests test-quick
+check-quick:
+	$(MAKE) check-static
+	$(MAKE) check-quick-tests
+
+check-quick-tests:
+	$(MAKE) test-quick
+	uv run pytest -q -m "not slow" --browser chromium --tracing=retain-on-failure e2e_tests $(PYTEST_ARGS)
+	$(MAKE) website-check
+
+test-quick: pst-importer mcti-scan pff-converter
+	uv run pytest -q -m "not slow" --durations=20 $(PYTEST_ARGS)
+
 lint:
 	$(MAKE) ruff
 	$(MAKE) pylint

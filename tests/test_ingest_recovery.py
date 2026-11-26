@@ -40,6 +40,9 @@ from tests.test_processing import plugin
 from tests.test_message import deeply_nested_message, encoded_nested_message
 
 
+# Real services, subprocesses or whole imports: run in the full CI tier only (make check-tests).
+pytestmark = pytest.mark.slow
+
 @pytest.fixture(scope="module")
 def scanner() -> Iterator[ClamScanner]:
     with ClamScanner() as instance:

@@ -132,7 +132,11 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
 
 
 def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
-    """Requirement: CI reports on documentation-only pushes and skips its expensive jobs."""
+    """Requirement: CI reports on documentation-only pushes, skips expensive jobs, and tiers its tests.
+
+    Ordinary pushes run the quick tier; [full-ci], [release-ci] and a manual full
+    dispatch run the complete suite. Ordinary CI may reuse a cached ClamAV build.
+    """
     workflow = Path(__file__).parents[1] / ".github/workflows/continuous-integration.yml"
     text = workflow.read_text(encoding="utf-8")
 
@@ -145,7 +149,10 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     assert triggers == {
         "push": {
             "branches": ["**", "!main"],
-        }
+        },
+        "workflow_dispatch": {"inputs": {"full": {
+            "description": "Run the full test suite, including slow tests", "type": "boolean", "default": True,
+        }}},
     }
     jobs = configuration[JOBS]
     assert set(jobs) == {"ci-gate", "static-rust", "python-browser", "windows-lifecycle", "release-candidate"}
@@ -164,7 +171,7 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
         "BASE_SHA": "${{ github.event.before }}",
         "HEAD_SHA": "${{ github.sha }}",
     }
-    assert '[[ "$BASE_SHA" =~ ^0+$ ]]' in gate_script
+    assert '[[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]' in gate_script
     assert "git diff --quiet" in gate_script
     assert ":(exclude)README.md" in gate_script
     assert ":(exclude)doc/RELEASE_NOTES.md" in gate_script
@@ -178,7 +185,13 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     static_runs = [step.get(RUN, "") for step in jobs["static-rust"][STEPS]]
     test_runs = [step.get(RUN, "") for step in jobs["python-browser"][STEPS]]
     assert any("make check-static" in run for run in static_runs)
-    assert any("make check-tests" in run for run in test_runs)
+    tier = next(step for step in jobs["python-browser"][STEPS] if step.get("name") == "Python and Chromium GUI tests")
+    assert "make check-tests" in tier[RUN] and "make check-quick-tests" in tier[RUN]
+    for condition in ("inputs.full", "'[full-ci]'", "'[release-ci]'"):
+        assert condition in tier["env"]["FULL_TESTS"]
+    clamav = [step for job in ("static-rust", "python-browser") for step in jobs[job][STEPS]
+              if step.get("uses") == "./.github/actions/prepare-clamav"]
+    assert [step["with"] for step in clamav] == [{"cache": "true"}] * 2
     assert "make test-frozen-lifecycle" in test_runs
     windows = jobs["windows-lifecycle"]
     assert windows[RUNS_ON] == "windows-latest"
