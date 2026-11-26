@@ -76,6 +76,7 @@ from .application import (
 from .scanner import CLAMAV_DOWNLOAD_URL, UNSCANNED_WARNING, ScannerAvailability, scanner_availability
 from .configuration import GuiConfiguration, application_configuration
 from .gui_default_lists import DefaultListsApi
+from .gui_metadata import message_metadata
 from .document_options import DocumentOptions, OwnerRulesState
 from .owner_rules import OwnerRules
 from .configuration_diagnostics import ConfigurationError
@@ -910,7 +911,7 @@ SEARCH_BRIDGE_METHODS = (
     "processing_work", "resume_processing", "abort_processing", "open_picker",
     "status", "activate", "search", "suggestions", "suggestions_start", "suggestions_status", "suggestions_cancel", "ingest_overview", "open_ingest_window",
     "mailbox_tree", "saved_filter_sets", "save_filter_set", "rename_filter_set", "delete_filter_set",
-    "open_message_window", "request_previews", "take_previews", "message", "part", "attachment",
+    "open_message_window", "request_previews", "take_previews", "message", "message_metadata", "part", "attachment",
     "copy_source_path", "copy_visible_text", "copy_link", "open_link", "open_attachment",
     "save_message", "save_attachment", "prepare_drag", "start_drag",
 )
@@ -1323,6 +1324,10 @@ class GuiApi:
         if self.search_window is not None:
             self.search_window.selected_message = message_pk
         return message.model_dump(mode="json")
+
+    def message_metadata(self, message_pk: int) -> dict[str, Any]:
+        """Return the read-only grouped metadata report for View Message Metadata."""
+        return message_metadata(self._archive(), message_pk).model_dump(mode="json")
 
     def copy_source_path(self, message_pk: int, source_location_index: int) -> str:
         """Copy one local source pathname as text and a macOS file URL."""

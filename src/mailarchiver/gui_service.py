@@ -65,6 +65,9 @@ IMMEDIATE_SEARCH_LIMIT = 2_000
 RAW_PART_ID = -1
 LEGACY_X_HTML_PART_ID = -2
 HEADER_BODY_SEPARATOR = re.compile(br"\r\n\r\n|\n\n|\r\r")
+# Older ingests kept a source envelope (often mboxo-quoted as ">From ") as the
+# first line of the canonical bytes. It is not a header, so display parsing skips it.
+LEADING_ENVELOPE_LINE = re.compile(br"\A>*From [^\r\n]*(?:\r\n|\n|\r)")
 LEGACY_X_HTML = re.compile(
     br"\A[ \t\r\n]*<x-html>[ \t\r\n]*(?P<body>.*?)[ \t\r\n]*</x-html>[ \t\r\n]*\Z",
     re.IGNORECASE | re.DOTALL,
@@ -313,8 +316,18 @@ def message_previews(archive: Path, message_pks: list[int]) -> list[MessagePrevi
         database.close()
 
 
+def display_entity(raw: bytes) -> bytes:
+    """Return the RFC 5322 entity to parse for display, without a leading envelope line.
+
+    The canonical bytes are unchanged; Raw Source, Save Message and hashes use them.
+    """
+    match = LEADING_ENVELOPE_LINE.match(raw)
+    return raw if match is None else raw[match.end():]
+
+
 def parsed_message(archive: Path, message_pk: int, *, headers_only: bool = False) -> tuple[bytes, Message]:
-    raw = read_message_bytes(archive, message_pk)
+    """Return the display entity and its parse; MIME part paths are relative to it."""
+    raw = display_entity(read_message_bytes(archive, message_pk))
     if not headers_only:
         try:
             return raw, BytesParser(policy=policy.compat32).parsebytes(raw)
@@ -535,14 +548,16 @@ def _source_location(
 
 
 def render_part(archive: Path, message_pk: int, part_id: int, allow_remote: bool = False) -> PartContent:
-    raw, message = parsed_message(archive, message_pk, headers_only=part_id == RAW_PART_ID)
     if part_id == RAW_PART_ID:
+        raw = read_message_bytes(archive, message_pk)
+        message = BytesHeaderParser(policy=policy.compat32).parsebytes(display_entity(raw))
         return PartContent(
             part_id=part_id,
             kind="raw",
             content_type="message/rfc822",
             content=decode_text(raw, message.get_content_charset()).value,
         )
+    raw, message = parsed_message(archive, message_pk)
     if part_id == LEGACY_X_HTML_PART_ID:
         content = legacy_x_html_body(raw, message)
         if content is None:

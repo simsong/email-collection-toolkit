@@ -892,6 +892,23 @@ headers and Raw Source without exposing partial part IDs; Save Message retains
 the complete original. Raw boundary caches must share byte spans, not retain one
 whole subtree copy per depth.
 
+Canonical bytes that begin with a source envelope line (`From ` or mboxo-quoted
+`>From `, kept by older ingests) must still display their headers, body parts
+and attachments; the reader skips only that first line for parsing. Raw Source,
+Save Message, drag and hashes keep the exact stored bytes, and no archive
+database is rewritten to achieve this.
+
+**View Message Metadata** is reachable from the message toolbar's (i) button
+and from a control-click (context) menu on a result row or on the message pane.
+It opens a read-only report grouped as Message, Recipients, Hashes and storage,
+each Source observation, Duplicates (exact duplicate copies and catalog messages
+sharing semantic content or Message-ID), Metadata defects, MIME structure and
+attachments (count and decoded sizes), and Extraction (ingest runs and their
+times, search-index state, and per-message processor invocations when a
+processing database exists). Producing the report never writes to any archive
+database. Validate with `tests/test_message_metadata.py` and
+`e2e_tests/test_message_metadata_ui.py`.
+
 Standalone message windows receive the application menu at creation and remain
 in the shared native window snapshot and Window menu. Native Close remains
 available when a standalone viewer is focused, including on macOS. Native

@@ -117,7 +117,9 @@ async function initialize() {
     "sort-by", "sort-direction", "search-attachments", "show-original-folders", "mailbox-browser", "mailbox-tree", "show-source-volumes", "filter-set", "manage-filter-sets",
     "save-filter-dialog", "save-filter-form", "filter-set-name", "cancel-save-filter", "manage-filter-dialog", "filter-set-list", "close-filter-manager",
     "message-pane", "message-content", "message-well", "computed-date-banner", "message-selection-summary", "message-file-well", "message-file-name", "message-subject", "message-headers", "part-select", "message-find", "message-find-query", "message-find-status", "message-find-previous", "message-find-next", "message-find-close", "remote-content",
-    "copy-message-text", "save-message", "print-message", "body-view", "attachment-section", "attachment-list", "attachment-preview", "provenance-section", "message-locations", "archive-status-banner", "archive-status-messages", "ingest-status-line", "link-dialog", "link-destination", "link-ignore", "link-copy", "link-open", "error"]) {
+    "copy-message-text", "save-message", "print-message", "body-view", "attachment-section", "attachment-list", "attachment-preview", "provenance-section", "message-locations", "archive-status-banner", "archive-status-messages", "ingest-status-line", "link-dialog", "link-destination", "link-ignore", "link-copy", "link-open", "error",
+    "message-info", "metadata-dialog", "metadata-subject", "metadata-sections", "metadata-copy", "metadata-close",
+    "message-context-menu", "context-copy", "context-view-metadata"]) {
     elements[id] = byId(id);
   }
   await initializeResultTable();
@@ -162,6 +164,7 @@ async function initialize() {
   elements["link-open"].addEventListener("click", () => void openExternalLink());
   installDrag(elements["message-file-well"], selectedDragMessagePks);
   document.addEventListener("keydown", handleCommandShortcut);
+  installMessageMetadata();
 
   if (parameters.get("standalone") === "1") document.body.classList.add("standalone");
   const status = await call(() => window.pywebview.api.status());
@@ -249,6 +252,14 @@ function waitForFrameLayout() {
 function installFrameFindShortcuts(frame) {
   const frameDocument = frame.contentDocument;
   if (!frameDocument) return false;
+  frameDocument.addEventListener("contextmenu", event => {
+    if (state.selected === null) return;
+    event.preventDefault();
+    const bounds = frame.getBoundingClientRect();
+    openMessageContextMenu(state.selected, bounds.left + event.clientX, bounds.top + event.clientY,
+      frameDocument.getSelection()?.toString() || "");
+  });
+  frameDocument.addEventListener("mousedown", closeMessageContextMenu);
   frameDocument.addEventListener("keydown", event => {
     if (!(event.metaKey || event.ctrlKey) || event.altKey || !state.view) return;
     if (event.key.toLowerCase() === "f") {
@@ -1158,6 +1169,10 @@ function initializeResultTable() {
     }
   });
   state.resultTable.on("rowClick", selectResultRow);
+  state.resultTable.on("rowContext", (event, row) => {
+    event.preventDefault();
+    openMessageContextMenu(row.getData().message_pk, event.clientX, event.clientY, window.getSelection()?.toString() || "");
+  });
   state.resultTable.on("rowDblClick", openResultWindow);
   state.resultTable.on("rowSelectionChanged", selected => {
     state.resultSelection = new Set(selected.map(result => result.message_pk));
@@ -1460,6 +1475,93 @@ function renderLocations(view) {
   });
   elements["provenance-section"].hidden = nodes.length === 0;
   elements["message-locations"].replaceChildren(...nodes);
+}
+
+// View Message Metadata: the (i) button and a control-click (context) menu open a
+// read-only report of catalog, source, duplicate, MIME and extraction facts.
+const contextMenu = {messagePk: null, selectedText: ""};
+
+function installMessageMetadata() {
+  elements["message-info"].addEventListener("click", () => {
+    if (state.selected !== null) void showMessageMetadata(state.selected);
+  });
+  elements["metadata-close"].addEventListener("click", () => elements["metadata-dialog"].close());
+  elements["metadata-copy"].addEventListener("click", () => {
+    const text = metadataText();
+    if (text) void call(() => window.pywebview.api.copy_visible_text(text));
+  });
+  elements["message-well"].addEventListener("contextmenu", event => {
+    if (state.selected === null) return;
+    event.preventDefault();
+    openMessageContextMenu(state.selected, event.clientX, event.clientY, window.getSelection()?.toString() || "");
+  });
+  elements["context-view-metadata"].addEventListener("click", () => {
+    const messagePk = contextMenu.messagePk;
+    closeMessageContextMenu();
+    if (messagePk !== null) void showMessageMetadata(messagePk);
+  });
+  elements["context-copy"].addEventListener("click", () => {
+    const text = contextMenu.selectedText;
+    closeMessageContextMenu();
+    if (text) void call(() => window.pywebview.api.copy_visible_text(text));
+  });
+  const menu = elements["message-context-menu"];
+  document.addEventListener("mousedown", event => { if (!menu.contains(event.target)) closeMessageContextMenu(); });
+  document.addEventListener("keydown", event => { if (event.key === "Escape") closeMessageContextMenu(); });
+  window.addEventListener("blur", closeMessageContextMenu);
+  document.addEventListener("scroll", closeMessageContextMenu, true);
+}
+
+function openMessageContextMenu(messagePk, x, y, selectedText) {
+  const menu = elements["message-context-menu"];
+  contextMenu.messagePk = messagePk;
+  contextMenu.selectedText = selectedText;
+  elements["context-copy"].hidden = !selectedText;
+  menu.hidden = false;
+  const {width, height} = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(0, Math.min(x, window.innerWidth - width - 4))}px`;
+  menu.style.top = `${Math.max(0, Math.min(y, window.innerHeight - height - 4))}px`;
+  elements["context-view-metadata"].focus();
+}
+
+function closeMessageContextMenu() {
+  const menu = elements["message-context-menu"];
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  contextMenu.messagePk = null;
+  contextMenu.selectedText = "";
+}
+
+async function showMessageMetadata(messagePk) {
+  const report = await call(() => window.pywebview.api.message_metadata(messagePk));
+  if (!report) return;
+  elements["metadata-subject"].textContent = `${report.subject} (message #${report.message_pk})`;
+  elements["metadata-sections"].replaceChildren(...report.sections.map(section => {
+    const node = document.createElement("section");
+    const title = document.createElement("h3"); title.textContent = section.title;
+    const list = document.createElement("dl");
+    for (const row of section.rows) {
+      const term = document.createElement("dt"); term.textContent = row.label;
+      const detail = document.createElement("dd"); detail.textContent = row.value;
+      if (row.monospace) detail.classList.add("mono");
+      list.append(term, detail);
+    }
+    node.append(title, list);
+    return node;
+  }));
+  const dialog = elements["metadata-dialog"];
+  if (!dialog.open) dialog.showModal();
+  dialog.scrollTop = 0;
+}
+
+function metadataText() {
+  const lines = [elements["metadata-subject"].textContent];
+  for (const section of elements["metadata-sections"].querySelectorAll("section")) {
+    lines.push("", section.querySelector("h3").textContent);
+    const terms = section.querySelectorAll("dt");
+    section.querySelectorAll("dd").forEach((detail, index) => lines.push(`  ${terms[index].textContent}: ${detail.textContent}`));
+  }
+  return lines.join("\n").trim();
 }
 
 async function copySourcePath(sourceLocationIndex) {

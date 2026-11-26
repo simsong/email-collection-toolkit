@@ -6,6 +6,20 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a102 — readable enveloped messages, View Message Metadata
+
+- Messages whose stored copy begins with a `>From ` envelope line (about
+  15,000 older Eudora-era messages in a typical archive) now show their
+  headers, plain-text and HTML bodies, and attachments. They used to show the
+  whole raw message, MIME boundaries and all, as "Plain Text — part 0". The
+  archive is not changed; Raw Source and Save Message still show the exact
+  stored bytes.
+- New **View Message Metadata** report, from the ⓘ button above a message or
+  by control-clicking a message in the results or the message pane. It shows
+  the message's catalog identity, hashes, every source it was found in,
+  duplicates, metadata defects, MIME structure with attachment count and
+  sizes, and which ingest runs and processors extracted it and when.
+
 ## 1.0.0a101 — faster checkpoints, Revalidate Archive, MBOX export
 
 - Finishing an import, or recovering one that was interrupted, now rechecks

@@ -183,6 +183,18 @@ mark.message-find-current { outline: 2px solid AccentColor; outline-offset: 1px;
 #archive-status-messages p { margin: 0; padding: 5px 12px; line-height: 20px; overflow-wrap: anywhere; }
 dialog { min-width: 340px; max-width: 620px; border: 1px solid var(--border); border-radius: 9px; color: CanvasText; background: Canvas; box-shadow: 0 12px 50px #0008; }
 dialog::backdrop { background: #0005; }
+#metadata-dialog { width: min(820px, 92vw); max-width: none; max-height: 86vh; overflow: auto; }
+.metadata-subject { margin: -10px 0 12px; color: var(--muted); }
+.metadata-report section { margin: 0 0 14px; }
+.metadata-report h3 { margin: 0 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.metadata-report dl { display: grid; grid-template-columns: minmax(150px, max-content) 1fr; gap: 3px 12px; margin: 0; }
+.metadata-report dt { color: var(--muted); }
+.metadata-report dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
+.metadata-report dd.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.context-menu { position: fixed; z-index: 50; display: flex; flex-direction: column; min-width: 200px; padding: 4px; border: 1px solid var(--border); border-radius: 7px; background: Canvas; box-shadow: 0 8px 28px #0006; }
+.context-menu[hidden] { display: none; }
+.context-menu button { padding: 4px 10px; border: 0; border-radius: 4px; color: CanvasText; background: transparent; font: inherit; text-align: left; cursor: default; }
+.context-menu button:hover, .context-menu button:focus-visible { color: white; background: AccentColor; outline: none; }
 dialog h2 { margin: 0 0 16px; font-size: 18px; }
 #save-filter-form label { display: grid; gap: 6px; }
 #filter-set-name { min-width: 300px; }

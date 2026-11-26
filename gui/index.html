@@ -107,6 +107,7 @@
                 <button id="message-find-close" type="button" aria-label="Close find" title="Close find">×</button>
               </form>
               <button id="remote-content" type="button" hidden>Load Remote Content</button>
+              <button id="message-info" type="button" aria-label="View message metadata" title="View message metadata">ⓘ</button>
               <button id="copy-message-text" type="button" aria-label="Copy displayed message text" title="Copy displayed message text">⧉</button>
               <button id="save-message" type="button">Save Message…</button>
               <button id="print-message" type="button">Print…</button>
@@ -155,6 +156,21 @@
           </div>
         </form>
       </dialog>
+      <dialog id="metadata-dialog" aria-labelledby="metadata-title">
+        <div class="metadata-report">
+          <h2 id="metadata-title">Message Metadata</h2>
+          <p id="metadata-subject" class="metadata-subject"></p>
+          <div id="metadata-sections"></div>
+          <div class="dialog-actions">
+            <button id="metadata-copy" type="button">Copy as Text</button>
+            <button id="metadata-close" type="button">Close</button>
+          </div>
+        </div>
+      </dialog>
+      <div id="message-context-menu" class="context-menu no-print" role="menu" aria-label="Message actions" hidden>
+        <button id="context-copy" type="button" role="menuitem">Copy</button>
+        <button id="context-view-metadata" type="button" role="menuitem">View Message Metadata…</button>
+      </div>
       <dialog id="save-filter-dialog">
         <form id="save-filter-form">
           <h2>Save Filter Set</h2>

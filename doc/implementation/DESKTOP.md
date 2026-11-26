@@ -1144,6 +1144,15 @@ same locator. Encoded RFC child trees retain production's depth-first IDs.
 `parsed_message` falls back to header-only parsing on MIME recursion/value failure;
 Raw Source requests select header-only parsing immediately. Hash-verified retrieval
 occurs before this fallback, so integrity errors still propagate.
+`display_entity` strips one leading `>*From ` envelope line before every reader
+parse, so MIME part paths are relative to that entity; Raw Source and exports read
+`read_message_bytes` directly and keep the line.
+`gui_metadata.message_metadata` builds View Message Metadata as typed
+`MetadataSection`/`MetadataRow` groups from read-only (`mode=ro`) catalog, search
+and optional processing connections plus the reader's own MIME description; the
+bridge method `message_metadata` returns it, and `app.js` renders it in
+`#metadata-dialog` from the (i) button, Tabulator `rowContext` and pane/frame
+`contextmenu` handlers.
 The reader footer describes extracted-text availability rather than a stale
 `.txt`-only restriction; attachment MIME type and selected extraction policy govern
 actual text availability.
