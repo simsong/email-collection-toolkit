@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from mailarchiver.reprocess import ReprocessProgress, progress_line
 from mailarchiver.__main__ import (
     ANSI_RESET,
     CLAMAV_START_PHASE,
@@ -30,11 +31,9 @@ from mailarchiver.__main__ import (
     ProgressReporter,
     ProgressUpdate,
     ProgressState,
-    RebuildIndexProgress,
     WorkerProgress,
     overall_line,
     overall_progress,
-    rebuild_index_line,
     run_file_workers,
     start_ingest_scanner,
 )
@@ -101,25 +100,25 @@ def test_scan_lane_completion_restores_active_source_and_never_counts_scan_offse
     assert overall_progress(progress.state, time.monotonic()).bytes_done == 350
 
 
-def test_rebuild_index_progress_has_a_bar_and_eta() -> None:
+def test_reprocess_progress_has_a_bar_and_eta() -> None:
     """Requirement: index rebuild reports bounded remaining work in bytes, with rate and ETA."""
-    progress = RebuildIndexProgress(
+    progress = ReprocessProgress(
         phase="Rebuilding search index",
         total_bytes=4 * 1024 * 1024,
         started_monotonic=10,
         completed_bytes=1024 * 1024,
     )
 
-    assert rebuild_index_line(progress, now=20, width=8) == (
+    assert progress_line(progress, now=20, width=8) == (
         "Rebuilding search index: [##------]  25.0% 1.0 MiB of 4.0 MiB  102.4 KiB/s  ETA 30s"
     )
 
 
-def test_empty_rebuild_index_progress_is_complete() -> None:
+def test_empty_reprocess_progress_is_complete() -> None:
     """Requirement: an empty index rebuild reports completion without a contradictory ETA."""
-    progress = RebuildIndexProgress(phase="Rebuilding search index", total_bytes=0, started_monotonic=10)
+    progress = ReprocessProgress(phase="Rebuilding search index", total_bytes=0, started_monotonic=10)
 
-    assert rebuild_index_line(progress, now=20, width=8) == (
+    assert progress_line(progress, now=20, width=8) == (
         "Rebuilding search index: [########] 100.0% 0 B of 0 B  0 B/s  ETA 0s"
     )
 

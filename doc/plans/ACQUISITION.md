@@ -47,8 +47,8 @@ source file. An unchanged digest may skip parsing after hashing; a changed
 digest is reprocessed. For IMAP, Rebuild performs a complete folder and UID
 reconciliation rather than relying only on the incremental cursor. Both modes
 remain message-idempotent, retain source observations, and never clear or
-recreate canonical mail. `rebuild-index` is unrelated: it rebuilds only the
-disposable search database from already archived messages.
+recreate canonical mail. `reprocess` is unrelated: it rebuilds derived catalog
+fields and the search database from already archived messages.
 
 The user manual and the website importing page must show the three source
 kinds, the secret-storage boundary, and a side-by-side explanation of

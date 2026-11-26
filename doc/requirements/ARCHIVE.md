@@ -436,20 +436,23 @@ table also stores explicitly labeled non-email Google Chat identities.
 * Mailbag CSV uses CRLF record endings. Folded source headers used as CSV
   metadata are unfolded to single-line values; canonical message bytes are
   unchanged.
-* `rebuild-index` rebuilds the disposable FTS database in a temporary file,
-  verifies every normal MBOX message against the catalog and the total
-  searchable-message count, and replaces the prior index only after those
-  checks succeed. It visibly reports a progress bar, bytes done of the
-  known byte total, rate and ETA, measured in bytes, for mailbox verification
-  and message indexing. **File → Rebuild Search Index** runs the same rebuild
-  in the background and shows the same byte progress in the search window's
-  status line; quitting discards the replacement and keeps the old index. It announces before starting that `Ctrl-C` discards the
-  incomplete replacement and retains the existing search index. Its
+* `reprocess` (and **File → Reprocess Saved Mail…**) rebuilds the catalog's
+  byte-derived message fields and the disposable FTS database into new files
+  (`*.sqlite3.new.<id>`), verifies every MBOX record against the catalog and
+  the total located-message count, and only then renames the live catalog and
+  index to `.old` and moves the new files into place. Message numbers,
+  locations, source provenance, import runs and non-parse defects are kept;
+  dates the bytes lack keep their recorded import-context value. It visibly
+  reports a progress bar, bytes done of the known byte total, rate and ETA for
+  catalog copying, mailbox verification and message reprocessing; the GUI shows
+  the same in the search window's status line, and quitting or Ctrl-C deletes
+  the incomplete replacement and keeps the live databases. It announces before
+  starting that `Ctrl-C` discards the new databases. Its
   `--workers` option defaults to the available CPU count (or two if it cannot
   be determined), and parallelizes bounded verified-MBOX read/hash/MIME work while
-  retaining one ordered SQLite writer. While it reads each verified message, it also refreshes the
-  derived catalog subject from canonical header bytes, repairing newly supported
-  legacy charset recovery without changing canonical mail. `review` queries the
+  retaining one ordered SQLite writer. Re-deriving from canonical header bytes
+  repairs newly supported legacy charset recovery and messages stored with a
+  leading `>From ` envelope line without changing canonical mail. `review` queries the
   committed source-observation log by run, source, and disposition. Derived
   catalog fields and canonical locations are created correctly during ingest.
 

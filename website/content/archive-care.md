@@ -101,17 +101,20 @@ both. Do not add daily counts together to get a total.
 
 ## Rebuilding derived data
 
-**File → Reprocess Saved Mail…** rebuilds the search index, extracted text, and
-automatic name evidence from the archived messages. It can take a long time,
-and search may be incomplete until it finishes. Your own decisions, such as name
-groupings, are kept, and no mail is downloaded again.
+**File → Reprocess Saved Mail…** re-reads every message saved in the archive
+and rebuilds what is derived from it: each message's catalog details
+(Message-ID, sender, recipients, subject and date) and the search index, then
+extracted text and automatic name evidence. Nothing is reimported or
+downloaded, the saved mail is not changed, and the record of where each
+message came from is kept, as are your own decisions such as name groupings.
 
-**File → Rebuild Search Index** rebuilds only the search index, directly from
-the archive's mailbox files, without reimporting. Search keeps using the old
-index until the new one is finished. Progress, measured in bytes of mail
-processed, appears in the bar at the bottom of the search window. Quitting
-stops the rebuild and keeps the old index. From the command line,
-`ect rebuild-index` does the same and shows the same progress.
+The new catalog and search index are built beside the current ones, and search
+keeps working on the current ones until they are finished. Then the current
+files are renamed `archive.sqlite3.old` and `search.sqlite3.old` and the new
+ones take their place. Progress, measured in bytes of mail processed, appears
+in the bar at the bottom of the search window. Quitting stops the work and
+keeps the current databases. From the command line, `ect reprocess` does the
+same and shows the same progress.
 
 ## Settings
 

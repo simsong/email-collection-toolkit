@@ -34,7 +34,7 @@ server and exposes only explicitly selected bridge methods.
 Imports populate the search index. Rebuild a saved archive's disposable index with:
 
 ```sh
-uv run --locked ect rebuild-index --archive collection.mailarchive --index-attachments
+uv run --locked ect reprocess --archive collection.mailarchive --index-attachments
 ```
 
 `--index-attachments` includes supported text attachments; PDF/Office text

@@ -287,9 +287,13 @@ issue 76. Windows shell work and frozen application/installers remain owned by
 issues 73, 72, 74, and 75 respectively.
 
 **File → Reprocess Saved Mail…** captures the active search/document and runs
-its confirmation as a tracked command. Accepting launches the existing writer-
-leased service with reprocess enabled, content processing enabled and no source
-roots or ingest traversal; the Activity window shows progress. Cancellation does
+its confirmation as a tracked command. Accepting runs `reprocess.reprocess_archive`
+under `writer_activity` with an observer that stores byte progress per document
+(`GuiIngestOverview.reprocess`, rendered in the status line) and a Quit-polling
+stop; afterwards the archive's search windows are refreshed. When
+`processing.sqlite3` exists it then launches the existing writer-leased service
+with reprocess enabled, content processing enabled and no source roots or ingest
+traversal; the Activity window shows that progress. Cancellation does
 not write. Rootless runs and interruption saves retain the preceding source
 request and separately store current processing overrides. Processing-only CLI/GUI
 continuation and inventory discovery prefer those overrides. Continue Import selects
@@ -743,7 +747,7 @@ filename, and normalized MIME type.
 Indexing parses each message once for FTS body text and attachment metadata;
 `--index-attachments` additionally writes decoded text attachments to
 `attachment_fts`.
-The tables are derived and are replaced together with FTS by `rebuild-index`.
+The tables are derived and are replaced together with FTS by `reprocess`.
 
 `.eml` export writes the bytes returned by hash-verified direct retrieval.
 Finder dragging uses an `NSPasteboardItem` with exactly one explicitly supplied

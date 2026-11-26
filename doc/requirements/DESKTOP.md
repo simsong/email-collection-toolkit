@@ -238,7 +238,7 @@ CPU ratios on the current machine and bound a migrated custom value to its cap.
 Apply choices to newly started or continued importing and saved-mail processing;
 do not resize an active pool. CLI `--workers N` takes precedence, leaves the saved
 choice unchanged and disables all worker preference controls, with the note
-`# workers set to {number} on command line`. Generic ingest, process, rebuild-index
+`# workers set to {number} on command line`. Generic ingest, process, reprocess
 and standalone IMAP use the preference when their flag is omitted.
 
 Preferences also expose **Maximum IMAP connections per account**, default 8,
@@ -442,12 +442,15 @@ ingest policy without overwriting later owner defaults in `config.yaml`.
 Only an explicitly requested import saves its owner rules as document defaults.
 
 **File → Reprocess Saved Mail…** targets the selected archive. Before changing
-anything, confirm that rebuilding derived content, search and automatic identity
-evidence may take a very long time and leave search temporarily incomplete.
-Cancel preserves all work. Replay retains canonical messages and curator edits,
-uses the normal background processing/status/suspension path, does not download
-source mail, and preserves saved source-import settings. Active work must finish
-or suspend before replay starts.
+anything, confirm that rebuilding catalog details, search, derived content and
+automatic identity evidence may take a long time. Cancel preserves all work.
+It first runs the same rebuild as `ect reprocess` in the background (byte
+progress in the search window's status line; search uses the current databases
+until the new ones are published; Quit discards the replacement), then, when a
+processing database exists, replays processors through the normal background
+processing/status/suspension path. Replay retains canonical messages, source
+provenance and curator edits, does not download source mail, and preserves saved
+source-import settings. Active work must finish or suspend before it starts.
 
 Only a saved document holding the matching cross-process writer lease may
 start ingest. The process-local document registry prevents duplicate UI jobs
@@ -596,8 +599,7 @@ a ZIP of `.eml` files, or, for one message, an `.eml`, chosen by the file type.
 The File menu is grouped by separators: the archive file (New, Open…, Open
 Recent); mail in and out of it and its settings (Import Mail…, Export Selected
 Messages…, Document Options…); whole-archive maintenance (Reprocess Saved Mail…,
-Rebuild Search Index, Revalidate Archive, and on Windows Show Archive in
-Explorer); then Close. Application settings are not in File: **Default Lists…**
+Revalidate Archive, and on Windows Show Archive in Explorer); then Close. Application settings are not in File: **Default Lists…**
 follows **Preferences…** in the macOS application menu and the Windows Help menu.
 Validate with `tests/test_gui_service.py::test_native_menus_route_through_the_application_controller`.
 **File → Revalidate Archive** rereads every catalogued message and every file

@@ -6,6 +6,25 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a105 — one Reprocess Saved Mail command
+
+- **File → Reprocess Saved Mail…** and the new `ect reprocess` replace both the
+  old Reprocess Saved Mail and Rebuild Search Index / `ect rebuild-index`. It
+  re-reads every saved message and rebuilds its catalog details (Message-ID,
+  sender, recipients, subject, date) and the search index, then re-runs
+  processors when the archive has a processing database
+  (`ect reprocess --skip-processors` omits that step).
+- The new catalog and search index are built as `*.sqlite3.new.*` files while
+  search keeps using the current ones. When both are complete the current files
+  become `archive.sqlite3.old` and `search.sqlite3.old` and the new ones take
+  their place. Stopping early deletes the new files and changes nothing.
+- Where each message came from, duplicate sightings, import runs and antivirus
+  results are kept; so are dates that came from the import's context because
+  the message itself has none.
+- Messages stored with a leading `>From ` line get their real Message-ID,
+  date, recipients and previews.
+- Progress is shown in bytes in the window's status bar and in the terminal.
+
 ## 1.0.0a104 — File menu and Preferences tidy-up
 
 - The File menu is grouped with dividers: New, Open…, Open Recent; then

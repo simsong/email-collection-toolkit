@@ -29,7 +29,7 @@ import sys
 import tempfile
 import time
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
-from contextlib import closing, contextmanager, nullcontext
+from contextlib import contextmanager, nullcontext
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from importlib import import_module
@@ -61,15 +61,8 @@ from .release_versions import release_metadata
 from .sparkle import SparkleBackend, start_installed_updater
 from .macos_preferences import MacOSPreferences
 from .winsparkle import WinSparkleBackend
-from .__main__ import (
-    IngestInterrupted,
-    IngestOutcome,
-    IngestRequest,
-    RebuildIndexInterrupted,
-    RebuildIndexProgress,
-    rebuild_search_index,
-    run_ingest,
-)
+from .__main__ import IngestInterrupted, IngestOutcome, IngestRequest, run_ingest
+from .reprocess import ReprocessInterrupted, ReprocessProgress, reprocess_archive
 from .archive_validation import ValidationStopped, validate_archive
 from .archive_validation import write_report as write_validation_report
 from .application import (
@@ -86,7 +79,6 @@ from .scanner import CLAMAV_DOWNLOAD_URL, UNSCANNED_WARNING, ScannerAvailability
 from .configuration import GuiConfiguration, application_configuration
 from .gui_default_lists import DefaultListsApi
 from .gui_metadata import message_metadata
-from .sqlite_paths import sqlite_uri
 from .document_options import DocumentOptions, OwnerRulesState
 from .owner_rules import OwnerRules
 from .configuration_diagnostics import ConfigurationError
@@ -232,8 +224,8 @@ class PreviewRequest(BaseModel):
     message_pks: list[int]
 
 
-class IndexRebuildStatus(BaseModel):
-    """Byte progress of a running File > Rebuild Search Index, for the status line."""
+class ReprocessStatus(BaseModel):
+    """Byte progress of a running File > Reprocess Saved Mail…, for the status line."""
 
     phase: str
     percent: float
@@ -245,7 +237,7 @@ class IndexRebuildStatus(BaseModel):
 class GuiIngestOverview(BaseModel):
     status: IngestStatus | None = None
     active: bool = False
-    index_rebuild: IndexRebuildStatus | None = None
+    reprocess: ReprocessStatus | None = None
 
 
 class GuiIngestStatus(IngestStatus):
@@ -943,16 +935,6 @@ INGEST_BRIDGE_METHODS = (
 )
 
 
-def _search_index_has_attachments(archive: Path) -> bool:
-    """Keep a rebuild's attachment indexing the same as the index it replaces."""
-    try:
-        with closing(sqlite3.connect(sqlite_uri(archive / "search.sqlite3"), uri=True)) as search:
-            return search.execute(
-                "SELECT 1 FROM message_metadata WHERE attachment_fts_rowid IS NOT NULL LIMIT 1").fetchone() is not None
-    except sqlite3.Error:
-        return False
-
-
 class GuiApi:
     """Narrow API exposed to one webview window."""
 
@@ -1095,9 +1077,9 @@ class GuiApi:
         status = latest_ingest_status(self._archive()) if self.archive and _is_archive(self.archive) else None
         status = status.for_display() if status is not None else None
         active = bool(self.document and self.document.ingest_job) or bool(status and status.state == "running")
-        rebuild = (self.application.index_rebuild_status(self.document)
-                   if self.application is not None and self.document is not None else None)
-        return GuiIngestOverview(status=status, active=active, index_rebuild=rebuild).model_dump(mode="json")
+        reprocess = (self.application.reprocess_status(self.document)
+                     if self.application is not None and self.document is not None else None)
+        return GuiIngestOverview(status=status, active=active, reprocess=reprocess).model_dump(mode="json")
 
     def open_ingest_window(self, status_id: str | None = None, imap_source_id: str | None = None) -> bool:
         """Open or focus the ingest browser shared by this archive document."""
@@ -1898,7 +1880,7 @@ class PyWebViewApplication:
         self._tasks: dict[Future[None], ApplicationTask] = {}
         self._import_futures: set[Future[None]] = set()
         self._writers: set[Event] = set()
-        self._index_rebuilds: dict[str, RebuildIndexProgress] = {}
+        self._reprocessing: dict[str, ReprocessProgress] = {}
         self._updates_started = False
         self._updating = False
         self._definition_updates = 0
@@ -2701,33 +2683,96 @@ class PyWebViewApplication:
         return self.start_import(api, [], processing_request=request)
 
     def reprocess_active_document(self) -> bool:
-        """Confirm a curator-requested replay, targeting the archive selected at invocation."""
+        """File > Reprocess Saved Mail…: confirm, then rebuild derived data for the active archive.
+
+        Catalog metadata and the search index are rebuilt from the canonical MBOX files
+        into new databases that replace the live ones (kept as `.old`) only when complete;
+        then, if the archive has a processing database, its processors are re-run in place
+        so manual identity decisions are kept. Byte progress appears in the status line.
+        """
         api = self.active_api()
         if api is None or api.document is None or api.document.path is None or api.window is None or api.search_window is None:
             return False
         document = api.document
         archive = document.path
         assert archive is not None
+        window_id = api.search_window.window_id
         if document.ingest_job is not None:
             self.add_notice("warning", "Suspend the active import or processing before reprocessing saved mail.",
-                            window_id=api.search_window.window_id)
+                            window_id=window_id)
+            return False
+        if document.descriptor.document_id in self._reprocessing:
+            self.add_notice("information", f"{document.display_path or archive} is already being reprocessed.",
+                            window_id=window_id)
             return False
 
         def reprocess() -> None:
-            request = resume_request(archive, False, True).model_copy(update={"reprocess": True})
             title = "Reprocess saved mail?"
             message = (
                 f"Archive: {document.display_path}\n\n"
-                "Rebuild extracted content, search indexes and automatic identity evidence from all saved mail. "
-                "This may take a very long time. Search results may be incomplete until it finishes.\n\n"
-                "Original archived messages and curator edits are preserved. No mail will be downloaded."
+                "Re-read every stored message and rebuild its catalog details (Message-ID, sender, recipients, "
+                "subject, date) and the search index, then re-run processors. This may take a long time; search "
+                "keeps working on the current databases until the new ones are finished.\n\n"
+                "Stored mail, sources and your own decisions are kept. No mail is downloaded. The previous "
+                "databases are kept as archive.sqlite3.old and search.sqlite3.old."
             )
             confirmed = (macos_alert(title, message, ("Reprocess", "Cancel")) == 0 if sys.platform == "darwin"
                          else api.window.create_confirmation_dialog(title, message))
-            if confirmed and self.start_import(api, [], processing_request=request):
-                self.open_ingest_window(document)
+            if confirmed:
+                self._reprocess_archive(api, document, archive)
 
-        return self._submit_task("Reprocess saved mail", reprocess, window_id=api.search_window.window_id) is not None
+        return self._submit_task("Reprocess saved mail", reprocess, window_id=window_id) is not None
+
+    def reprocess_status(self, document: ArchiveDocument) -> ReprocessStatus | None:
+        with self._lock:
+            progress = self._reprocessing.get(document.descriptor.document_id)
+        if progress is None:
+            return None
+        return ReprocessStatus(phase=progress.phase, percent=round(progress.percent, 1),
+                               completed_bytes=progress.completed_bytes, total_bytes=progress.total_bytes,
+                               eta=progress.eta(time.monotonic()))
+
+    def _reprocess_archive(self, api: GuiApi, document: ArchiveDocument, archive: Path) -> None:
+        """Run the rebuild under the writer lease, then queue processors when they exist."""
+        label = document.display_path or archive
+        document_id = document.descriptor.document_id
+        with self._lock:
+            if document_id in self._reprocessing:
+                return
+            self._reprocessing[document_id] = ReprocessProgress(phase="Preparing to reprocess saved mail", total_bytes=0)
+        self._status_changed()
+
+        def observe(progress: ReprocessProgress) -> None:
+            with self._lock:
+                self._reprocessing[document_id] = progress
+            self._status_changed()
+
+        result = None
+        try:
+            with self.writer_activity():
+                result = reprocess_archive(archive, workers=configured_workers(), observer=observe,
+                                           should_stop=lambda: self._quitting,
+                                           application_version=application_metadata().version)
+        except ReprocessInterrupted:
+            return
+        except (OSError, ValueError, RuntimeError, sqlite3.Error) as error:
+            self.add_notice("error", f"Could not reprocess {label}: {error}")
+            return
+        finally:
+            with self._lock:
+                self._reprocessing.pop(document_id, None)
+                window_ids = tuple(window_id for window_id, item in self._apis.items() if item.document is document)
+            if not self._quitting:
+                self._refresh_search_windows(window_ids)
+            self._status_changed()
+        self.add_notice("information", (
+            f"Reprocessed {result.messages:,} messages in {label}; {result.changed:,} catalog entries changed"
+            + (f", {result.failures:,} kept their previous values" if result.failures else "")
+            + ". The previous databases are kept as .old files."))
+        if result.processing_database and not self._quitting:
+            request = resume_request(archive, False, True).model_copy(update={"reprocess": True})
+            if self.start_import(api, [], processing_request=request):
+                self.open_ingest_window(document)
 
     def stop_imports_for_quit(self) -> tuple[IngestJob, ...]:
         """Called only after confirmation; prevent new imports and stop all existing jobs."""
@@ -2975,68 +3020,6 @@ class PyWebViewApplication:
             self.add_notice(severity, f"Validation of {label} finished: {summary}. Report: {path}")
 
         return self._submit_task("Revalidate archive", run) is not None
-
-    def index_rebuild_status(self, document: ArchiveDocument) -> IndexRebuildStatus | None:
-        with self._lock:
-            progress = self._index_rebuilds.get(document.descriptor.document_id)
-        if progress is None:
-            return None
-        return IndexRebuildStatus(phase=progress.phase, percent=round(progress.percent, 1),
-                                  completed_bytes=progress.completed_bytes, total_bytes=progress.total_bytes,
-                                  eta=progress.eta(time.monotonic()))
-
-    def rebuild_active_search_index(self) -> bool:
-        """File > Rebuild Search Index: replace search.sqlite3 from the canonical MBOX files.
-
-        Runs in the background under the archive writer lease; byte progress appears in
-        each search window's status line. The old index stays in use until the new one
-        is published atomically, and stopping (Quit) discards the replacement.
-        """
-        document = self.active_document()
-        if document is None or document.path is None:
-            return False
-        archive = document.path
-        label = document.display_path or archive
-        document_id = document.descriptor.document_id
-        if document.ingest_job is not None:
-            self.add_notice("warning", "Suspend the active import or processing before rebuilding the search index.")
-            return False
-        with self._lock:
-            if document_id in self._index_rebuilds:
-                self.add_notice("information", f"The search index of {label} is already being rebuilt.")
-                return False
-            self._index_rebuilds[document_id] = RebuildIndexProgress(phase="Preparing to rebuild search index", total_bytes=0)
-        self._status_changed()
-
-        def observe(progress: RebuildIndexProgress) -> None:
-            with self._lock:
-                self._index_rebuilds[document_id] = progress
-            self._status_changed()
-
-        def run() -> None:
-            try:
-                with self.writer_activity():
-                    rebuild_search_index(archive, _search_index_has_attachments(archive), configured_workers(),
-                                         observer=observe, should_stop=lambda: self._quitting)
-            except RebuildIndexInterrupted:
-                return
-            except (OSError, ValueError, RuntimeError, sqlite3.Error) as error:
-                self.add_notice("error", f"Could not rebuild the search index of {label}: {error}")
-                return
-            finally:
-                with self._lock:
-                    self._index_rebuilds.pop(document_id, None)
-                    window_ids = tuple(window_id for window_id, api in self._apis.items() if api.document is document)
-                if not self._quitting:
-                    self._refresh_search_windows(window_ids)
-                self._status_changed()
-            self.add_notice("information", f"Rebuilt the search index of {label}.")
-
-        if self._submit_task("Rebuild search index", run) is None:
-            with self._lock:
-                self._index_rebuilds.pop(document_id, None)
-            return False
-        return True
 
     def reveal_active_archive(self) -> bool:
         """Open the saved archive folder through the platform shell."""
@@ -3681,7 +3664,6 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
         MenuAction("Document Options…", application.open_document_options),
         MenuSeparator(),
         MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
-        MenuAction("Rebuild Search Index", application.rebuild_active_search_index),
         MenuAction("Revalidate Archive", application.revalidate_active_archive),
     ))
     if sys.platform == "win32":

@@ -20,7 +20,6 @@ import argparse
 import hashlib
 import logging
 import mailbox
-import math
 import os
 import queue
 import re
@@ -56,6 +55,14 @@ from .imap_source import IMAP_BUSY_PHASE
 from .imap_preferences import ImapConnectionLimit
 from .imap_transport import ImapTransport
 from .worker_preferences import half_cpus, worker_argument
+from .reprocess import (
+    ByteProgressReporter,
+    ReprocessInterrupted,
+    ReprocessProgress,
+    formatted_bytes,
+    formatted_duration,
+    reprocess_archive,
+)
 from .archive_integrity import ArchiveIntegrityWarning, MailbagArchiveIntegrityControls
 from .bagit import CheckpointInterrupted
 from .archive_path import add_archive_argument, require_archive
@@ -355,91 +362,6 @@ class OverallProgress(BaseModel):
     eta: str
 
 
-class RebuildIndexProgress(BaseModel):
-    """One observable, byte-measured phase of the disposable-index rebuild.
-
-    Totals come from catalog record lengths and mailbox file sizes, which are
-    known before any message is read, so percent and ETA track bytes processed.
-    """
-
-    phase: str
-    total_bytes: int
-    started_monotonic: float = Field(default_factory=time.monotonic)
-    completed_bytes: int = 0
-
-    @property
-    def percent(self) -> float:
-        return 100.0 if self.total_bytes == 0 else 100 * min(self.completed_bytes, self.total_bytes) / self.total_bytes
-
-    def eta(self, now: float) -> str:
-        completed = min(self.completed_bytes, self.total_bytes)
-        if completed >= self.total_bytes:
-            return "0s"
-        if completed == 0:
-            return "calculating"
-        elapsed = max(now - self.started_monotonic, 0.001)
-        return formatted_duration((self.total_bytes - completed) * elapsed / completed)
-
-
-def rebuild_index_line(progress: RebuildIndexProgress, now: float, width: int = 24) -> str:
-    """Render bounded byte progress without relying on terminal controls."""
-    completed = min(progress.completed_bytes, progress.total_bytes)
-    elapsed = max(now - progress.started_monotonic, 0.001)
-    filled = round(width * progress.percent / 100)
-    bar = "#" * filled + "-" * (width - filled)
-    return (
-        f"{progress.phase}: [{bar}] {progress.percent:5.1f}% {formatted_bytes(completed)} of "
-        f"{formatted_bytes(progress.total_bytes)}  {formatted_bytes(int(completed / elapsed))}/s  ETA {progress.eta(now)}"
-    )
-
-
-class RebuildIndexReporter:
-    """Report rebuild progress to a terminal, or to a callback such as the GUI."""
-
-    def __init__(self, phase: str, total_bytes: int,
-                 observer: Callable[[RebuildIndexProgress], None] | None = None) -> None:
-        self.progress = RebuildIndexProgress(phase=phase, total_bytes=total_bytes)
-        self.observer = observer
-        self.tty = sys.stderr.isatty()
-        self.last_tenth: int | None = None
-
-    def display(self, *, force: bool = False) -> None:
-        tenth = int(self.progress.percent * 10)
-        if not force and self.last_tenth == tenth:
-            return
-        self.last_tenth = tenth
-        if self.observer is not None:
-            self.observer(self.progress.model_copy())
-            return
-        if not force and not self.tty and tenth % 10:
-            return  # Logs get one line per whole percent; terminals redraw per tenth.
-        line = rebuild_index_line(self.progress, time.monotonic())
-        if self.tty:
-            sys.stderr.write(f"\r\x1b[2K{line}")
-        else:
-            print(line, file=sys.stderr)
-        sys.stderr.flush()
-
-    def advance(self, byte_count: int) -> None:
-        self.progress.completed_bytes += byte_count
-        self.display()
-
-    def finish(self) -> None:
-        self.progress.completed_bytes = self.progress.total_bytes
-        self.display(force=True)
-        if self.tty and self.observer is None:
-            sys.stderr.write("\n")
-            sys.stderr.flush()
-
-
-class RebuildIndexInterrupted(KeyboardInterrupt):
-    """Report whether Ctrl-C arrived before or after atomic search publication."""
-
-    def __init__(self, published: bool) -> None:
-        super().__init__()
-        self.published = published
-
-
 class RebuildIndexWork(BaseModel):
     """One immutable verified-MBOX read assigned to a refresh worker."""
 
@@ -473,15 +395,6 @@ class RebuildIndexPublication:
             signal.signal(signal.SIGINT, self.previous_handler)
 
 
-def formatted_bytes(value: int) -> str:
-    amount = float(value)
-    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
-        if amount < 1024 or unit == "TiB":
-            return f"{int(amount)} B" if unit == "B" else f"{amount:.1f} {unit}"
-        amount /= 1024
-    raise AssertionError("unreachable")
-
-
 def processor_statistics_table(statistics: tuple[PluginStatistics, ...]) -> str:
     """Render cumulative archive statistics with aligned counts and second timings."""
     rows: list[tuple[str, ...]] = [("Processor", "Calls", "Errors", "Timeouts", "Min", "Max", "Mean", "Total")]
@@ -498,14 +411,6 @@ def processor_statistics_table(statistics: tuple[PluginStatistics, ...]) -> str:
         if position == 0:
             lines.append("  ".join("-" * width for width in widths))
     return "\n".join(lines)
-
-
-def formatted_duration(seconds: float) -> str:
-    remaining = max(0, math.ceil(seconds))
-    hours, remaining = divmod(remaining, 3600)
-    minutes, seconds = divmod(remaining, 60)
-    fields = ([f"{hours}h"] if hours else []) + ([f"{minutes}m"] if hours or minutes else []) + [f"{seconds}s"]
-    return " ".join(fields)
 
 
 def safe_status_text(value: str, *, limit: int = 80) -> str:
@@ -2813,7 +2718,7 @@ def rebuild_search_index(
     workers: int = REBUILD_INDEX_DEFAULT_WORKERS,
     *,
     writer_lease: WriterLease | None = None,
-    observer: Callable[[RebuildIndexProgress], None] | None = None,
+    observer: Callable[[ReprocessProgress], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
 ) -> None:
     """Build and publish a replacement search database under the writer lease.
@@ -2843,7 +2748,7 @@ def rebuild_search_index(
 
 def _rebuild_search_index(
     archive: Path, index_attachments: bool, workers: int,
-    observer: Callable[[RebuildIndexProgress], None] | None = None,
+    observer: Callable[[ReprocessProgress], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
 ) -> None:
     temporary = archive / "search.sqlite3.tmp"
@@ -2871,7 +2776,7 @@ def _rebuild_search_index(
                 for path in sorted(mbox_directory(archive).glob("*.mbox"))
                 if not QUARANTINE_MAILBOX.fullmatch(path.name)
             ]
-            mailbox_progress = RebuildIndexReporter(
+            mailbox_progress = ByteProgressReporter(
                 "Checking canonical mailboxes", sum(path.stat().st_size for path in mailboxes), observer
             )
             mailbox_progress.display(force=True)
@@ -2907,7 +2812,7 @@ def _rebuild_search_index(
             assert total_row is not None
             catalog.execute("BEGIN")
             indexed = 0
-            message_progress = RebuildIndexReporter(
+            message_progress = ByteProgressReporter(
                 f"Rebuilding search index ({workers} workers)", int(total_row[0]), observer
             )
             message_progress.display(force=True)
@@ -2964,19 +2869,25 @@ def _rebuild_search_index(
     except KeyboardInterrupt as error:
         if catalog.in_transaction:
             catalog.rollback()
-        raise RebuildIndexInterrupted(published) from error
+        raise ReprocessInterrupted(published) from error
     finally:
         catalog.close()
         temporary.unlink(missing_ok=True)
 
 
-def rebuild_index(args: argparse.Namespace) -> None:
-    print(
-        "rebuild-index: Ctrl-C discards the incomplete replacement; the existing search index remains unchanged",
-        file=sys.stderr,
-        flush=True,
-    )
-    rebuild_search_index(Path(args.archive), args.index_attachments, configured_workers(args.workers))
+def reprocess_command(args: argparse.Namespace) -> None:
+    """Rebuild derived catalog fields and the search index from stored mail, then processors."""
+    print("reprocess: Ctrl-C discards the new databases; the existing catalog and search index remain unchanged",
+          file=sys.stderr, flush=True)
+    result = reprocess_archive(Path(args.archive), workers=configured_workers(args.workers),
+                               index_attachments=True if args.index_attachments else None,
+                               application_version=version("mailarchiver"))
+    print(f"reprocessed {result.messages:,} messages; {result.changed:,} catalog entries changed; "
+          f"{result.failures:,} kept previous values. Previous databases: archive.sqlite3.old, search.sqlite3.old")
+    if result.processing_database and not args.skip_processors:
+        print("re-running processors (extracted content and identity evidence)", file=sys.stderr, flush=True)
+        process_archive(argparse.Namespace(archive=args.archive, workers=args.workers, phase="content", max_jobs=None,
+                                           plugin_dir=[], installation_config=None, reprocess=True))
 
 
 def add_ingest_arguments(parser: argparse.ArgumentParser, *, require_scan: bool = True,
@@ -3049,15 +2960,18 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     contacts_parser.add_argument("--all", action="store_true", help="include all human header addresses, not only direct Contacts")
     contacts_parser.add_argument("--format", choices=("table", "tsv", "json"), default="table")
     contacts_parser.set_defaults(function=contact_list)
-    rebuild_parser = commands.add_parser(
-        "rebuild-index", help="rebuild the search index from the archive's MBOX files, without reimporting")
-    rebuild_parser.add_argument("--index-attachments", action="store_true", help="include text attachments; PDF and Office extraction is planned")
-    rebuild_parser.add_argument(
+    reprocess_parser = commands.add_parser(
+        "reprocess", help="rebuild catalog metadata and the search index from stored mail, without reimporting")
+    reprocess_parser.add_argument("--index-attachments", action="store_true",
+                                  help="index text attachments (default: keep the current index's setting)")
+    reprocess_parser.add_argument(
         "--workers",
         type=worker_argument,
         help="verified-message workers; override preferences (default: half CPUs; maximum: twice CPUs)",
     )
-    rebuild_parser.set_defaults(function=rebuild_index)
+    reprocess_parser.add_argument("--skip-processors", action="store_true",
+                                  help="rebuild the catalog and search index only; do not re-run processors")
+    reprocess_parser.set_defaults(function=reprocess_command)
     for child in commands.choices.values():
         child.add_argument("--archive", type=Path, default=argparse.SUPPRESS,
                            help="archive directory; defaults to $MAIL_ARCHIVE_DIR")
@@ -3076,11 +2990,11 @@ def execute(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         args.function(args)
     except ContactInputError as error:
         parser.error(str(error))
-    except RebuildIndexInterrupted as error:
+    except ReprocessInterrupted as error:
         message = (
-            "interrupted: the rebuilt search index was already published; no partial index exists"
+            "interrupted: the new databases were already published; no partial database exists"
             if error.published
-            else "interrupted: discarded incomplete replacement; the existing search index is unchanged"
+            else "interrupted: discarded the incomplete replacement; the existing databases are unchanged"
         )
         print(f"\n{message}\n", file=sys.stderr, flush=True)
         return 130

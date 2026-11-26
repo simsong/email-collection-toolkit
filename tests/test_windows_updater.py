@@ -68,7 +68,7 @@ def test_preferences_bridge_does_not_expose_native_window(tmp_path: Path) -> Non
     try:
         bridge = window._js_api
         names = {name for name in dir(bridge) if not name.startswith("_")}
-        assert names == {"state", "save", "check", "close_saved"}
+        assert names == {"state", "save", "check", "close_saved", "save_drag_format"}
         assert all(callable(getattr(bridge, name)) for name in names)
         with pytest.raises(AttributeError):
             getattr(bridge, "window")

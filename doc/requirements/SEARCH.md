@@ -42,7 +42,7 @@ The search database must be fully rebuildable from the
 canonical MBOX files and `archive.sqlite3`, and is not backed up as a required
 preservation object.
 It excludes `INFECTED` and `MALFORMED` quarantine categories even when
-attachment indexing is requested. `rebuild-index` applies the same exclusion
+attachment indexing is requested. `reprocess` applies the same exclusion
 when rebuilding from canonical MBOX files.
 Text extraction must decode MIME payload bytes before introducing replacement
 characters. A valid declared charset, including legacy labels such as
@@ -64,7 +64,7 @@ derived catalog, search, and viewer text; canonical header bytes remain exact.
 For every indexed message, the disposable database records an attachment count
 and one ordered metadata row per MIME attachment containing its MIME-walk part
 ID, decoded filename, and normalized MIME type. This metadata is derived during
-the same MIME parse as body indexing and is rebuilt by `rebuild-index`; it does
+the same MIME parse as body indexing and is rebuilt by `reprocess`; it does
 not make attachment payload bytes canonical database content.
 The message metadata also stores a deterministic, whitespace-collapsed preview
 of the first 18 words of the preferred non-attachment body. An ellipsis marks a
@@ -101,7 +101,7 @@ must show the complete search language, AND and phrase behavior, every
 supported operator, and concrete examples.
 Index extraction and insertion happen after canonical MBOX/catalog publication.
 An indexing failure is recorded as a metadata defect and does not reject mail;
-`rebuild-index` repairs missing disposable content.
+`reprocess` repairs missing disposable content.
 Index-only repair must not resume pending ingestion, contact mail sources, or
 modify canonical MBOX bytes or the durable processing queue. Rebuild searchable
 non-quarantine mail from verified canonical locations and publish the replacement

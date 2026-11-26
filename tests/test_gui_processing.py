@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 import sys
 import time
-from threading import Barrier, Event
+from threading import Thread, Barrier, Event
 from time import monotonic
 from datetime import UTC, datetime, timedelta
 
@@ -94,23 +94,31 @@ def test_revalidate_menu_writes_report_and_opens_it(tmp_path: Path, monkeypatch:
         app.shutdown()
 
 
-def test_rebuild_search_index_menu_replaces_index_with_byte_progress(tmp_path: Path) -> None:
-    """SEARCH: File > Rebuild Search Index rebuilds in the background and reports byte progress."""
+def test_reprocess_saved_mail_swaps_databases_with_byte_progress(tmp_path: Path) -> None:
+    """SEARCH: File > Reprocess Saved Mail rebuilds catalog and index into new files, keeps .old, shows bytes."""
     archive = build_deferred_archive(tmp_path)
     app, api = open_headless(archive, tmp_path / "preferences.json")
-    before = (archive / "search.sqlite3").stat().st_ino
+    assert api.document is not None
+    before = {name: (archive / name).stat().st_ino for name in ("archive.sqlite3", "search.sqlite3")}
     seen: list[dict[str, object]] = []
+    # The confirmation dialog is native UI; the background work after it is real.
+    worker = Thread(target=app._reprocess_archive, args=(api, api.document, archive))  # pylint: disable=protected-access
     try:
-        assert app.rebuild_active_search_index()
-        deadline = time.monotonic() + 60
-        while not any("Rebuilt the search index" in notice.message for notice in app.window_notices(None)):
-            assert time.monotonic() < deadline, [notice.message for notice in app.window_notices(None)]
-            rebuild = api.ingest_overview()["index_rebuild"]
-            if rebuild is not None:
-                seen.append(rebuild)
-            time.sleep(0.01)
-        assert api.ingest_overview()["index_rebuild"] is None
-        assert (archive / "search.sqlite3").stat().st_ino != before
+        worker.start()
+        while worker.is_alive():
+            reprocess = api.ingest_overview()["reprocess"]
+            if reprocess is not None:
+                seen.append(reprocess)
+            time.sleep(0.005)
+        worker.join()
+        wait_for_import(api)
+        assert any("Reprocessed" in notice.message for notice in app.window_notices(None)), \
+            [notice.message for notice in app.window_notices(None)]
+        assert api.ingest_overview()["reprocess"] is None
+        for name, inode in before.items():
+            assert (archive / f"{name}.old").stat().st_ino == inode
+            assert (archive / name).stat().st_ino != inode
+        assert not list(archive.glob("*.sqlite3.new.*"))
         assert all(isinstance(item["total_bytes"], int) for item in seen)
     finally:
         api.close()
