@@ -148,6 +148,11 @@ class IngestStatus(BaseModel):
     download_coverage: ImapDownloadCoverage | None = None
     saved_workers: list[IngestWorkerStatus] = Field(default_factory=list)
     concurrent_processing: bool = False
+    # Rebuild databases only: the canonical MBOX being rebuilt, and the addresses (and
+    # those with a display name) in the search index built so far. None for other runs.
+    current_mailbox: str | None = None
+    names_learned: int | None = Field(default=None, ge=0)
+    addresses_known: int | None = Field(default=None, ge=0)
 
     @field_validator("started_at", "updated_at", "completed_at")
     @classmethod

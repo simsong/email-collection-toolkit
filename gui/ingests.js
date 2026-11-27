@@ -348,7 +348,12 @@ function renderDetail(status) {
     detail.append(section("Downloaded message coverage", messageCoverage(status)));
   }
   if (status.failure_detail) detail.append(section("Failure", textBlock(status.failure_detail, "failure")));
-  if (!rebuildRun(status)) detail.append(section("Workers", workerTable(status.workers)));
+  if (rebuildRun(status)) {
+    if (status.workers.length) detail.append(section("Workers", rebuildWorkerTable(status.workers)));
+    if (status.years.length) detail.append(section("Progress by year", rebuildYearTable(status)));
+  } else {
+    detail.append(section("Workers", workerTable(status.workers)));
+  }
   if (status.saved_workers?.length) detail.append(section("Saved-mail processing workers", workerTable(status.saved_workers)));
   if (status.source_roots.length) {
     const sources = document.createElement("ul");
@@ -367,7 +372,8 @@ function statistics(status) {
   const imap = status.source_roots.length > 0 && status.source_roots.every(root => root.startsWith("imap://"));
   const values = rebuildRun(status) ? [
     ["Messages rebuilt", integer(status.processed_messages)],
-    ["Current step", `${formatBytes(status.bytes_processed)} of ${formatBytes(status.bytes_total)}`],
+    ["Now rebuilding", status.current_mailbox || `${formatBytes(status.bytes_processed)} of ${formatBytes(status.bytes_total)}`],
+    ["Names learned", status.names_learned == null ? "Counting…" : integer(status.names_learned)],
     ["Elapsed", formatDuration(status.elapsed_seconds)],
     ["Average rate", `${Number(status.message_rate).toFixed(1)} messages/s`],
     ["Workers", integer(status.configured_workers)],
@@ -396,6 +402,9 @@ function statistics(status) {
     const cell = document.createElement("div");
     cell.className = "stat";
     if (label === "Processing tasks finished") cell.title = "Completed tasks for messages or MIME parts, including metadata extraction and search indexing. Several tasks can belong to one email.";
+    if (label === "Now rebuilding") cell.title = "Mailboxes are rebuilt in year order. Counts below refresh every 10 seconds.";
+    if (label === "Names learned") cell.title = status.addresses_known == null ? "Addresses with a display name found so far."
+      : `Addresses with a display name found so far, of ${integer(status.addresses_known)} addresses seen.`;
     if (label === "Messages requiring processing") cell.title = "Distinct archived emails with pending, running or failed work, including body and attachment tasks and blocked prerequisites. An email leaves the count only when all its tasks finish. Excludes future downloads. Older runs may not report this count.";
     cell.append(textSpan(label), textBlock(value, "strong"));
     grid.append(cell);
@@ -436,6 +445,49 @@ function messageCoverage(status) {
   coverage.append(table);
   if (!measured.years.length) coverage.append(textBlock("No dated messages downloaded in this run yet."));
   return coverage;
+}
+
+// Rebuild workers are separate processes that report what they finished, not a live task.
+function rebuildWorkerTable(workers) {
+  return simpleTable(["Worker", "Last mailbox", "Messages rebuilt", "Data read"], workers.map(worker => [
+    String(worker.worker), worker.last_path || "—", integer(worker.messages_processed), formatBytes(worker.bytes_done),
+  ]), "worker-table");
+}
+
+function rebuildYearTable(status) {
+  const rows = [...status.years].sort((a, b) => a.year - b.year).map(entry => [
+    `${entry.year}${entry.year === status.current_year && status.state === "running" ? " (now)" : ""}`, integer(entry.messages),
+  ]);
+  return simpleTable(["Year", "Messages rebuilt"], rows, "coverage-table");
+}
+
+function simpleTable(labels, rows, className) {
+  const table = document.createElement("table");
+  table.className = className;
+  const head = document.createElement("thead");
+  const headings = document.createElement("tr");
+  for (const label of labels) {
+    const heading = document.createElement("th");
+    heading.scope = "col";
+    heading.textContent = label;
+    headings.append(heading);
+  }
+  head.append(headings);
+  const body = document.createElement("tbody");
+  for (const values of rows) {
+    const row = document.createElement("tr");
+    for (const value of values) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  table.append(head, body);
+  const scroll = document.createElement("div");
+  scroll.className = "worker-table-scroll";
+  scroll.append(table);
+  return scroll;
 }
 
 function workerTable(workers) {

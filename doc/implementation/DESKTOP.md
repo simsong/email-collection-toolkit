@@ -298,8 +298,14 @@ Activity run: `rebuild.RebuildActivity` writes an `IngestStatus` file with
 `activity_kind="rebuild"` and `run_pk` 0 (no catalog ingest run is created), at
 most once a second, on each phase change and on completion, interruption or
 failure. `ingests.js` titles it "Rebuild databases" and shows step bytes,
-messages and rate instead of source and worker tables; the search window's status
-line reports the last rebuild by name. Cancellation does
+messages and rate instead of source tables; the search window's status line reports
+the last rebuild by name. Every `DETAIL_REFRESH_SECONDS` (10 s) and at the end,
+`RebuildDetail` adds the last applied canonical MBOX (`current_mailbox`; MBOX names
+sort by year, so this is the year position), messages per mailbox year (`years`,
+`current_year`), per-worker-process totals in `workers` (results carry their worker's
+process ID; workers are numbered by first result and show their last mailbox, messages
+and bytes), and `names_learned`/`addresses_known` counted from the new search
+index's `address_suggestions`. Cancellation does
 not write. Rootless runs and interruption saves retain the preceding source
 request and separately store current processing overrides. Processing-only CLI/GUI
 continuation and inventory discovery prefer those overrides. Continue Import selects

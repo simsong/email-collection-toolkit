@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a112 — rebuild detail in Activity
+
+- A running **Rebuild databases** shows the mailbox it is on (mailboxes are
+  rebuilt in year order), names learned so far, messages rebuilt per year, and
+  each worker's last mailbox, messages and data read. These refresh about every
+  10 seconds; the progress bar still updates every second.
+
 ## 1.0.0a111 — Activity window: Suspend and Continue only
 
 - The Activity window no longer has **Import Directory…**; start imports with

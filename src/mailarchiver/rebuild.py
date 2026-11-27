@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import multiprocessing
 import os
 import shutil
@@ -41,7 +42,8 @@ from pydantic import BaseModel, Field
 
 from .bagit import BAG_INFO, CHECKPOINT_STAMP_MARGIN_NS
 from .catalog import address_pk, create_catalog, create_search
-from .ingest_status import IngestCounts, IngestState, IngestStatus, IngestStatusFile, new_status_id
+from .ingest_status import (IngestCounts, IngestState, IngestStatus, IngestStatusFile, IngestWorkerStatus, YearProgress,
+                            new_status_id)
 from .layout import mbox_directory, mbox_path
 from .mbox import MboxLocation, read_verified_location
 from .message import MetadataDefect, ParsedMessage, display_entity, parse_message
@@ -59,6 +61,9 @@ PROCESSING = "processing.sqlite3"
 OLD_SUFFIX = ".old"
 NEW_INFIX = ".new."
 REBUILD_DEFAULT_WORKERS = half_cpus()
+# Per-worker, per-year and name counts refresh this often; the progress bar keeps its
+# one-second cadence. Counting names scans the new address table, so keep it rare.
+DETAIL_REFRESH_SECONDS = 10.0
 MAX_IN_FLIGHT_BYTES = 256 * 1024 * 1024
 FREE_SPACE_MARGIN = 1.2
 # Defect fields that parse_message can emit; others (antivirus, scanning, search) are kept.
@@ -190,11 +195,66 @@ class UninterruptiblePublication:
             signal.signal(signal.SIGINT, self.previous_handler)
 
 
+MAILBOX_YEAR = re.compile(r"^(\d{4})-")
+
+
+def mailbox_year(filename: str) -> int | None:
+    """The year of a canonical MBOX named ``YYYY-Mailbox1.mbox``; None for others (e.g. INFECTED1)."""
+    match = MAILBOX_YEAR.match(filename)
+    return int(match.group(1)) if match else None
+
+
+class WorkerTally(BaseModel):
+    """What one worker process has rebuilt, seen from the results the parent applied."""
+
+    worker: int
+    messages: int = 0
+    bytes_done: int = 0
+    last_mailbox: str | None = None
+
+
+class RebuildDetail:
+    """Per-worker, per-year and current-mailbox counts for the Activity window.
+
+    Work is handed out in canonical MBOX order (``YYYY-Mailbox1.mbox`` sorts by year), and
+    results are applied in that order, so the last applied mailbox is the rebuild's
+    position. Workers are numbered by first result; a result names its worker's process.
+    """
+
+    def __init__(self) -> None:
+        self.workers: dict[int, WorkerTally] = {}
+        self.years: dict[int, int] = {}
+        self.mailbox: str | None = None
+        self.year: int | None = None
+        self.names_learned: int | None = None
+        self.addresses_known: int | None = None
+
+    def record(self, worker_pid: int, filename: str, byte_length: int) -> None:
+        tally = self.workers.get(worker_pid)
+        if tally is None:
+            tally = self.workers[worker_pid] = WorkerTally(worker=len(self.workers) + 1)
+        tally.messages += 1
+        tally.bytes_done += byte_length
+        tally.last_mailbox = filename
+        self.mailbox = filename
+        year = mailbox_year(filename)
+        if year is not None:
+            self.year = year
+            self.years[year] = self.years.get(year, 0) + 1
+
+    def count_names(self, search: sqlite3.Connection) -> None:
+        """Count addresses, and those with a display name, in the index being built."""
+        row = search.execute("SELECT count(*), count(*) FILTER (WHERE display_name != '') FROM address_suggestions").fetchone()
+        assert row is not None
+        self.addresses_known, self.names_learned = int(row[0]), int(row[1])
+
+
 class RebuildActivity:
     """Show one rebuild run in the Activity window, as an ingest-status file of kind "rebuild".
 
-    Progress is written at most once a second and on completion; a status that cannot
-    be written never stops the rebuild itself.
+    Progress is written at most once a second and on completion; per-worker, per-year
+    and name counts are refreshed every DETAIL_REFRESH_SECONDS. A status that cannot be
+    written never stops the rebuild itself.
     """
 
     def __init__(self, archive: Path, workers: int, application_version: str) -> None:
@@ -204,6 +264,11 @@ class RebuildActivity:
         self.messages = 0
         self.progress = RebuildProgress(phase="Preparing to rebuild databases", total_bytes=0)
         self.last_write = 0.0
+        self.detail = RebuildDetail()
+        self.search: sqlite3.Connection | None = None
+        self.last_detail = -math.inf
+        self.workers_status: list[IngestWorkerStatus] = []
+        self.years_status: list[YearProgress] = []
         self.status_id = new_status_id(self.started_at, 0, os.getpid())
         self.file: IngestStatusFile | None = None
         try:
@@ -221,9 +286,28 @@ class RebuildActivity:
 
     def finish(self, state: IngestState, phase: str, detail: str | None = None) -> None:
         self.progress = self.progress.model_copy(update={"phase": phase})
-        self._write(state, detail=detail, force=True)
+        self.last_detail = -math.inf  # Final counts, not the last periodic sample.
+        self._write(state, failure=detail, force=True)
+        self.search = None
 
-    def _write(self, state: IngestState, *, detail: str | None = None, force: bool = False) -> None:
+    def _refresh_detail(self, now: float, running: bool) -> None:
+        if now - self.last_detail < DETAIL_REFRESH_SECONDS:
+            return
+        self.last_detail = now
+        if self.search is not None:
+            try:
+                self.detail.count_names(self.search)
+            except sqlite3.Error:
+                logging.getLogger(__name__).warning("Could not count names for the rebuild activity", exc_info=True)
+        detail = self.detail
+        self.workers_status = [
+            IngestWorkerStatus(worker=tally.worker, phase="rebuilding" if running else "idle", path=None,
+                               last_path=tally.last_mailbox, bytes_done=tally.bytes_done,
+                               messages_processed=tally.messages)
+            for tally in sorted(detail.workers.values(), key=lambda tally: tally.worker)]
+        self.years_status = [YearProgress(year=year, messages=count) for year, count in sorted(detail.years.items())]
+
+    def _write(self, state: IngestState, *, failure: str | None = None, force: bool = False) -> None:
         now = time.monotonic()
         if self.file is None or (not force and now - self.last_write < 1.0):
             return
@@ -231,6 +315,8 @@ class RebuildActivity:
         elapsed = max(now - self.started, 0.0)
         running = state == "running"
         progress = self.progress
+        self._refresh_detail(now, running)
+        detail = self.detail
         try:
             self.file.write(IngestStatus(
                 status_id=self.status_id, archive=str(self.archive), run_pk=0, process_id=os.getpid(),
@@ -242,8 +328,11 @@ class RebuildActivity:
                 bytes_total=progress.total_bytes,
                 percent=100.0 if state == "completed" else progress.percent,
                 eta=progress.eta(now) if running else "0s", active_workers=self.workers if running else 0,
-                peak_workers=self.workers, configured_workers=self.workers, workers=[], counts=IngestCounts(),
-                years=[], failure_detail=detail, activity_kind="rebuild"))
+                peak_workers=self.workers, configured_workers=self.workers,
+                workers=self.workers_status, counts=IngestCounts(), years=self.years_status,
+                current_year=detail.year, current_year_messages=detail.years.get(detail.year, 0) if detail.year else 0,
+                current_mailbox=detail.mailbox, names_learned=detail.names_learned,
+                addresses_known=detail.addresses_known, failure_detail=failure, activity_kind="rebuild"))
         except (OSError, ValueError):
             logging.getLogger(__name__).warning("Could not update the rebuild activity status", exc_info=True)
 
@@ -269,6 +358,7 @@ class RebuiltMessage(BaseModel):
     parsed: ParsedMessage | None
     error: str | None = None
     indexed: PreparedSearchMessage | None = None
+    worker_pid: int = 0
 
 
 class RebuildResult(BaseModel):
@@ -299,7 +389,7 @@ def rebuild_message(archive: Path, index_attachments: bool, work: RebuildWork) -
     indexed = prepare_search_message(raw, index_attachments, sha256=work.sha256) if work.searchable else None
     return RebuiltMessage(message_pk=work.message_pk, byte_length=work.location.byte_length,
                               date_utc=parsed.date_utc if parsed is not None else work.date_utc,
-                              parsed=parsed, error=error, indexed=indexed)
+                              parsed=parsed, error=error, indexed=indexed, worker_pid=os.getpid())
 
 
 def _ignore_interrupts() -> None:
@@ -547,6 +637,7 @@ def _rebuild(archive: Path, workers: int, index_attachments: bool,
                 catalog.commit()
                 search.commit()
             finally:
+                activity.search = None
                 search.close()
         finally:
             catalog.close()
@@ -575,7 +666,8 @@ def _rederive(archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connec
     live = sqlite3.connect(sqlite_uri(archive / CATALOG), uri=True)
     items = _work_items(live)
     next_item = next(items, None)
-    pending: deque[tuple[Future[RebuiltMessage], int]] = deque()
+    pending: deque[tuple[Future[RebuiltMessage], int, str]] = deque()
+    activity.search = search
     in_flight = 0
     # Parsing and indexing are CPU-bound Python, so threads would share one core through the
     # GIL; spawned worker processes use all configured workers. Only this process writes SQLite.
@@ -589,10 +681,11 @@ def _rederive(archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connec
                     length = next_item.location.byte_length
                     if pending and in_flight + length > MAX_IN_FLIGHT_BYTES:
                         break
-                    pending.append((pool.submit(rebuild_message, archive, index_attachments, next_item), length))
+                    pending.append((pool.submit(rebuild_message, archive, index_attachments, next_item), length,
+                                    next_item.filename))
                     in_flight += length
                     next_item = next(items, None)
-                future, length = pending.popleft()
+                future, length, filename = pending.popleft()
                 result = future.result()
                 in_flight -= length
                 changed += _apply(catalog, result)
@@ -601,6 +694,7 @@ def _rederive(archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connec
                     write_prepared_search_message(search, result.indexed, date_utc=result.date_utc)
                 messages += 1
                 activity.messages = messages
+                activity.detail.record(result.worker_pid, filename, length)
                 reporter.advance(length)
         except BaseException:
             pool.shutdown(wait=True, cancel_futures=True)
@@ -608,6 +702,7 @@ def _rederive(archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connec
         pool.shutdown(wait=True)
     if messages != int(total_row[1]):
         raise RuntimeError(f"catalog has {total_row[1]} located messages but only {messages} were rebuilt")
+    activity.detail.count_names(search)
     reporter.finish()
     return RebuildResult(messages=messages, changed=changed, failures=failures,
                            processing_database=(archive / PROCESSING).is_file())

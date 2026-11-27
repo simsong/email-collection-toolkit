@@ -451,7 +451,10 @@ until the new ones are published; Quit discards the replacement), then, when a
 processing database exists, replays processors through the normal background
 processing/status/suspension path. Each rebuild appears in the Activity window
 as its own "Rebuild databases" run with its step, percent, bytes, ETA, message
-count and final state, whether started from the menu or `ect rebuild`. Replay retains canonical messages, source
+count and final state, whether started from the menu or `ect rebuild`. It also
+shows, refreshed about every 10 seconds, the mailbox being rebuilt (mailboxes go in
+year order), messages rebuilt per year, names learned (addresses with a display name
+in the new index), and each worker's last mailbox, messages and data read. Replay retains canonical messages, source
 provenance and curator edits, does not download source mail, and preserves saved
 source-import settings. Active work must finish or suspend before it starts.
 

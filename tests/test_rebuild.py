@@ -23,7 +23,7 @@ import pytest
 
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.mbox import mbox_directory
-from mailarchiver.rebuild import RebuildInterrupted, RebuildProgress, rebuild_archive, worker_pool
+from mailarchiver.rebuild import RebuildDetail, RebuildInterrupted, RebuildProgress, mailbox_year, rebuild_archive, worker_pool
 from mailarchiver.search import prepare_search_message
 from tests.test_gui_service import MULTIPART_MESSAGE, make_gui_archive
 
@@ -112,6 +112,26 @@ def test_rebuild_repairs_catalog_and_index_and_keeps_old_databases(tmp_path: Pat
     assert (activity.activity_kind, activity.state, activity.run_pk, activity.processed_messages, activity.percent) == (
         "rebuild", "completed", 0, 4, 100.0)
     assert activity.phase.startswith("Rebuilt from 4 messages")
+    # Requirement: Activity shows where a rebuild is (mailboxes go in year order), what each
+    # worker process finished, messages per year, and names learned by the new index.
+    with sqlite3.connect(archive / "archive.sqlite3") as catalog:
+        stored = catalog.execute("SELECT g.filename, count(*) FROM locations l JOIN mbox_generations g USING (generation_pk) "
+                                 "GROUP BY g.filename ORDER BY g.filename").fetchall()
+    with sqlite3.connect(archive / "search.sqlite3") as search:
+        names, addresses = search.execute(
+            "SELECT count(*) FILTER (WHERE display_name != ''), count(*) FROM address_suggestions").fetchone()
+    expected_years: dict[int, int] = {}
+    for filename, count in stored:
+        if (year := mailbox_year(filename)) is not None:
+            expected_years[year] = expected_years.get(year, 0) + count
+    assert {entry.year: entry.messages for entry in activity.years} == expected_years
+    assert activity.current_mailbox == stored[-1][0]
+    assert activity.current_year == mailbox_year(stored[-1][0])
+    assert (activity.names_learned, activity.addresses_known) == (names, addresses) and addresses > 0
+    assert 1 <= len(activity.workers) <= 2
+    assert [worker.worker for worker in activity.workers] == list(range(1, len(activity.workers) + 1))
+    assert sum(worker.messages_processed for worker in activity.workers) == 4
+    assert sum(worker.bytes_done for worker in activity.workers) == record_bytes
 
     rebuild_archive(archive, workers=1)  # A second run replaces the earlier .old files.
     assert _digests(archive, ".old") != before
@@ -196,3 +216,16 @@ def test_worker_processes_ignore_ctrl_c() -> None:
         assert pool.submit(_process_id).result(timeout=60) == worker  # Same worker, still serving work.
     finally:
         pool.shutdown(wait=True, cancel_futures=True)
+
+
+def test_rebuild_detail_follows_mailbox_order_and_names_workers_by_first_result() -> None:
+    """Requirement: the current position is the last applied mailbox; years and workers are tallied."""
+    detail = RebuildDetail()
+    for pid, filename, length in ((900, "1985-Archive1.mbox", 10), (700, "1985-Sent1.mbox", 20),
+                                  (900, "1986-Archive1.mbox", 5), (700, "INFECTED1.mbox", 7)):
+        detail.record(pid, filename, length)
+    assert detail.years == {1985: 2, 1986: 1}
+    assert (detail.mailbox, detail.year) == ("INFECTED1.mbox", 1986)  # Quarantine has no year of its own.
+    assert {pid: (tally.worker, tally.messages, tally.bytes_done, tally.last_mailbox) for pid, tally in detail.workers.items()} == {
+        900: (1, 2, 15, "1986-Archive1.mbox"), 700: (2, 2, 27, "INFECTED1.mbox")}
+    assert mailbox_year("2003-Sent12.mbox") == 2003 and mailbox_year("Archive.mbox") is None

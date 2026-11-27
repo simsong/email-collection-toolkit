@@ -18,11 +18,17 @@ from tests.test_gui_service import make_gui_archive
 
 
 def test_activity_window_lists_completed_and_running_rebuild_runs(tmp_path: Path, page: Page) -> None:
-    """DESKTOP: a finished run shows its message count; a running one shows bytes and ETA."""
+    """DESKTOP: a finished run shows its message count; a running one shows bytes, ETA, its
+    current mailbox, names learned, each worker's last mailbox and messages per year."""
     archive = make_gui_archive(tmp_path)
     rebuild_archive(archive, workers=1)
     running = RebuildActivity(archive, 4, "test")
     running.messages = 1_234
+    for pid, mailbox, length in ((41, "1985-Archive1.mbox", 900), (42, "1985-Sent1.mbox", 500),
+                                 (41, "1986-Archive1.mbox", 700)):
+        running.detail.record(pid, mailbox, length)
+    running.detail.names_learned, running.detail.addresses_known = 37, 52
+    running.last_detail = float("-inf")
     running.update(RebuildProgress(phase="Rebuilding databases (4 workers)", total_bytes=4 * 1024**3,
                                      completed_bytes=1024**3))
     assert [status.state for status in read_ingest_history(archive).statuses] == ["running", "completed"]
@@ -34,6 +40,14 @@ def test_activity_window_lists_completed_and_running_rebuild_runs(tmp_path: Path
     expect(detail.locator("h1")).to_have_text("Rebuild databases")
     expect(detail.locator(".progress-caption")).to_contain_text("25.0% · 1.0 GiB of 4.0 GiB · ETA")
     expect(detail).to_contain_text("1,234")
+    expect(detail.locator(".stat").filter(has_text="Now rebuilding")).to_contain_text("1986-Archive1.mbox")
+    expect(detail.locator(".stat").filter(has_text="Names learned")).to_contain_text("37")
+    workers = detail.locator(".worker-table tbody tr")
+    expect(workers).to_have_count(2)
+    expect(workers.nth(0)).to_contain_text("1986-Archive1.mbox")
+    expect(workers.nth(1)).to_contain_text("1985-Sent1.mbox")
+    years = detail.locator(".coverage-table tbody tr")
+    expect(years).to_have_text(["19852", "1986 (now)1"])
     rows = page.locator(".history-row")
     expect(rows).to_have_count(2)
     rows.nth(1).click()
