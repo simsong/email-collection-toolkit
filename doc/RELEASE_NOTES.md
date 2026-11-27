@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a108 — quicker start for Reprocess Saved Mail
+
+- Reprocessing no longer rereads every mailbox file just to count its messages
+  before it starts. A mailbox untouched since the last checkpoint, with the size
+  and message count that checkpoint recorded, is taken as unchanged; only other
+  mailboxes are counted. **File → Revalidate Archive** remains the full recheck.
+  The step is now labelled "Checking mailboxes for changes".
+
 ## 1.0.0a107 — reprocessing in the Activity window
 
 - **Reprocess Saved Mail** now appears in the Activity window as its own run,

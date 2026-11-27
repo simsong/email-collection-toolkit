@@ -39,6 +39,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from .bagit import BAG_INFO, CHECKPOINT_STAMP_MARGIN_NS
 from .catalog import address_pk, create_catalog, create_search
 from .ingest_status import IngestCounts, IngestState, IngestStatus, IngestStatusFile, new_status_id
 from .layout import mbox_directory, mbox_path
@@ -356,28 +357,53 @@ def _apply(catalog: sqlite3.Connection, result: ReprocessedMessage) -> bool:
     return before != after or old_recipients != new_recipients
 
 
+def checkpoint_stamp_ns(archive: Path) -> int | None:
+    """Return when the last completed checkpoint began (bag-info.txt), if recorded."""
+    try:
+        for line in (archive / BAG_INFO).read_text(encoding="utf-8").splitlines():
+            if line.startswith("Bagging-Timestamp: "):
+                stamped = datetime.fromisoformat(line.removeprefix("Bagging-Timestamp: ").strip())
+                return int(stamped.timestamp() * 1_000_000_000) if stamped.tzinfo is not None else None
+    except (OSError, ValueError):
+        return None
+    return None
+
+
 def _check_mailboxes(archive: Path, catalog: sqlite3.Connection, observer: Callable[[ReprocessProgress], None] | None,
                      should_stop: Callable[[], bool] | None, listener: Callable[[ReprocessProgress], None] | None = None,
                      ) -> None:
-    """Refuse to rebuild when the catalog and the canonical MBOX record counts disagree."""
+    """Refuse to rebuild when a mailbox changed since the last checkpoint and its record count disagrees.
+
+    A mailbox last modified before the last completed checkpoint, whose size and message
+    count match what that checkpoint recorded, is taken as unchanged and is not reread;
+    File > Revalidate Archive is the full recheck. Only other mailboxes are counted.
+    """
     expected = dict(catalog.execute(
         "SELECT g.filename, COUNT(*) FROM mbox_generations g JOIN locations l USING (generation_pk) GROUP BY g.filename"))
+    recorded = {name: (count, size) for name, count, size in catalog.execute(
+        "SELECT filename, message_count, byte_count FROM mbox_generations")}
+    stamp_ns = checkpoint_stamp_ns(archive)
     mailboxes = sorted(mbox_directory(archive).glob("*.mbox"))
-    reporter = ByteProgressReporter("Checking canonical mailboxes", sum(path.stat().st_size for path in mailboxes),
+    reporter = ByteProgressReporter("Checking mailboxes for changes", sum(path.stat().st_size for path in mailboxes),
                                     observer, listener)
     reporter.display(force=True)
     for path in mailboxes:
         if should_stop is not None and should_stop():
             raise KeyboardInterrupt
-        box = PreservingMbox(path, factory=None, create=False)
-        try:
-            actual = len(box)
-        finally:
-            box.close()
-        if actual != int(expected.get(path.name, 0)):
-            raise RuntimeError(f"canonical MBOX/catalog count mismatch for {path.name}: "
-                               f"{actual} records, {expected.get(path.name, 0)} catalogued")
-        reporter.advance(path.stat().st_size)
+        status = path.stat()
+        catalogued = int(expected.get(path.name, 0))
+        unchanged = (stamp_ns is not None and status.st_mtime_ns < stamp_ns - CHECKPOINT_STAMP_MARGIN_NS
+                     and recorded.get(path.name) == (catalogued, status.st_size))
+        if not unchanged:
+            box = PreservingMbox(path, factory=None, create=False)
+            try:
+                actual = len(box)
+            finally:
+                box.close()
+            if actual != catalogued:
+                raise RuntimeError(f"canonical MBOX/catalog count mismatch for {path.name}: "
+                                   f"{actual} records, {catalogued} catalogued")
+        reporter.advance(status.st_size)
     reporter.finish()
 
 

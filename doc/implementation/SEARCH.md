@@ -118,8 +118,9 @@ numbered quarantine MBOX filenames.
 `reprocess` (CLI) and File → Reprocess Saved Mail… (GUI) share
 `reprocess.reprocess_archive`. Under the writer lease it removes stale
 `*.sqlite3.new.*` files, checks free space, copies the live catalog with the
-SQLite backup API to `archive.sqlite3.new.<id>`, verifies MBOX record counts
-against the catalog, then streams `(message, location)` rows from the unchanged
+SQLite backup API to `archive.sqlite3.new.<id>`, recounts MBOX records only for
+mailboxes modified after the `Bagging-Timestamp` checkpoint (less the checkpoint
+margin) or whose size or count differs from `mbox_generations`, then streams `(message, location)` rows from the unchanged
 live catalog to a bounded worker pool. Workers verify each record's SHA-256,
 parse `display_entity(raw)` with `parse_message` (the stored-bytes hash stays the
 identity; a date the bytes lack keeps its recorded import-context value) and

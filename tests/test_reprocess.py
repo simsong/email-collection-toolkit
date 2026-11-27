@@ -13,7 +13,9 @@ and that stopping leaves the live databases untouched with no `.new` files behin
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -101,7 +103,7 @@ def test_reprocess_repairs_catalog_and_index_and_keeps_old_databases(tmp_path: P
     assert len(previews) == 4
     phases = {progress.phase.split(" (")[0]: progress for progress in seen}
     assert phases["Copying catalog"].total_bytes == (archive / "archive.sqlite3.old").stat().st_size
-    assert phases["Checking canonical mailboxes"].total_bytes == mailbox_bytes
+    assert phases["Checking mailboxes for changes"].total_bytes == mailbox_bytes
     assert phases["Reprocessing saved mail"].total_bytes == record_bytes
     assert seen[-1].completed_bytes == seen[-1].total_bytes == record_bytes
 
@@ -148,3 +150,33 @@ def test_mailbox_catalog_mismatch_fails_closed(tmp_path: Path) -> None:
     assert activity.state == "failed" and "count mismatch" in (activity.failure_detail or "")
     assert _digests(archive) == before
     assert not list(archive.glob("*.sqlite3.new.*"))
+
+
+def test_mailbox_unchanged_since_checkpoint_is_not_reread(tmp_path: Path) -> None:
+    """Requirement: a mailbox untouched since the last checkpoint is trusted; Revalidate Archive is the full recheck.
+
+    An extra record appended before the checkpoint, with the catalog's recorded size
+    updated to match, would fail a full count; it is accepted because the file's
+    timestamp, size and catalogued count all agree with the checkpoint.
+    """
+    archive = _archive(tmp_path)
+    mailbox = next(mbox_directory(archive).glob("*.mbox"))
+    with mailbox.open("ab") as output:
+        output.write(b"\nFrom extra@example.net Thu Jan  4 10:00:00 2024\nSubject: uncatalogued\n\nbody\n")
+    with sqlite3.connect(archive / "archive.sqlite3") as catalog:
+        catalog.execute("UPDATE mbox_generations SET byte_count = ?, message_count = "
+                        "(SELECT COUNT(*) FROM locations) WHERE filename = ?", (mailbox.stat().st_size, mailbox.name))
+    checkpoint = datetime.now(UTC)
+    before = (checkpoint - timedelta(hours=1)).timestamp()
+    os.utime(mailbox, (before, before))
+    info = archive / "bag-info.txt"
+    lines = [line for line in (info.read_text(encoding="utf-8").splitlines() if info.exists() else [])
+             if not line.startswith("Bagging-Timestamp:")]
+    info.write_text("\n".join([*lines, f"Bagging-Timestamp: {checkpoint.isoformat()}"]) + "\n", encoding="utf-8")
+
+    assert reprocess_archive(archive, workers=1, observer=lambda _progress: None).messages == 4
+
+    later = (checkpoint + timedelta(minutes=1)).timestamp()  # Modified after the checkpoint: counted again.
+    os.utime(archive / "data/mbox" / mailbox.name, (later, later))
+    with pytest.raises(RuntimeError, match="count mismatch"):
+        reprocess_archive(archive, workers=1, observer=lambda _progress: None)

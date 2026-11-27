@@ -438,8 +438,10 @@ table also stores explicitly labeled non-email Google Chat identities.
   unchanged.
 * `reprocess` (and **File → Reprocess Saved Mail…**) rebuilds the catalog's
   byte-derived message fields and the disposable FTS database into new files
-  (`*.sqlite3.new.<id>`), verifies every MBOX record against the catalog and
-  the total located-message count, and only then renames the live catalog and
+  (`*.sqlite3.new.<id>`), counts the records only of mailboxes modified since
+  the last completed checkpoint (or whose size or count differs from what it
+  recorded; **File → Revalidate Archive** is the full recheck), verifies the
+  total located-message count, and only then renames the live catalog and
   index to `.old` and moves the new files into place. Message numbers,
   locations, source provenance, import runs and non-parse defects are kept;
   dates the bytes lack keep their recorded import-context value. It visibly
