@@ -325,10 +325,12 @@ documents; argparse and the Finder delegate retain their existing roles.
 same isolated diagnostics as the packaged app and rejects unexpected startup
 errors. The native application probe also checks startup notices and opens its
 fixture through the document-open delegate.
-The Activity bridge exposes **Import Directory…** for its bound document. It
-reuses that document's search window (or opens one to own the job) and runs the
-normal confirmed import workflow.
-The UI refreshes import availability on application/status events and prevents repeated clicks while dialogs are open.
+The Activity bridge exposes only `suspend_import` and `resume_import` controls for
+its bound document. `history()` reports `active` for a running import or rebuild
+and `can_resume` for resumable import work or a latest rebuild that was
+interrupted or failed; `suspend_import` sets the import's stop event or adds the
+document to `_rebuild_stops` (polled by the rebuild's `should_stop`), and
+`resume_import` restarts an interrupted rebuild or resumes the saved import request.
 Import's final confirmation uses an application-owned macOS NSAlert with the
 bundled icon, destination heading/path, and explicit Import/Cancel actions.
 The shared alert helper marshals presentation onto the Cocoa main thread and

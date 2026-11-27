@@ -738,8 +738,10 @@ def main() -> None:
             assert ingest.events.loaded.wait(10), "Ingest bridge failed to load"
             check_document_path(ingest, document.display_path)
             evaluate_async(ingest, "refreshHistory().then(() => true)")
-            assert ingest.evaluate_js("document.getElementById('import-directory').textContent") == "Import Directory…"
-            assert not ingest.evaluate_js("document.getElementById('import-directory').disabled")
+            # Activity offers only Suspend and Continue; importing starts from File > Import Mail….
+            assert ingest.evaluate_js("document.getElementById('import-directory') === null")
+            assert ingest.evaluate_js("document.getElementById('suspend-import').textContent") == "Suspend"
+            assert ingest.evaluate_js("document.getElementById('resume-import').textContent") == "Continue"
             check_ingest_wake_refresh(application, ingest)
             document_id = document.descriptor.document_id
             lease = WriterLease.acquire(document.path, document.descriptor.identity, "test", "button-test", "test")
@@ -748,12 +750,12 @@ def main() -> None:
                 evaluate_async(options, "refreshOptions().then(() => true)")
                 assert options.evaluate_js("document.getElementById('save').disabled")
                 evaluate_async(ingest, "refreshHistory().then(() => true)")
-                assert ingest.evaluate_js("document.getElementById('import-directory').disabled")
-                assert not evaluate_async(ingest, "window.pywebview.api.import_directory()")
+                assert not ingest.evaluate_js("document.getElementById('suspend-import').disabled")
+                assert ingest.evaluate_js("document.getElementById('resume-import').disabled")
             finally:
                 controller.finish_ingest(document_id, "button-test", published=False)
             evaluate_async(ingest, "refreshHistory().then(() => true)")
-            assert not ingest.evaluate_js("document.getElementById('import-directory').disabled")
+            assert ingest.evaluate_js("document.getElementById('suspend-import').disabled")
             # Shared-document Close must never wait for an import or a Cocoa dialog.
             sibling = application.create_search_window(controller.new_search_window(document))
             assert sibling.window.events.loaded.wait(10), "Second search bridge failed to load"

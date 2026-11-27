@@ -36,7 +36,7 @@ def test_lost_control_reply_is_visible_and_never_replays_the_command(tmp_path: P
     saved = IngestStatusFile(archive, "ingest-reply-fixture")
     progress = ProgressReporter(1, status_file=saved, archive=archive, run_pk=1, terminal=False)
     progress.finish("interrupted")
-    bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    bridge(page, IngestWindowApi(archive), ("history", "antivirus"))
     page.clock.install()
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
     expect(page.locator(".detail-heading")).to_contain_text("Ingest")
@@ -66,7 +66,7 @@ def test_lost_history_reply_releases_refresh_for_a_fresh_read(tmp_path: Path, pa
     saved = IngestStatusFile(tmp_path, "ingest-status-reply")
     progress = ProgressReporter(1, status_file=saved, archive=tmp_path, run_pk=1, terminal=False)
     progress.finish("completed")
-    bridge(page, IngestWindowApi(tmp_path), ("history", "antivirus", "can_import_directory"))
+    bridge(page, IngestWindowApi(tmp_path), ("history", "antivirus"))
     page.clock.install()
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
     expect(page.locator(".state-badge")).to_have_text("completed")
@@ -110,7 +110,7 @@ def test_concurrent_download_and_processing_have_separate_rows(tmp_path: Path, p
     assert snapshot.saved_workers[0].operation == "processing"
     assert snapshot.saved_workers[0].processing_jobs_completed == 0
     assert snapshot.eta == "unavailable"
-    bridge(page, IngestWindowApi(tmp_path), ("history", "antivirus", "can_import_directory"))
+    bridge(page, IngestWindowApi(tmp_path), ("history", "antivirus"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
     expect(page.locator(".processing-explanation")).to_have_text("Source work and saved message processing are running together.")
     tables = page.locator(".worker-table")
@@ -152,7 +152,7 @@ def test_failed_run_shows_recorded_version_or_unavailable(tmp_path: Path, page: 
         payload[APPLICATION_VERSION_FIELD] = recorded_version
     saved.path.write_text(json.dumps(payload))
     original = saved.path.read_bytes()
-    bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    bridge(page, IngestWindowApi(archive), ("history", "antivirus"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
     timestamp = page.evaluate("value => new Date(value).toLocaleString()", progress.state.started_at.isoformat())
     label = f"{timestamp} ({recorded_version or 'version unavailable'})"
@@ -172,7 +172,7 @@ def test_invalid_configuration_shows_warning_and_saved_history(tmp_path: Path, p
     progress.finish("completed")
     (archive / "config.yaml").write_text("imap_sources: PRIVATE_CONFIGURATION_VALUE\n")
     original = saved.path.read_bytes()
-    bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    bridge(page, IngestWindowApi(archive), ("history", "antivirus"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
     warning = page.locator("#configuration-warning")
     expect(warning).to_be_visible()
@@ -194,13 +194,13 @@ def test_saved_timeout_shows_yellow_dash_without_traceback(tmp_path: Path, page:
     progress.finish("failed", "TimeoutError: The read operation timed out\n\nTraceback (most recent call last):\n"
                     '  File "/fixture/imap_protocol.py", line 331, in body\nsynthetic stack')
     original = saved.path.read_bytes()
-    bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    bridge(page, IngestWindowApi(archive), ("history", "antivirus"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
     expect(page.locator(".state-badge")).to_have_text("Timeout")
     expect(page.locator(".state-dot").last).to_have_text("−")
     assert page.locator(".state-dot").last.evaluate("el => getComputedStyle(el).backgroundColor") == "rgb(244, 197, 66)"
     expect(page.get_by_role("heading", name="Failure", exact=True)).to_have_count(0)
-    expect(page.locator(".progress-caption")).to_contain_text("Timeout. Choose Resume when connected.")
+    expect(page.locator(".progress-caption")).to_contain_text("Timeout. Choose Continue when connected.")
     expect(page.locator("body")).not_to_contain_text("Traceback")
     expect(page.locator("body")).not_to_contain_text("ETA finalizing")
     assert saved.path.read_bytes() == original
@@ -220,7 +220,7 @@ def test_long_failure_detail_wraps_without_hiding_source_or_traceback(tmp_path: 
         ), terminal=False)
     assert read_ingest_history(archive).statuses[0].application_version == APPLICATION_VERSION
     page.set_viewport_size({WIDTH: 1000, HEIGHT: 900})
-    bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    bridge(page, IngestWindowApi(archive), ("history", "antivirus"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
     failure = page.locator("div.failure")
     expect(page.locator(".history-time")).to_contain_text(f"({APPLICATION_VERSION})")
@@ -254,7 +254,7 @@ def test_imap_coverage_and_unknown_eta(tmp_path: Path, page: Page, legacy: bool)
         payload[ETA_FIELD] = "finalizing"
         saved.path.write_text(json.dumps(payload))
     page.set_viewport_size({WIDTH: 1200, HEIGHT: 1000})
-    bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    bridge(page, IngestWindowApi(archive), ("history", "antivirus"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
     expect(page.locator(".progress-caption")).to_contain_text("ETA unavailable")
     coverage = page.locator(".message-coverage")

@@ -26,7 +26,6 @@ body { display: flex; flex-direction: column; }
 .ingest-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 10px 15px; border-bottom: 1px solid var(--border); }
 .ingest-actions button { padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: CanvasText; }
 .ingest-actions button:disabled { opacity: 0.5; }
-#import-directory { grid-column: 1 / -1; justify-self: start; }
 #import-control-status { grid-column: 1 / -1; margin: 0; font-size: 12px; }
 .history-row { display: grid; grid-template-columns: 22px 1fr; gap: 8px; width: 100%; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--border); text-align: left; background: transparent; }
 .history-divider { padding: 10px 12px 4px; color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; border-bottom: 1px solid var(--border); }

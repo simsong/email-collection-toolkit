@@ -26,8 +26,10 @@ def test_activity_window_lists_completed_and_running_rebuild_runs(tmp_path: Path
     running.update(RebuildProgress(phase="Rebuilding databases (4 workers)", total_bytes=4 * 1024**3,
                                      completed_bytes=1024**3))
     assert [status.state for status in read_ingest_history(archive).statuses] == ["running", "completed"]
-    bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    bridge(page, IngestWindowApi(archive), ("history", "antivirus"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
+    expect(page.locator("#import-directory")).to_have_count(0)  # Imports start from File > Import Mail….
+    expect(page.locator(".ingest-actions button:visible")).to_have_text(["Suspend", "Continue"])
     detail = page.locator("#ingest-detail")
     expect(detail.locator("h1")).to_have_text("Rebuild databases")
     expect(detail.locator(".progress-caption")).to_contain_text("25.0% · 1.0 GiB of 4.0 GiB · ETA")

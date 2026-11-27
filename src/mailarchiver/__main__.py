@@ -2538,7 +2538,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             # Suspend and Quit must take effect at once. The checkpoint rereads every
             # archived message, which takes minutes to hours on a large archive;
             # an interrupted archive is not promised current manifests, and the
-            # next completed import or Continue Import writes them.
+            # next completed import or Continue in Activity writes them.
             options.write_detected(catalog, owners, writer_lease)
         elif boxes or succeeded or pause_reason:
             try:
@@ -2557,7 +2557,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 else:
                     print(f"integrity refresh also failed: {error}", file=sys.stderr)
         if checkpoint_deferred:
-            print("Checksums not refreshed: the import was stopped. Continue Import or the next "
+            print("Checksums not refreshed: the import was stopped. Continue in Activity or the next "
                   "completed import refreshes them.", file=sys.stderr)
         if integrity_error is not None:
             result = "failed"

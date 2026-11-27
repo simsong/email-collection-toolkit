@@ -169,7 +169,7 @@ class IngestStatus(BaseModel):
         """Present current and legacy IMAP timeouts quietly, retaining the saved diagnostics."""
         legacy_timeout = self.state == "failed" and legacy_imap_timeout(self.failure_detail or "")
         if legacy_timeout or (self.state == "paused" and "timed out" in self.phase):
-            return self.model_copy(update={"state": "paused", "phase": "Timeout. Choose Resume when connected.",
+            return self.model_copy(update={"state": "paused", "phase": "Timeout. Choose Continue when connected.",
                                            "failure_detail": None, "timed_out": True})
         return self
 

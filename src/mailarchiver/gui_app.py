@@ -724,11 +724,19 @@ class IngestWindowApi:
             self._configuration_warning = warning
         if warning and changed:
             logging.getLogger(__name__).warning("%s", warning)
+        application, document = self._application, self._document
+        rebuilding = application is not None and document is not None and application.rebuild_running(document)
+        rebuild_stopping = application is not None and document is not None and application.rebuild_stopping(document)
+        # Continue restarts an interrupted rebuild (a rebuild is all-or-nothing) or resumes an import.
+        rebuild_stopped = bool(statuses and statuses[0].activity_kind in ("rebuild", "reprocess")
+                               and statuses[0].state in ("interrupted", "failed", "stale"))
         return GuiIngestHistory(statuses=statuses, errors=history.errors, starting=starting,
                                 warnings=[warning] if warning else [],
-                                active=job is not None, suspending=bool(job and job.stop.is_set()),
+                                active=job is not None or rebuilding,
+                                suspending=bool(job and job.stop.is_set()) or (rebuilding and rebuild_stopping),
                                 imap_accounts=accounts,
-                                can_resume=job is None and resumable and self._application is not None).model_dump(mode="json")
+                                can_resume=self._application is not None and job is None and not rebuilding
+                                and (rebuild_stopped or resumable)).model_dump(mode="json")
 
     def update_imap_password(self, source_id: str, password: str) -> bool:
         """Validate a user-entered replacement before updating only its native-vault item."""
@@ -766,18 +774,6 @@ class IngestWindowApi:
 
     def close(self, *_args: object) -> None:
         self.window = None
-
-    def can_import_directory(self) -> bool:
-        return bool(
-            self._application and self._document and self._document.path
-            and self._document.ingest_job is None and self.window is not None
-        )
-
-    def import_directory(self) -> bool:
-        if not self.can_import_directory():
-            return False
-        assert self._application is not None and self._document is not None
-        return self._application.import_directory(self._document, self.window)
 
 
 class IdentityPickerApi:
@@ -930,7 +926,7 @@ SEARCH_BRIDGE_METHODS = (
 )
 
 INGEST_BRIDGE_METHODS = (
-    "history", "can_import_directory", "import_directory", "antivirus", "install_antivirus",
+    "history", "antivirus", "install_antivirus",
     "suspend_import", "resume_import", "update_imap_password",
 )
 
@@ -1881,6 +1877,7 @@ class PyWebViewApplication:
         self._import_futures: set[Future[None]] = set()
         self._writers: set[Event] = set()
         self._rebuilding: dict[str, RebuildProgress] = {}
+        self._rebuild_stops: set[str] = set()
         self._updates_started = False
         self._updating = False
         self._definition_updates = 0
@@ -2485,15 +2482,6 @@ class PyWebViewApplication:
             api = self.create_search_window(self.controller.new_search_window(document))
         return self._import_document(api) if api is not None else False
 
-    def import_directory(self, document: ArchiveDocument, anchor: Any) -> bool:
-        """Use the Activity window's document, independently of the active search window."""
-        if document.path is None or document.ingest_job is not None:
-            return False
-        api = next((item for item in self._search_apis() if item.document is document), None)
-        if api is None:
-            api = self.create_search_window(self.controller.new_search_window(document))
-        return self._import_document(api, directory_only=True, dialog_window=anchor)
-
     def _import_document(
         self, api: GuiApi, *, directory_only: bool = False, dialog_window: Any = None,
         selected_roots: list[Path] | None = None,
@@ -2663,18 +2651,41 @@ class PyWebViewApplication:
         return True
 
     def suspend_import(self, document: ArchiveDocument) -> bool:
-        """Checkpoint this archive's work without closing any windows or quitting."""
+        """Activity > Suspend: checkpoint an import, or stop a rebuild (keeping the current databases)."""
         with self._lock:
+            if self._quitting or self._updating:
+                return False
+            document_id = document.descriptor.document_id
+            if document_id in self._rebuilding:
+                self._rebuild_stops.add(document_id)
+                return True
             job = document.ingest_job
-            if job is None or self._quitting or self._updating:
+            if job is None:
                 return False
             job.stop.set()
         return True
 
+    def rebuild_running(self, document: ArchiveDocument) -> bool:
+        with self._lock:
+            return document.descriptor.document_id in self._rebuilding
+
+    def rebuild_stopping(self, document: ArchiveDocument) -> bool:
+        with self._lock:
+            return document.descriptor.document_id in self._rebuild_stops
+
     def resume_import(self, document: ArchiveDocument) -> bool:
         """Resume with the original request, including suspension during preflight."""
-        if document.path is None or document.ingest_job is not None:
+        if document.path is None or document.ingest_job is not None or self.rebuild_running(document):
             return False
+        latest = latest_ingest_status(document.path)
+        if latest is not None and latest.activity_kind in ("rebuild", "reprocess") and latest.state != "completed":
+            # A rebuild cannot resume part-way; Continue starts it again (no confirmation needed).
+            session = next((window for window in self.controller.windows()
+                            if window.document_id == document.descriptor.document_id), None)
+            api = (GuiApi(document.path, application=self, document=document, search_window=session) if session else
+                   self.create_search_window(self.controller.new_search_window(document)))
+            archive = document.path
+            return self._submit_task("Rebuild databases", lambda: self._rebuild_archive(api, document, archive)) is not None
         request = resume_request(document.path, True, True)
         session = next((window for window in self.controller.windows()
                         if window.document_id == document.descriptor.document_id), None)
@@ -2740,6 +2751,7 @@ class PyWebViewApplication:
             if document_id in self._rebuilding:
                 return
             self._rebuilding[document_id] = RebuildProgress(phase="Preparing to rebuild", total_bytes=0)
+            self._rebuild_stops.discard(document_id)
         self._status_changed()
 
         def observe(progress: RebuildProgress) -> None:
@@ -2751,7 +2763,7 @@ class PyWebViewApplication:
         try:
             with self.writer_activity():
                 result = rebuild_archive(archive, workers=configured_workers(), observer=observe,
-                                           should_stop=lambda: self._quitting,
+                                           should_stop=lambda: self._quitting or document_id in self._rebuild_stops,
                                            application_version=application_metadata().version)
         except RebuildInterrupted:
             return
@@ -2761,6 +2773,7 @@ class PyWebViewApplication:
         finally:
             with self._lock:
                 self._rebuilding.pop(document_id, None)
+                self._rebuild_stops.discard(document_id)
                 window_ids = tuple(window_id for window_id, item in self._apis.items() if item.document is document)
             if not self._quitting:
                 self._refresh_search_windows(window_ids)
@@ -2848,7 +2861,7 @@ class PyWebViewApplication:
         if isinstance(error, ImapPaused):
             notice("information", f"Import paused for {document.display_path}: {error}")
         elif isinstance(error, IngestInterrupted):
-            notice("information", f"Import suspended for {document.display_path}; use Continue Import in Activity to resume.")
+            notice("information", f"Import suspended for {document.display_path}; use Continue in Activity to resume.")
         elif error is None:
             notice("information", f"Import completed for {document.display_path}")
         elif isinstance(error, ImapAuthenticationError):

@@ -308,7 +308,7 @@ def test_ingest_suspend_and_continue_controls_keep_application_open(tmp_path: Pa
         controls = IngestWindowApi(archive, application=app, document=api.document)
         expose(page, controls, ("history", "suspend_import", "resume_import"))
         page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
-        page.get_by_role("button", name="Suspend Import", exact=True).click()
+        page.get_by_role("button", name="Suspend", exact=True).click()
         expect(page.locator("#import-control-status")).to_contain_text("Suspending import")
         expect(page.locator("#suspend-import")).to_be_disabled()
         expect(page.locator("#resume-import")).to_be_disabled()
@@ -480,7 +480,7 @@ def test_continue_processing_disabled_until_background_work_finishes(tmp_path: P
 def test_ingest_sources_show_account_and_server(tmp_path: Path, page: Page) -> None:
     """Desktop source labels resolve saved IMAP IDs while keeping locator options out of view."""
     archive = build_interrupted_archive(tmp_path)
-    expose(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    expose(page, IngestWindowApi(archive), ("history", "antivirus"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri() + "?status=ingest-fixture-2")
     sources = page.locator(".source-list")
     expect(sources).to_have_text("IMAP: sam@example.test on imap.example.test:993")
@@ -509,7 +509,7 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
         "elapsed_seconds": 120, "workers": [worker, second], "percent": 0, "eta": "finalizing", "saved_messages_remaining": 37})
     status_file = IngestStatusFile(archive, status.status_id)
     status_file.write(status)
-    expose(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    expose(page, IngestWindowApi(archive), ("history", "antivirus"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri() + f"?status={status.status_id}")
     expect(page.locator(".progress-caption")).to_contain_text("Processing saved mail")
     expect(page.locator(".progress-caption")).to_contain_text("1,665 tasks finished · Extracting message bodies and attachments")
@@ -612,7 +612,7 @@ def test_worker_columns_stay_fixed_during_status_changes(tmp_path: Path, page: P
     status = status.model_copy(update={"status_id": "ingest-column-fixture", "workers": [worker]})
     status_file = IngestStatusFile(archive, status.status_id)
     status_file.write(status)
-    expose(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    expose(page, IngestWindowApi(archive), ("history", "antivirus"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri() + f"?status={status.status_id}")
     headings = page.locator(".worker-table th")
     operation = page.locator(".worker-table tbody td").nth(1)
@@ -658,7 +658,7 @@ def test_history_startup_and_status_symbols(tmp_path: Path, page: Page) -> None:
     lease = WriterLease.acquire(archive, document.descriptor.identity, "test", job.operation_id, "test")
     app.controller.begin_ingest(document.descriptor.document_id, job, lease)
     history_api = IngestWindowApi(archive, application=app, document=document)
-    expose(page, history_api, ("history", "antivirus", "can_import_directory"))
+    expose(page, history_api, ("history", "antivirus"))
     try:
         assert api.ingest_overview()["active"]
         page.goto((GUI_DIRECTORY / "ingests.html").as_uri())

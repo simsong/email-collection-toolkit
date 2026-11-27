@@ -333,7 +333,7 @@ A successful build does not establish these manual checks.
   Repeating the same import must not add duplicate archived messages.
 - Suspend a larger import; keep the app open and search the saved messages.
   Continue and verify progress resumes past saved UIDs without downloading them
-  again. Suspend, Quit, relaunch, and choose Continue Import; then repeat using
+  again. Suspend, Quit, relaunch, and choose Continue in Activity; then repeat using
   Leave import suspended. The incomplete-work prompt appears once per opened
   search window, not whenever a window regains focus.
 - During saved-mail work, check Messages requiring processing, completed tasks,

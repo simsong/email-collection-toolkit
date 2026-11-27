@@ -436,7 +436,7 @@ class ImapSession:
         if self._expired():
             return ImapSessionExpired()
         reason = "timed out" if isinstance(connection_cause(error), TimeoutError) else "was interrupted"
-        return ImapPaused(f"IMAP connection {reason}. Saved progress is retained; use Resume when connected.")
+        return ImapPaused(f"IMAP connection {reason}. Saved progress is retained; use Continue when connected.")
 
     @staticmethod
     def _ok(status: str, command: str) -> None:

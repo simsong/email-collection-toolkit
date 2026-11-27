@@ -967,7 +967,7 @@ def test_shared_cli_login_reason_survives_long_account_names(tmp_path: Path, sho
                                 capture_output=True, text=True, check=False, timeout=30)
         assert result.returncode == (75 if paused else 1) and "Traceback" not in result.stderr
         if paused:
-            assert "use Resume when connected" in result.stderr
+            assert "use Continue when connected" in result.stderr
             assert read_ingest_history(archive).statuses[0].state == "paused"
         else:
             assert reason.decode() in result.stderr and "--set-password" in result.stderr

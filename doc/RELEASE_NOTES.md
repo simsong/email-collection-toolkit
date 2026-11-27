@@ -6,6 +6,16 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a111 — Activity window: Suspend and Continue only
+
+- The Activity window no longer has **Import Directory…**; start imports with
+  **File → Import Mail…**. Its only buttons are **Suspend**, enabled while an
+  import or a rebuild is running, and **Continue**, enabled when the latest
+  activity was suspended, interrupted or failed. "Resume" is now "Continue".
+- **Suspend** stops a running rebuild and keeps the current databases.
+  **Continue** starts an interrupted rebuild again from the beginning, since a
+  rebuild only replaces the databases when it finishes.
+
 ## 1.0.0a110 — "Rebuild" everywhere
 
 - **File → Reprocess Saved Mail…** is now **File → Rebuild Databases…**, and

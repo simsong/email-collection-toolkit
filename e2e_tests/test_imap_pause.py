@@ -59,7 +59,7 @@ def test_captive_portal_waiting_status_recovers_through_real_import(imap_archive
                 return bool(statuses and "Waiting for IMAP connectivity" in statuses[0].phase)
 
             wait_for_path_state([imap_archive / "status"], waiting, timeout=10)
-            bridge(page, IngestWindowApi(imap_archive), ("history", "antivirus", "can_import_directory"))
+            bridge(page, IngestWindowApi(imap_archive), ("history", "antivirus"))
             page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
             expect(page.locator(".state-badge")).to_have_text("running")
             expect(page.locator(".progress-caption")).to_contain_text("retrying in 150s")
@@ -168,7 +168,7 @@ def test_password_replacement_form_checks_real_login_before_saving(imap_archive:
         expect(page.locator("#imap-account")).to_have_value(account.id)
         page.keyboard.press("Escape")
         expect(page.locator("#imap-password-dialog")).not_to_be_visible()
-        page.get_by_role("button", name="Continue Import", exact=True).click()
+        page.get_by_role("button", name="Continue", exact=True).click()
         wait_for_import(api)
         notify_status(page)
         expect(page.locator(".state-badge")).to_have_text("completed")
@@ -183,7 +183,7 @@ def test_password_replacement_form_checks_real_login_before_saving(imap_archive:
 @pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
 def test_connection_backoff_stays_running_and_suspend_cancels_wait(imap_archive: Path,
         imap_inbox: DisposableImap, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, page: Page) -> None:
-    """ACQUISITION: quota backoff is live progress; Suspend wakes it and Continue Import retains settings."""
+    """ACQUISITION: quota backoff is live progress; Suspend wakes it and Continue retains settings."""
     server = imap_inbox
     assert isinstance(server, InterruptibleImap) and server.account is not None
     monkeypatch.setattr("mailarchiver.imap_source.IMAP_RETRY_INITIAL", 60.0)
@@ -202,11 +202,11 @@ def test_connection_backoff_stays_running_and_suspend_cancels_wait(imap_archive:
         expect(page.locator("#ingest-detail")).to_contain_text("retrying in 60s")
         status = read_ingest_history(imap_archive).statuses[0]
         assert status.state == "running" and status.failure_detail is None
-        page.get_by_role("button", name="Suspend Import", exact=True).click()
+        page.get_by_role("button", name="Suspend", exact=True).click()
         wait_for_import(api)  # Must complete without waiting for the 60-second retry deadline.
         notify_status(page)
         assert read_ingest_history(imap_archive).statuses[0].state == "interrupted"
-        page.get_by_role("button", name="Continue Import", exact=True).click()
+        page.get_by_role("button", name="Continue", exact=True).click()
         wait_for_import(api)
         notify_status(page)
         expect(page.locator(".state-badge")).to_have_text("completed")
@@ -257,7 +257,7 @@ def test_network_pause_and_resume_through_real_ingest_window(imap_archive: Path,
             wait_for_import(api)
         status = read_ingest_history(imap_archive).statuses[0]
         assert status.state == "paused" and status.failure_detail is None
-        assert "IMAP connection" in status.phase and "Resume" in status.phase
+        assert "IMAP connection" in status.phase and "Continue" in status.phase
         assert controls.history()["can_resume"] and not controls.history()["active"]
         assert not any(notice.severity == "error" for notice in app.notices()), app.notices()
         with sqlite3.connect(imap_archive / "archive.sqlite3") as database:
@@ -275,14 +275,14 @@ def test_network_pause_and_resume_through_real_ingest_window(imap_archive: Path,
         # Persist the pause and accepted request across a complete application restart.
         app, api = open_headless(imap_archive, tmp_path / "preferences.json", workers_override=workers)
         controls = IngestWindowApi(imap_archive, application=app, document=api.document)
-        bridge(page, controls, ("history", "antivirus", "can_import_directory", "suspend_import", "resume_import"))
+        bridge(page, controls, ("history", "antivirus", "suspend_import", "resume_import"))
         page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
         expect(page.locator(".state-badge")).to_have_text("Timeout" if fault.mode in {"timeout", "partial"} else "paused")
         expect(page.locator(".history-row.selected .state-dot")).to_have_text("−")
         assert page.locator(".history-row.selected .state-dot").evaluate("el => getComputedStyle(el).backgroundColor") == "rgb(244, 197, 66)"
         expect(page.get_by_role("heading", name="Failure", exact=True)).to_have_count(0)
         expect(page.locator("#import-control-status")).to_contain_text("Download paused")
-        resume = page.get_by_role("button", name="Resume", exact=True)
+        resume = page.get_by_role("button", name="Continue", exact=True)
         expect(resume).to_be_enabled()
         page.screenshot(path=str(tmp_path / "imap-paused.png"))
         server.fault = None

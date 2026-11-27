@@ -374,19 +374,20 @@ defects. An optional installation link opens the application release page withou
 installing software or starting a service. Startup errors likewise record evidence
 and continue. About displays scanner and definition availability, date, age and
 refresh status; explicit unscanned imports retain their warning in history.
-The Activity window provides **Import Directory…**, bound to its own archive even
-when another archive is active. It opens the source picker directly, then
-uses the same owner-names setup, confirmation, and writer lease as File Import.
-The button is disabled during an import or while its dialogs are pending.
+The Activity window offers exactly two controls for its own archive: **Suspend**,
+enabled while an import or rebuild is running, and **Continue**, enabled when the
+latest activity was suspended, interrupted or failed. Imports start only from
+**File → Import Mail…**. Suspending a rebuild stops it and keeps the current
+databases; Continue starts an interrupted rebuild again, since a rebuild is
+all-or-nothing.
 Archive checkpoint progress reads **Verifying archived messages and saving
 checksums**, describing local preservation work without implying online publication.
-The same window offers **Suspend Import** for its own active archive and
-**Continue Import** for interrupted or failed work. Suspension is cooperative
+For imports, **Suspend** and **Continue** checkpoint and resume work. Suspension is cooperative
 but prompt: show that current work is finishing until the current message and
 source checkpoints are saved and the writer lease is released. Suspend and Quit
 do not wait for the whole-archive checksum refresh, which rereads every
 archived message; a refresh already under way stops at the next message.
-Continue Import or the next completed import writes current manifests. Do not quit or cancel saved jobs. Retain accepted
+Continue or the next completed import writes current manifests. Do not quit or cancel saved jobs. Retain accepted
 settings even if suspension precedes processing initialization, so reopening
 the archive can continue. Resume must preserve bytes and source idempotence.
 Network-interrupted IMAP runs display **paused** with a pause symbol and a

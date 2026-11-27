@@ -125,6 +125,45 @@ def test_rebuild_databases_swaps_databases_with_byte_progress(tmp_path: Path) ->
         app.shutdown()
 
 
+def test_activity_suspend_and_continue_control_a_rebuild(tmp_path: Path) -> None:
+    """DESKTOP: Activity's Suspend stops a running rebuild (databases unchanged); Continue starts it again."""
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    assert api.document is not None
+    activity = IngestWindowApi(archive, application=app, document=api.document)
+    before = (archive / "archive.sqlite3").read_bytes()
+    worker = Thread(target=app._rebuild_archive, args=(api, api.document, archive))  # pylint: disable=protected-access
+    try:
+        worker.start()
+        deadline = time.monotonic() + 30
+        while not app.rebuild_running(api.document):
+            assert worker.is_alive() and time.monotonic() < deadline, "rebuild did not start"
+            time.sleep(0.001)
+        assert GuiIngestHistory.model_validate(activity.history()).active
+        assert activity.suspend_import()
+        worker.join(60)
+        assert not app.rebuild_running(api.document)
+        assert (archive / "archive.sqlite3").read_bytes() == before
+        stopped = GuiIngestHistory.model_validate(activity.history())
+        assert stopped.statuses[0].activity_kind == "rebuild" and stopped.statuses[0].state == "interrupted"
+        assert stopped.can_resume and not stopped.active
+
+        assert activity.resume_import()
+        deadline = time.monotonic() + 60
+        while True:
+            history = GuiIngestHistory.model_validate(activity.history())
+            if not history.active and history.statuses[0].state == "completed":
+                break
+            assert time.monotonic() < deadline, history.statuses[0].state
+            time.sleep(0.05)
+        wait_for_import(api)
+        assert (archive / "archive.sqlite3.old").read_bytes() == before
+        assert not GuiIngestHistory.model_validate(activity.history()).can_resume
+    finally:
+        api.close()
+        app.shutdown()
+
+
 def test_opening_an_open_archive_raises_its_native_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """DESKTOP: File Open, Open Recent and Finder opens raise the archive's window rather than adding a copy."""
     archive = build_deferred_archive(tmp_path)

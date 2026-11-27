@@ -45,7 +45,6 @@ window.setTimeout(() => {
 async function initialize() {
   if (initialized) return;
   initialized = true;
-  byId("import-directory").addEventListener("click", importDirectory);
   byId("suspend-import").addEventListener("click", () => controlImport("suspend_import"));
   byId("resume-import").addEventListener("click", () => controlImport("resume_import"));
   byId("update-imap-password").addEventListener("click", () => openImapPassword());
@@ -76,8 +75,7 @@ function ingestReply(method) {
   const operation = window.pywebview.api[method];
   if (!operation) return Promise.resolve(undefined);
   const action = {antivirus: "checking antivirus status", history: "reading import status",
-    can_import_directory: "checking import availability", suspend_import: "suspending the import",
-    resume_import: "resuming the import"}[method] || "updating this window";
+    suspend_import: "suspending", resume_import: "continuing"}[method] || "updating this window";
   const callbacks = window.pywebview._returnValuesCallbacks?.[method];
   return new Promise((resolve, reject) => {
     let callbackId;
@@ -106,7 +104,6 @@ async function readHistory() {
   try {
     const antivirus = await ingestReply("antivirus");
     const history = await ingestReply("history");
-    const canImport = await ingestReply("can_import_directory");
     byId("antivirus-warning").hidden = !antivirus || antivirus.configured;
     byId("antivirus-detail").textContent = antivirus?.detail || "";
     const previousLatestId = statuses[0]?.status_id;
@@ -124,15 +121,16 @@ async function readHistory() {
     byId("update-imap-password").disabled = passwordBlocked;
     byId("suspend-import").disabled = importing || !history.active || history.suspending;
     byId("resume-import").disabled = importing || !history.can_resume;
-    byId("resume-import").textContent = statuses[0]?.state === "paused" ? "Resume" : "Continue Import";
+    const latestRebuild = statuses[0] && rebuildRun(statuses[0]);
     byId("import-control-status").textContent = history.suspending
-      ? "Suspending import… waiting for current work to finish and save its checkpoint."
-      : statuses[0]?.state === "paused" ? "Download paused. Reconnect to the network, then choose Resume."
-      : history.can_resume ? "Import is suspended or unfinished. Continue Import resumes saved work." : "";
+      ? (latestRebuild ? "Stopping the rebuild… the current databases stay in use."
+        : "Suspending import… waiting for current work to finish and save its checkpoint.")
+      : statuses[0]?.state === "paused" ? "Download paused. Reconnect to the network, then choose Continue."
+      : history.can_resume ? (latestRebuild ? "The rebuild was interrupted. Continue starts it again."
+        : "Import is suspended or unfinished. Continue resumes saved work.") : "";
     byId("import-control-status").hidden = !byId("import-control-status").textContent;
     byId("starting-import").hidden = !starting;
     render(history.errors || []);
-    byId("import-directory").disabled = importing || !canImport;
     if (historyError) {
       byId("error").hidden = true;
       historyError = false;
@@ -184,7 +182,7 @@ async function updateImapPassword(event) {
     if (!await window.pywebview.api.update_imap_password(byId("imap-account").value, byId("imap-password").value)) {
       throw new Error("The password could not be saved.");
     }
-    byId("imap-password-status").textContent = "Login succeeded. Password saved. Choose Continue Import to resume.";
+    byId("imap-password-status").textContent = "Login succeeded. Password saved. Choose Continue to resume.";
     byId("cancel-imap-password").textContent = "Close";
   } catch (error) {
     byId("imap-password-status").textContent = String(error?.message || error);
@@ -198,28 +196,13 @@ async function updateImapPassword(event) {
   }
 }
 
-async function importDirectory() {
-  if (importing) return;
-  importing = true;
-  byId("import-directory").disabled = true;
-  byId("error").hidden = true;
-  try {
-    await window.pywebview.api.import_directory();
-  } catch (error) {
-    showError(`Could not import directory: ${String(error?.message || error)}`);
-  } finally {
-    importing = false;
-    await historyRefresh.fresh();
-  }
-}
-
 async function controlImport(method) {
   if (importing) return;
   importing = true;
   byId("suspend-import").disabled = true;
   byId("resume-import").disabled = true;
   byId("error").hidden = true;
-  byId("import-control-status").textContent = method === "suspend_import" ? "Suspending import…" : "Continuing import…";
+  byId("import-control-status").textContent = method === "suspend_import" ? "Suspending…" : "Continuing…";
   byId("import-control-status").hidden = false;
   try {
     if (!await ingestReply(method)) throw new Error("The import state changed. Please try again.");
