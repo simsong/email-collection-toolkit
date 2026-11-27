@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a109 — quiet Ctrl-C during reprocessing
+
+- Pressing Ctrl-C in the terminal while Reprocess Saved Mail runs no longer
+  prints a traceback from every worker process. Workers ignore it; the
+  application stops the run itself, keeps the current databases, and exits
+  cleanly.
+
 ## 1.0.0a108 — quicker start for Reprocess Saved Mail
 
 - Reprocessing no longer rereads every mailbox file just to count its messages

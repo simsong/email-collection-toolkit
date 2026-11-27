@@ -302,6 +302,18 @@ def reprocess_message(archive: Path, index_attachments: bool, work: ReprocessWor
                               parsed=parsed, error=error, indexed=indexed)
 
 
+def _ignore_interrupts() -> None:
+    """Worker initializer: Ctrl-C reaches the whole terminal process group, but only the
+    parent decides how to stop (it cancels queued work and shuts the pool down)."""
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
+def worker_pool(workers: int) -> ProcessPoolExecutor:
+    """Spawned reprocess workers that ignore Ctrl-C and leave stopping to the parent."""
+    return ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"),
+                               initializer=_ignore_interrupts)
+
+
 def _work_items(source: sqlite3.Connection) -> Iterator[ReprocessWork]:
     """Stream work from the unchanged live catalog, never from the copy being rewritten."""
     rows = source.execute(
@@ -567,7 +579,7 @@ def _rederive(archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connec
     in_flight = 0
     # Parsing and indexing are CPU-bound Python, so threads would share one core through the
     # GIL; spawned worker processes use all configured workers. Only this process writes SQLite.
-    pool = ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"))
+    pool = worker_pool(workers)
     with closing(live):
         try:
             while next_item is not None or pending:

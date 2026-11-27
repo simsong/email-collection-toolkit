@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import signal
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,7 +23,7 @@ import pytest
 
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.mbox import mbox_directory
-from mailarchiver.reprocess import ReprocessInterrupted, ReprocessProgress, reprocess_archive
+from mailarchiver.reprocess import ReprocessInterrupted, ReprocessProgress, reprocess_archive, worker_pool
 from mailarchiver.search import prepare_search_message
 from tests.test_gui_service import MULTIPART_MESSAGE, make_gui_archive
 
@@ -180,3 +181,18 @@ def test_mailbox_unchanged_since_checkpoint_is_not_reread(tmp_path: Path) -> Non
     os.utime(archive / "data/mbox" / mailbox.name, (later, later))
     with pytest.raises(RuntimeError, match="count mismatch"):
         reprocess_archive(archive, workers=1, observer=lambda _progress: None)
+
+
+def _process_id() -> int:
+    return os.getpid()
+
+
+def test_worker_processes_ignore_ctrl_c() -> None:
+    """Requirement: Ctrl-C in the terminal does not kill or traceback reprocess workers; the parent stops them."""
+    pool = worker_pool(1)
+    try:
+        worker = pool.submit(_process_id).result(timeout=60)
+        os.kill(worker, signal.SIGINT)
+        assert pool.submit(_process_id).result(timeout=60) == worker  # Same worker, still serving work.
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)

@@ -133,7 +133,7 @@ sources and runs are untouched. `publish` renames each live file to `.old`
 are keyed by hash, so either order is consistent. Progress is measured in bytes
 known before reading (catalog size, MBOX sizes, record lengths); the terminal
 bar or the GUI observer receives each tenth of a percent. A `should_stop` poll
-or Ctrl-C before publication deletes the `.new` files. Index attachment
+or Ctrl-C before publication deletes the `.new` files. Workers are spawned processes whose initializer ignores SIGINT, so a terminal Ctrl-C (sent to the whole process group) reaches only the parent, which cancels queued work and shuts the pool down. Index attachment
 indexing defaults to the replaced index's setting. `rebuild_search_index`
 remains only for an import's obsolete-search-schema recovery. Indexing parses each message after
 `display_entity` drops a leading `>*From ` envelope line, so rebuilt previews,
