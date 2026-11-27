@@ -122,11 +122,12 @@ async function readHistory() {
     byId("suspend-import").disabled = importing || !history.active || history.suspending;
     byId("resume-import").disabled = importing || !history.can_resume;
     const latestRebuild = statuses[0] && rebuildRun(statuses[0]);
+    byId("suspend-import").textContent = history.stop_label || "Suspend";  // "Cancel" while rebuilding.
     byId("import-control-status").textContent = history.suspending
-      ? (latestRebuild ? "Stopping the rebuild… the current databases stay in use."
+      ? (history.stop_label === "Cancel" ? "Cancelling the rebuild… the current databases stay in use."
         : "Suspending import… waiting for current work to finish and save its checkpoint.")
       : statuses[0]?.state === "paused" ? "Download paused. Reconnect to the network, then choose Continue."
-      : history.can_resume ? (latestRebuild ? "The rebuild was interrupted. Continue starts it again."
+      : history.can_resume ? (latestRebuild ? "The rebuild was cancelled. Continue starts it again from the beginning."
         : "Import is suspended or unfinished. Continue resumes saved work.") : "";
     byId("import-control-status").hidden = !byId("import-control-status").textContent;
     byId("starting-import").hidden = !starting;
@@ -202,7 +203,8 @@ async function controlImport(method) {
   byId("suspend-import").disabled = true;
   byId("resume-import").disabled = true;
   byId("error").hidden = true;
-  byId("import-control-status").textContent = method === "suspend_import" ? "Suspending…" : "Continuing…";
+  byId("import-control-status").textContent = method !== "suspend_import" ? "Continuing…"
+    : byId("suspend-import").textContent === "Cancel" ? "Cancelling…" : "Suspending…";
   byId("import-control-status").hidden = false;
   try {
     if (!await ingestReply(method)) throw new Error("The import state changed. Please try again.");

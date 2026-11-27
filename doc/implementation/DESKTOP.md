@@ -337,6 +337,11 @@ and `can_resume` for resumable import work or a latest rebuild that was
 interrupted or failed; `suspend_import` sets the import's stop event or adds the
 document to `_rebuild_stops` (polled by the rebuild's `should_stop`), and
 `resume_import` restarts an interrupted rebuild or resumes the saved import request.
+`history()` also returns `stop_label`, "Cancel" while a rebuild runs and otherwise
+"Suspend", which `ingests.js` puts on the stop button. Quit checks
+`has_active_rebuild()` (a lock-free read of `_rebuilding`) before `prepare_quit`,
+which would otherwise mark Quit as started and stop the rebuild, and confirms with
+`QUIT_REBUILD_TITLE`/`QUIT_REBUILD_MESSAGE`; declining leaves the rebuild running.
 Import's final confirmation uses an application-owned macOS NSAlert with the
 bundled icon, destination heading/path, and explicit Import/Cancel actions.
 The shared alert helper marshals presentation onto the Cocoa main thread and

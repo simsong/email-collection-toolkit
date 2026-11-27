@@ -6,6 +6,15 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a113 — Cancel a rebuild; warn before quitting one
+
+- While a rebuild is running, the Activity window's stop button reads **Cancel**
+  instead of **Suspend**, since a rebuild cannot resume part-way. Imports still
+  show **Suspend**.
+- Quitting during a rebuild now asks first: **Abort rebuild and quit?** explains
+  that the rebuild is aborted and the current databases are kept. **Keep
+  Rebuilding** leaves it running.
+
 ## 1.0.0a112 — rebuild detail in Activity
 
 - A running **Rebuild databases** shows the mailbox it is on (mailboxes are

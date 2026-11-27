@@ -252,6 +252,8 @@ class GuiIngestHistory(BaseModel):
     active: bool = False
     suspending: bool = False
     can_resume: bool = False
+    # A rebuild cannot resume part-way, so the Activity stop button cancels it.
+    stop_label: Literal["Suspend", "Cancel"] = "Suspend"
     imap_accounts: list[ImapAccount] = Field(default_factory=list)
 
 
@@ -489,6 +491,15 @@ QUIT_IMPORT_MESSAGE = (
     "Continue Processing to resume. Messages already archived will not be imported twice.\n\n"
     "Each import will pause after its current message. The application will quit within five seconds; "
     "unfinished work will be recovered when you resume."
+)
+
+QUIT_REBUILD_TITLE = "Abort rebuild and quit?"
+QUIT_REBUILD_BUTTONS = ("Keep Rebuilding", "Abort Rebuild and Quit")
+QUIT_REBUILD_MESSAGE = (
+    "Quitting aborts the database rebuild. The rebuild cannot resume part-way: the partly rebuilt "
+    "databases are discarded and the current databases stay in use, unchanged.\n\n"
+    "To rebuild later, reopen the archive and choose Continue in the Activity window; "
+    "the rebuild then starts again from the beginning."
 )
 
 
@@ -736,7 +747,8 @@ class IngestWindowApi:
                                 suspending=bool(job and job.stop.is_set()) or (rebuilding and rebuild_stopping),
                                 imap_accounts=accounts,
                                 can_resume=self._application is not None and job is None and not rebuilding
-                                and (rebuild_stopped or resumable)).model_dump(mode="json")
+                                and (rebuild_stopped or resumable),
+                                stop_label="Cancel" if rebuilding else "Suspend").model_dump(mode="json")
 
     def update_imap_password(self, source_id: str, password: str) -> bool:
         """Validate a user-entered replacement before updating only its native-vault item."""
@@ -3303,6 +3315,11 @@ class PyWebViewApplication:
             pass  # A repeated native callback may refer to an already reserved close.
         return True
 
+    def has_active_rebuild(self) -> bool:
+        # Read without the application lock: Quit runs on Cocoa's event thread and
+        # must never wait. A dict's truth value is read atomically.
+        return bool(self._rebuilding)
+
     def has_active_ingest(self) -> bool:
         # Unknown state still requires confirmation, but never a pre-watchdog wait.
         return self.controller.has_jobs("ingest", blocking=False) is not False
@@ -3321,7 +3338,17 @@ class PyWebViewApplication:
         # returning from a bridge callback that needs that same event loop.
         if self._quitting and not update_install:
             return
-        if not self.prepare_quit() and confirm_ingest and self.has_active_ingest():
+        # Ask before prepare_quit: it marks Quit as started, which already stops a rebuild.
+        if confirm_ingest and self.has_active_rebuild():
+            if sys.platform == "darwin":
+                confirmed = macos_alert(QUIT_REBUILD_TITLE, QUIT_REBUILD_MESSAGE, QUIT_REBUILD_BUTTONS,
+                                        body_width=IMPORT_CONFIRMATION_WIDTH) == 1
+            else:
+                anchor = webview.active_window() or self._about_window
+                confirmed = bool(anchor and anchor.create_confirmation_dialog(QUIT_REBUILD_TITLE, QUIT_REBUILD_MESSAGE))
+            if not confirmed:
+                return
+        elif not self.prepare_quit() and confirm_ingest and self.has_active_ingest():
             if sys.platform == "darwin":
                 confirmed = macos_alert("Suspend import and quit?", QUIT_IMPORT_MESSAGE,
                     ("Cancel", "Suspend import and quit"), body_width=IMPORT_CONFIRMATION_WIDTH) == 1

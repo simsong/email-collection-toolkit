@@ -126,7 +126,9 @@ Application-wide warnings remain shared, and About may retain the aggregate hist
 ## Shutdown feedback
 
 During active import, Quit offers **Suspend import and quit** and explains that
-saved work resumes later without duplicate imports. After confirmation, loaded
+saved work resumes later without duplicate imports. During a rebuild, Quit asks
+**Abort rebuild and quit?**, explains that quitting aborts the rebuild, discards the
+partly rebuilt databases and keeps the current ones, and offers **Keep Rebuilding**. After confirmation, loaded
 application windows show a full-window translucent gray overlay (20% gray fill)
 with centered black **Shutting down…** text at 50% opacity. It covers existing
 dialogs, blocks content interaction and cannot be dismissed with Escape. Canceling
@@ -374,12 +376,12 @@ defects. An optional installation link opens the application release page withou
 installing software or starting a service. Startup errors likewise record evidence
 and continue. About displays scanner and definition availability, date, age and
 refresh status; explicit unscanned imports retain their warning in history.
-The Activity window offers exactly two controls for its own archive: **Suspend**,
-enabled while an import or rebuild is running, and **Continue**, enabled when the
-latest activity was suspended, interrupted or failed. Imports start only from
-**File → Import Mail…**. Suspending a rebuild stops it and keeps the current
-databases; Continue starts an interrupted rebuild again, since a rebuild is
-all-or-nothing.
+The Activity window offers exactly two controls for its own archive: **Suspend**
+(labelled **Cancel** while a rebuild is running), enabled while an import or rebuild
+is running, and **Continue**, enabled when the latest activity was suspended,
+interrupted or failed. Imports start only from **File → Import Mail…**. Cancelling a
+rebuild stops it and keeps the current databases; Continue starts a cancelled rebuild
+again from the beginning, since a rebuild is all-or-nothing.
 Archive checkpoint progress reads **Verifying archived messages and saving
 checksums**, describing local preservation work without implying online publication.
 For imports, **Suspend** and **Continue** checkpoint and resume work. Suspension is cooperative

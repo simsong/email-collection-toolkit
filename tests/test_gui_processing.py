@@ -14,6 +14,9 @@ from threading import Thread, Barrier, Event
 from time import monotonic
 from datetime import UTC, datetime, timedelta
 
+from types import SimpleNamespace
+from typing import Any
+
 import pytest
 from pydantic import BaseModel, Field
 
@@ -139,7 +142,8 @@ def test_activity_suspend_and_continue_control_a_rebuild(tmp_path: Path) -> None
         while not app.rebuild_running(api.document):
             assert worker.is_alive() and time.monotonic() < deadline, "rebuild did not start"
             time.sleep(0.001)
-        assert GuiIngestHistory.model_validate(activity.history()).active
+        running = GuiIngestHistory.model_validate(activity.history())
+        assert running.active and running.stop_label == "Cancel"  # A rebuild cannot resume part-way.
         assert activity.suspend_import()
         worker.join(60)
         assert not app.rebuild_running(api.document)
@@ -147,6 +151,7 @@ def test_activity_suspend_and_continue_control_a_rebuild(tmp_path: Path) -> None
         stopped = GuiIngestHistory.model_validate(activity.history())
         assert stopped.statuses[0].activity_kind == "rebuild" and stopped.statuses[0].state == "interrupted"
         assert stopped.can_resume and not stopped.active
+        assert stopped.stop_label == "Suspend"
 
         assert activity.resume_import()
         deadline = time.monotonic() + 60
@@ -162,6 +167,56 @@ def test_activity_suspend_and_continue_control_a_rebuild(tmp_path: Path) -> None
     finally:
         api.close()
         app.shutdown()
+
+
+@pytest.mark.parametrize("confirm", [False, True])
+def test_quit_during_rebuild_warns_that_it_aborts_the_rebuild(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                              confirm: bool) -> None:
+    """DESKTOP: Quit during a rebuild asks first, saying the rebuild will be aborted; declining keeps it running."""
+    import mailarchiver.gui_app as gui_app
+    archive = build_deferred_archive(tmp_path)
+    exited = Event()
+    app, api = open_headless(archive, tmp_path / "preferences.json", exit_process=lambda _code: exited.set())
+    assert api.document is not None
+    before = (archive / "archive.sqlite3").read_bytes()
+    asked: list[tuple[str, str, tuple[str, ...]]] = []
+
+    def alert(title: str, message: str, buttons: tuple[str, ...], **_options: object) -> int:
+        asked.append((title, message, buttons))
+        return 1 if confirm else 0
+
+    monkeypatch.setattr(gui_app, "macos_alert", alert)
+    anchor = SimpleNamespace(create_confirmation_dialog=lambda title, message: asked.append((title, message, ())) or confirm)
+    app._about_window = anchor  # pylint: disable=protected-access
+    monkeypatch.setattr(gui_app.webview, "active_window", lambda: None)
+    hold, release = Event(), Event()
+    real_rebuild = gui_app.rebuild_archive
+
+    def held_rebuild(archive: Path, **options: Any) -> Any:
+        hold.set()
+        assert release.wait(30), "test did not release the rebuild"
+        return real_rebuild(archive, **options)
+
+    monkeypatch.setattr(gui_app, "rebuild_archive", held_rebuild)
+    worker = Thread(target=app._rebuild_archive, args=(api, api.document, archive))  # pylint: disable=protected-access
+    try:
+        worker.start()
+        assert hold.wait(30) and app.has_active_rebuild()
+        app.request_quit()
+        (title, message, buttons), = asked
+        assert title == "Abort rebuild and quit?" and "aborts the database rebuild" in message
+        assert buttons in ((), ("Keep Rebuilding", "Abort Rebuild and Quit"))
+        assert app._quitting is confirm  # pylint: disable=protected-access
+    finally:
+        if not confirm:
+            app.suspend_import(api.document)
+        release.set()
+        worker.join(60)
+        api.close()
+        app.shutdown()
+    assert not worker.is_alive()
+    assert (archive / "archive.sqlite3").read_bytes() == before  # Aborted or cancelled: databases unchanged.
+    assert not list(archive.glob("*.sqlite3.new.*"))
 
 
 def test_opening_an_open_archive_raises_its_native_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
