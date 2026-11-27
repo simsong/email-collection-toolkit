@@ -327,7 +327,7 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
   SHA-256 skips the file without parsing its messages.  If a file grew, ingest
   first compares the SHA-256 of the old length.  A matching MBOX prefix followed
   by a valid `From ` boundary resumes at that byte offset; all other changes
-  reprocess the whole file.  The checkpoint is updated only after the selected
+  reread the whole file.  The checkpoint is updated only after the selected
   region finishes and the source metadata remains stable.
   A lightweight preliminary pass counts recognized source containers and their
   available byte estimates without hashing or retaining message contents. It
@@ -436,7 +436,7 @@ table also stores explicitly labeled non-email Google Chat identities.
 * Mailbag CSV uses CRLF record endings. Folded source headers used as CSV
   metadata are unfolded to single-line values; canonical message bytes are
   unchanged.
-* `reprocess` (and **File → Reprocess Saved Mail…**) rebuilds the catalog's
+* `rebuild` (and **File → Rebuild Databases…**) rebuilds the catalog's
   byte-derived message fields and the disposable FTS database into new files
   (`*.sqlite3.new.<id>`), counts the records only of mailboxes modified since
   the last completed checkpoint (or whose size or count differs from what it
@@ -446,7 +446,7 @@ table also stores explicitly labeled non-email Google Chat identities.
   locations, source provenance, import runs and non-parse defects are kept;
   dates the bytes lack keep their recorded import-context value. It visibly
   reports a progress bar, bytes done of the known byte total, rate and ETA for
-  catalog copying, mailbox verification and message reprocessing; the GUI shows
+  catalog copying, mailbox verification and message rebuilding; the GUI shows
   the same in the search window's status line, and quitting or Ctrl-C deletes
   the incomplete replacement and keeps the live databases. It announces before
   starting that `Ctrl-C` discards the new databases. Its

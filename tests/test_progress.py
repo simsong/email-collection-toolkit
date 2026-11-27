@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from mailarchiver.reprocess import ReprocessProgress, progress_line
+from mailarchiver.rebuild import RebuildProgress, progress_line
 from mailarchiver.__main__ import (
     ANSI_RESET,
     CLAMAV_START_PHASE,
@@ -100,9 +100,9 @@ def test_scan_lane_completion_restores_active_source_and_never_counts_scan_offse
     assert overall_progress(progress.state, time.monotonic()).bytes_done == 350
 
 
-def test_reprocess_progress_has_a_bar_and_eta() -> None:
+def test_rebuild_progress_has_a_bar_and_eta() -> None:
     """Requirement: index rebuild reports bounded remaining work in bytes, with rate and ETA."""
-    progress = ReprocessProgress(
+    progress = RebuildProgress(
         phase="Rebuilding search index",
         total_bytes=4 * 1024 * 1024,
         started_monotonic=10,
@@ -114,9 +114,9 @@ def test_reprocess_progress_has_a_bar_and_eta() -> None:
     )
 
 
-def test_empty_reprocess_progress_is_complete() -> None:
+def test_empty_rebuild_progress_is_complete() -> None:
     """Requirement: an empty index rebuild reports completion without a contradictory ETA."""
-    progress = ReprocessProgress(phase="Rebuilding search index", total_bytes=0, started_monotonic=10)
+    progress = RebuildProgress(phase="Rebuilding search index", total_bytes=0, started_monotonic=10)
 
     assert progress_line(progress, now=20, width=8) == (
         "Rebuilding search index: [########] 100.0% 0 B of 0 B  0 B/s  ETA 0s"

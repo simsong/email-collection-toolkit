@@ -17,10 +17,10 @@ const historyRefresh = new RefreshTask(readHistory);
 const byId = id => document.getElementById(id);
 const integer = value => Number(value || 0).toLocaleString();
 const stateLabel = status => status.timed_out ? "Timeout" : status.state;
-// Reprocess Saved Mail runs (run_pk 0) rebuild the catalog and search index from stored mail.
-const reprocessRun = status => status.activity_kind === "reprocess";
-const runTitle = status => reprocessRun(status) ? "Reprocess saved mail" : `Ingest ${status.run_pk}`;
-const processingMode = status => !reprocessRun(status) && !status.concurrent_processing && !(status.state !== "running" && (status.processed_messages || status.files_processed))
+// Rebuild Databases runs (run_pk 0) rebuild the catalog and search index from stored mail.
+const rebuildRun = status => ["rebuild", "reprocess"].includes(status.activity_kind);  // "reprocess": 1.0.0a107–a109 runs.
+const runTitle = status => rebuildRun(status) ? "Rebuild databases" : `Ingest ${status.run_pk}`;
+const processingMode = status => !rebuildRun(status) && !status.concurrent_processing && !(status.state !== "running" && (status.processed_messages || status.files_processed))
   && (status.activity_kind === "processing" || status.processing_active
     || ["recovering archived content", "recovering pending imports", "processing content"].includes(status.phase));
 const processingActive = status => processingMode(status) && status.state === "running";
@@ -280,7 +280,7 @@ function historyRow(status) {
   summary.className = "history-summary";
   const imapOnly = status.source_roots.length && status.source_roots.every(root => root.startsWith("imap://"));
   const messages = imapOnly ? status.download_coverage?.messages : status.processed_messages;
-  summary.textContent = `${reprocessRun(status) ? `${runTitle(status)} · ${integer(status.processed_messages)} messages`
+  summary.textContent = `${rebuildRun(status) ? `${runTitle(status)} · ${integer(status.processed_messages)} messages`
     : processingMode(status) ? `${integer(status.processing_jobs_completed)} processing tasks finished`
     : messages == null ? "Source message count unavailable" : `${integer(messages)} source messages`} · ${formatDuration(status.elapsed_seconds)}`;
   main.append(title, time, summary);
@@ -332,13 +332,13 @@ function renderDetail(status) {
   const caption = document.createElement("div");
   caption.className = "progress-caption";
   track.setAttribute("role", "progressbar");
-  track.setAttribute("aria-label", processingNow ? "Processing jobs" : reprocessRun(status) ? "Reprocess progress"
+  track.setAttribute("aria-label", processingNow ? "Processing jobs" : rebuildRun(status) ? "Rebuild progress"
     : "Source import progress");
   const processing = `${integer(status.processing_jobs_completed)} tasks finished · ${processorLabel(status.processing_processor || "preparing")}`;
   track.setAttribute("aria-valuetext", processingNow ? processing : `${Number(status.percent).toFixed(1)}%`);
   if (!processingNow) track.setAttribute("aria-valuenow", Number(status.percent));
   caption.append(textSpan(phaseLabel(status)), textSpan(processingNow ? processing : status.state === "paused"
-    ? `${Number(status.percent).toFixed(1)}% saved` : reprocessRun(status) && status.state === "running"
+    ? `${Number(status.percent).toFixed(1)}% saved` : rebuildRun(status) && status.state === "running"
     ? `${Number(status.percent).toFixed(1)}% · ${formatBytes(status.bytes_processed)} of ${formatBytes(status.bytes_total)} · ETA ${status.eta}`
     : `${Number(status.percent).toFixed(1)}% · ETA ${!status.bytes_total && status.files_processed < status.files_total ? "unavailable" : status.eta}`));
 
@@ -346,7 +346,7 @@ function renderDetail(status) {
   if (status.state === "running" && status.concurrent_processing) {
     detail.append(textBlock("Source work and saved message processing are running together.", "processing-explanation"));
   }
-  if (reprocessRun(status)) {
+  if (rebuildRun(status)) {
     detail.append(textBlock("Re-reading every saved message to rebuild its catalog details and the search index. "
       + "Search keeps using the current databases until the new ones are finished; the previous ones are then kept "
       + "as archive.sqlite3.old and search.sqlite3.old.", "processing-explanation"));
@@ -365,7 +365,7 @@ function renderDetail(status) {
     detail.append(section("Downloaded message coverage", messageCoverage(status)));
   }
   if (status.failure_detail) detail.append(section("Failure", textBlock(status.failure_detail, "failure")));
-  if (!reprocessRun(status)) detail.append(section("Workers", workerTable(status.workers)));
+  if (!rebuildRun(status)) detail.append(section("Workers", workerTable(status.workers)));
   if (status.saved_workers?.length) detail.append(section("Saved-mail processing workers", workerTable(status.saved_workers)));
   if (status.source_roots.length) {
     const sources = document.createElement("ul");
@@ -382,8 +382,8 @@ function renderDetail(status) {
 function statistics(status) {
   const processing = processingMode(status);
   const imap = status.source_roots.length > 0 && status.source_roots.every(root => root.startsWith("imap://"));
-  const values = reprocessRun(status) ? [
-    ["Messages reprocessed", integer(status.processed_messages)],
+  const values = rebuildRun(status) ? [
+    ["Messages rebuilt", integer(status.processed_messages)],
     ["Current step", `${formatBytes(status.bytes_processed)} of ${formatBytes(status.bytes_total)}`],
     ["Elapsed", formatDuration(status.elapsed_seconds)],
     ["Average rate", `${Number(status.message_rate).toFixed(1)} messages/s`],

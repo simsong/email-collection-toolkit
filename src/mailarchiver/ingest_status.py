@@ -141,9 +141,9 @@ class IngestStatus(BaseModel):
     processing_jobs_completed: int = 0
     processing_job_id: int | None = None
     processing_processor: str | None = None
-    # "reprocess" runs (File > Reprocess Saved Mail…, `ect reprocess`) use run_pk 0:
-    # they rebuild derived databases and do not create a catalog ingest run.
-    activity_kind: Literal["source", "processing", "reprocess"] | None = None
+    # "rebuild" runs (File > Rebuild Databases…, `ect rebuild`; written as "reprocess" by
+    # 1.0.0a107–a109) use run_pk 0: they rebuild derived databases, not a catalog ingest run.
+    activity_kind: Literal["source", "processing", "rebuild", "reprocess"] | None = None
     saved_messages_remaining: int | None = Field(default=None, ge=0)
     download_coverage: ImapDownloadCoverage | None = None
     saved_workers: list[IngestWorkerStatus] = Field(default_factory=list)

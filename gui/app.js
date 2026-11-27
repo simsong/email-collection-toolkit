@@ -518,12 +518,12 @@ async function refreshIngestOverview() {
   line.hidden = elements.search.disabled;
   line.className = `ingest-status-line no-print${status ? ` ${status.state}` : ""}`;
   line.dataset.statusId = status?.status_id || "";
-  const reprocess = overview.reprocess;
-  if (reprocess) {
+  const rebuild = overview.rebuild;
+  if (rebuild) {
     line.className = "ingest-status-line no-print running";
-    setIngestStatusText(reprocess.total_bytes
-      ? `${reprocess.phase} · ${Number(reprocess.percent).toFixed(1)}% · ${formatBytes(reprocess.completed_bytes)} of ${formatBytes(reprocess.total_bytes)} · ETA ${reprocess.eta}`
-      : reprocess.phase);
+    setIngestStatusText(rebuild.total_bytes
+      ? `${rebuild.phase} · ${Number(rebuild.percent).toFixed(1)}% · ${formatBytes(rebuild.completed_bytes)} of ${formatBytes(rebuild.total_bytes)} · ETA ${rebuild.eta}`
+      : rebuild.phase);
     return;
   }
   if (!status) {
@@ -532,12 +532,12 @@ async function refreshIngestOverview() {
   }
   const messages = Number(status.processed_messages).toLocaleString();
   const percent = Number(status.percent).toFixed(1);
-  if (status.activity_kind === "reprocess") {
+  if (["rebuild", "reprocess"].includes(status.activity_kind)) {
     setIngestStatusText(status.state === "running"
       ? `${status.phase} · ${percent}% · ${formatBytes(status.bytes_processed)} of ${formatBytes(status.bytes_total)} · ETA ${status.eta}`
       : status.state === "completed"
-        ? `Last reprocess completed · ${messages} messages · ${formatElapsed(status.elapsed_seconds)} · Click for history`
-        : `Last reprocess ${status.state}: ${status.phase} · Click for details`);
+        ? `Last rebuild completed · ${messages} messages · ${formatElapsed(status.elapsed_seconds)} · Click for history`
+        : `Last rebuild ${status.state}: ${status.phase} · Click for details`);
     return;
   }
   const phase = status.phase === "recovering archived content" ? "Processing saved mail" : status.phase;

@@ -1,8 +1,8 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Reprocess saved mail: rebuild the catalog's derived message fields and the search index.
+"""Rebuild databases: rebuild the catalog's derived message fields and the search index.
 
-Purpose: `ect reprocess` and File → Reprocess Saved Mail… re-read every stored message
+Purpose: `ect rebuild` and File → Rebuild Databases… re-read every stored message
 from the canonical MBOX files and rebuild everything that is derived from message bytes,
 without reimporting and without changing the mailboxes.
 
@@ -58,13 +58,13 @@ SEARCH = "search.sqlite3"
 PROCESSING = "processing.sqlite3"
 OLD_SUFFIX = ".old"
 NEW_INFIX = ".new."
-REPROCESS_DEFAULT_WORKERS = half_cpus()
+REBUILD_DEFAULT_WORKERS = half_cpus()
 MAX_IN_FLIGHT_BYTES = 256 * 1024 * 1024
 FREE_SPACE_MARGIN = 1.2
 # Defect fields that parse_message can emit; others (antivirus, scanning, search) are kept.
 PARSE_DEFECT_FIELDS = frozenset({
     "Message-ID", "From", "Sender", "to", "cc", "bcc", "Date", "Received", "Subject",
-    "X-Apple-Auto-Saved", "body date", "reprocess",
+    "X-Apple-Auto-Saved", "body date", "rebuild", "reprocess",
 })
 
 
@@ -85,8 +85,8 @@ def formatted_duration(seconds: float) -> str:
     return " ".join(fields)
 
 
-class ReprocessProgress(BaseModel):
-    """One observable, byte-measured phase of reprocessing or index rebuilding.
+class RebuildProgress(BaseModel):
+    """One observable, byte-measured phase of rebuilding or index rebuilding.
 
     Totals come from catalog record lengths and file sizes, which are known before
     any message is read, so percent and ETA track bytes processed.
@@ -111,7 +111,7 @@ class ReprocessProgress(BaseModel):
         return formatted_duration((self.total_bytes - completed) * elapsed / completed)
 
 
-def progress_line(progress: ReprocessProgress, now: float, width: int = 24) -> str:
+def progress_line(progress: RebuildProgress, now: float, width: int = 24) -> str:
     """Render bounded byte progress without relying on terminal controls."""
     completed = min(progress.completed_bytes, progress.total_bytes)
     elapsed = max(now - progress.started_monotonic, 0.001)
@@ -127,9 +127,9 @@ class ByteProgressReporter:
     """Report byte progress to a terminal, or to a callback such as the GUI."""
 
     def __init__(self, phase: str, total_bytes: int,
-                 observer: Callable[[ReprocessProgress], None] | None = None,
-                 listener: Callable[[ReprocessProgress], None] | None = None) -> None:
-        self.progress = ReprocessProgress(phase=phase, total_bytes=total_bytes)
+                 observer: Callable[[RebuildProgress], None] | None = None,
+                 listener: Callable[[RebuildProgress], None] | None = None) -> None:
+        self.progress = RebuildProgress(phase=phase, total_bytes=total_bytes)
         self.observer = observer
         self.listener = listener  # Always notified (the Activity status file), besides observer or terminal.
         self.tty = sys.stderr.isatty()
@@ -166,7 +166,7 @@ class ByteProgressReporter:
             sys.stderr.flush()
 
 
-class ReprocessInterrupted(KeyboardInterrupt):
+class RebuildInterrupted(KeyboardInterrupt):
     """Report whether a stop arrived before or after the new databases were published."""
 
     def __init__(self, published: bool) -> None:
@@ -190,8 +190,8 @@ class UninterruptiblePublication:
             signal.signal(signal.SIGINT, self.previous_handler)
 
 
-class ReprocessActivity:
-    """Show one reprocess run in the Activity window, as an ingest-status file of kind "reprocess".
+class RebuildActivity:
+    """Show one rebuild run in the Activity window, as an ingest-status file of kind "rebuild".
 
     Progress is written at most once a second and on completion; a status that cannot
     be written never stops the rebuild itself.
@@ -202,17 +202,17 @@ class ReprocessActivity:
         self.started_at = datetime.now(UTC)
         self.started = self.phase_started = time.monotonic()
         self.messages = 0
-        self.progress = ReprocessProgress(phase="Preparing to reprocess saved mail", total_bytes=0)
+        self.progress = RebuildProgress(phase="Preparing to rebuild databases", total_bytes=0)
         self.last_write = 0.0
         self.status_id = new_status_id(self.started_at, 0, os.getpid())
         self.file: IngestStatusFile | None = None
         try:
             self.file = IngestStatusFile(archive, self.status_id)
         except OSError:
-            logging.getLogger(__name__).warning("Could not create the reprocess activity status", exc_info=True)
+            logging.getLogger(__name__).warning("Could not create the rebuild activity status", exc_info=True)
         self._write("running", force=True)
 
-    def update(self, progress: ReprocessProgress) -> None:
+    def update(self, progress: RebuildProgress) -> None:
         new_phase = progress.phase != self.progress.phase
         if new_phase:
             self.phase_started = time.monotonic()
@@ -243,12 +243,12 @@ class ReprocessActivity:
                 percent=100.0 if state == "completed" else progress.percent,
                 eta=progress.eta(now) if running else "0s", active_workers=self.workers if running else 0,
                 peak_workers=self.workers, configured_workers=self.workers, workers=[], counts=IngestCounts(),
-                years=[], failure_detail=detail, activity_kind="reprocess"))
+                years=[], failure_detail=detail, activity_kind="rebuild"))
         except (OSError, ValueError):
-            logging.getLogger(__name__).warning("Could not update the reprocess activity status", exc_info=True)
+            logging.getLogger(__name__).warning("Could not update the rebuild activity status", exc_info=True)
 
 
-class ReprocessWork(BaseModel):
+class RebuildWork(BaseModel):
     """One verified-MBOX read assigned to a worker, with the catalog values it may keep."""
 
     message_pk: int
@@ -260,7 +260,7 @@ class ReprocessWork(BaseModel):
     searchable: bool
 
 
-class ReprocessedMessage(BaseModel):
+class RebuiltMessage(BaseModel):
     """A worker result consumed, in catalog order, by the sole SQLite writer."""
 
     message_pk: int
@@ -271,14 +271,14 @@ class ReprocessedMessage(BaseModel):
     indexed: PreparedSearchMessage | None = None
 
 
-class ReprocessResult(BaseModel):
+class RebuildResult(BaseModel):
     messages: int
     changed: int
     failures: int
     processing_database: bool
 
 
-def reprocess_message(archive: Path, index_attachments: bool, work: ReprocessWork) -> ReprocessedMessage:
+def rebuild_message(archive: Path, index_attachments: bool, work: RebuildWork) -> RebuiltMessage:
     """Verify one stored message and re-derive its catalog fields and search content."""
     raw = read_verified_location(mbox_path(archive, work.filename), work.location, work.sha256)
     entity = display_entity(raw)
@@ -297,7 +297,7 @@ def reprocess_message(archive: Path, index_attachments: bool, work: ReprocessWor
             update["date_utc"], update["date_source"] = work.date_utc, work.date_source
         parsed = parsed.model_copy(update=update)
     indexed = prepare_search_message(raw, index_attachments, sha256=work.sha256) if work.searchable else None
-    return ReprocessedMessage(message_pk=work.message_pk, byte_length=work.location.byte_length,
+    return RebuiltMessage(message_pk=work.message_pk, byte_length=work.location.byte_length,
                               date_utc=parsed.date_utc if parsed is not None else work.date_utc,
                               parsed=parsed, error=error, indexed=indexed)
 
@@ -309,12 +309,12 @@ def _ignore_interrupts() -> None:
 
 
 def worker_pool(workers: int) -> ProcessPoolExecutor:
-    """Spawned reprocess workers that ignore Ctrl-C and leave stopping to the parent."""
+    """Spawned rebuild workers that ignore Ctrl-C and leave stopping to the parent."""
     return ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"),
                                initializer=_ignore_interrupts)
 
 
-def _work_items(source: sqlite3.Connection) -> Iterator[ReprocessWork]:
+def _work_items(source: sqlite3.Connection) -> Iterator[RebuildWork]:
     """Stream work from the unchanged live catalog, never from the copy being rewritten."""
     rows = source.execute(
         "SELECT m.message_pk, m.sha256, g.filename, l.byte_offset, l.byte_length, m.date_utc, m.date_source, "
@@ -325,16 +325,16 @@ def _work_items(source: sqlite3.Connection) -> Iterator[ReprocessWork]:
         searchable = category in SEARCH_CATEGORIES and not QUARANTINE_MAILBOX.fullmatch(filename)
         if category in SEARCH_CATEGORIES and QUARANTINE_MAILBOX.fullmatch(filename):
             raise RuntimeError(f"searchable catalog message is stored in quarantine MBOX: {filename}")
-        yield ReprocessWork(message_pk=message_pk, sha256=digest, filename=filename,
+        yield RebuildWork(message_pk=message_pk, sha256=digest, filename=filename,
                             location=MboxLocation(byte_offset=offset, byte_length=length),
                             date_utc=date_utc, date_source=date_source, searchable=searchable)
 
 
-def _apply(catalog: sqlite3.Connection, result: ReprocessedMessage) -> bool:
+def _apply(catalog: sqlite3.Connection, result: RebuiltMessage) -> bool:
     """Write one message's re-derived fields; return whether any catalog field changed."""
     message_pk, parsed = result.message_pk, result.parsed
     if parsed is None:
-        catalog.execute("INSERT OR IGNORE INTO metadata_defects(message_pk, field, detail) VALUES (?, 'reprocess', ?)",
+        catalog.execute("INSERT OR IGNORE INTO metadata_defects(message_pk, field, detail) VALUES (?, 'rebuild', ?)",
                         (message_pk, f"could not re-derive metadata; kept previous values: {result.error}"))
         return False
     before = catalog.execute(
@@ -347,7 +347,7 @@ def _apply(catalog: sqlite3.Connection, result: ReprocessedMessage) -> bool:
     try:
         catalog.execute("UPDATE messages SET message_id_normalized = ? WHERE message_pk = ?", (parsed.message_id, message_pk))
     except sqlite3.IntegrityError:
-        defects.append(MetadataDefect(field="reprocess", detail=(
+        defects.append(MetadataDefect(field="rebuild", detail=(
             f"parsed Message-ID {parsed.message_id} is already catalogued for identical bytes; kept the previous ID")))
     catalog.execute(
         "UPDATE messages SET sender_address_pk = ?, subject = ?, date_utc = ?, date_source = ? WHERE message_pk = ?",
@@ -381,8 +381,8 @@ def checkpoint_stamp_ns(archive: Path) -> int | None:
     return None
 
 
-def _check_mailboxes(archive: Path, catalog: sqlite3.Connection, observer: Callable[[ReprocessProgress], None] | None,
-                     should_stop: Callable[[], bool] | None, listener: Callable[[ReprocessProgress], None] | None = None,
+def _check_mailboxes(archive: Path, catalog: sqlite3.Connection, observer: Callable[[RebuildProgress], None] | None,
+                     should_stop: Callable[[], bool] | None, listener: Callable[[RebuildProgress], None] | None = None,
                      ) -> None:
     """Refuse to rebuild when a mailbox changed since the last checkpoint and its record count disagrees.
 
@@ -419,8 +419,8 @@ def _check_mailboxes(archive: Path, catalog: sqlite3.Connection, observer: Calla
     reporter.finish()
 
 
-def _copy_catalog(source: Path, destination: Path, observer: Callable[[ReprocessProgress], None] | None,
-                  should_stop: Callable[[], bool] | None, listener: Callable[[ReprocessProgress], None] | None = None,
+def _copy_catalog(source: Path, destination: Path, observer: Callable[[RebuildProgress], None] | None,
+                  should_stop: Callable[[], bool] | None, listener: Callable[[RebuildProgress], None] | None = None,
                   ) -> None:
     reporter = ByteProgressReporter("Copying catalog", source.stat().st_size, observer, listener)
     reporter.display(force=True)
@@ -475,39 +475,39 @@ def publish(archive: Path, new_catalog: Path, new_search: Path) -> None:
     sync_directory(archive)
 
 
-def reprocess_archive(
+def rebuild_archive(
     archive: Path,
     *,
-    workers: int = REPROCESS_DEFAULT_WORKERS,
+    workers: int = REBUILD_DEFAULT_WORKERS,
     index_attachments: bool | None = None,
     writer_lease: WriterLease | None = None,
-    observer: Callable[[ReprocessProgress], None] | None = None,
+    observer: Callable[[RebuildProgress], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
     application_version: str = "",
-) -> ReprocessResult:
+) -> RebuildResult:
     """Rebuild derived catalog fields and the search index into new files, then publish them.
 
     ``index_attachments`` defaults to what the current search index does. ``observer``
     receives byte progress instead of terminal output; ``should_stop`` is polled
-    between messages. Raises ReprocessInterrupted when stopped.
+    between messages. Raises RebuildInterrupted when stopped.
     """
     archive = archive.resolve(strict=True)
     if not (archive / CATALOG).is_file():
         raise ValueError(f"{archive} has no {CATALOG}")
     identity = os.path.normcase(str(archive))
     owned = writer_lease is None
-    lease = writer_lease or WriterLease.acquire(archive, identity, "reprocess saved mail", uuid4().hex,
+    lease = writer_lease or WriterLease.acquire(archive, identity, "rebuild databases", uuid4().hex,
                                                application_version)
     if not lease.acquired or not lease.lock_path.parent.parent.samefile(archive):
         if owned:
             lease.release()
         raise ValueError("an acquired writer lease for this archive is required")
     try:
-        activity = ReprocessActivity(archive, workers, application_version)
+        activity = RebuildActivity(archive, workers, application_version)
         try:
-            result = _reprocess(archive, workers, _search_has_attachments(archive) if index_attachments is None
+            result = _rebuild(archive, workers, _search_has_attachments(archive) if index_attachments is None
                                 else index_attachments, observer, should_stop, activity)
-        except ReprocessInterrupted as error:
+        except RebuildInterrupted as error:
             activity.finish("completed" if error.published else "interrupted",
                             "Published; stopped afterwards" if error.published
                             else "Stopped; the existing databases are unchanged")
@@ -515,7 +515,7 @@ def reprocess_archive(
         except BaseException as error:
             activity.finish("failed", "Failed; the existing databases are unchanged", f"{type(error).__name__}: {error}")
             raise
-        activity.finish("completed", f"Reprocessed {result.messages:,} messages; {result.changed:,} catalog entries "
+        activity.finish("completed", f"Rebuilt from {result.messages:,} messages; {result.changed:,} catalog entries "
                         "changed; previous databases kept as .old")
         return result
     finally:
@@ -523,14 +523,14 @@ def reprocess_archive(
             lease.release()
 
 
-def _reprocess(archive: Path, workers: int, index_attachments: bool,
-               observer: Callable[[ReprocessProgress], None] | None,
-               should_stop: Callable[[], bool] | None, activity: ReprocessActivity) -> ReprocessResult:
+def _rebuild(archive: Path, workers: int, index_attachments: bool,
+               observer: Callable[[RebuildProgress], None] | None,
+               should_stop: Callable[[], bool] | None, activity: RebuildActivity) -> RebuildResult:
     _discard_stale_new_files(archive)
     needed = sum((archive / name).stat().st_size for name in (CATALOG, SEARCH) if (archive / name).exists())
     free = shutil.disk_usage(archive).free
     if free < needed * FREE_SPACE_MARGIN:
-        raise ValueError(f"reprocessing needs about {formatted_bytes(int(needed * FREE_SPACE_MARGIN))} free "
+        raise ValueError(f"rebuilding needs about {formatted_bytes(int(needed * FREE_SPACE_MARGIN))} free "
                          f"beside the archive; {formatted_bytes(free)} is available")
     token = uuid4().hex[:8]
     new_catalog = archive / f"{CATALOG}{NEW_INFIX}{token}"
@@ -555,7 +555,7 @@ def _reprocess(archive: Path, workers: int, index_attachments: bool,
             published = True
         return result
     except KeyboardInterrupt as error:
-        raise ReprocessInterrupted(published) from error
+        raise RebuildInterrupted(published) from error
     finally:
         if not published:
             _remove_database(new_catalog)
@@ -563,11 +563,11 @@ def _reprocess(archive: Path, workers: int, index_attachments: bool,
 
 
 def _rederive(archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connection, workers: int,
-              index_attachments: bool, observer: Callable[[ReprocessProgress], None] | None,
-              should_stop: Callable[[], bool] | None, activity: ReprocessActivity) -> ReprocessResult:
+              index_attachments: bool, observer: Callable[[RebuildProgress], None] | None,
+              should_stop: Callable[[], bool] | None, activity: RebuildActivity) -> RebuildResult:
     total_row = catalog.execute("SELECT COALESCE(SUM(byte_length), 0), COUNT(*) FROM locations").fetchone()
     assert total_row is not None
-    reporter = ByteProgressReporter(f"Reprocessing saved mail ({workers} workers)", int(total_row[0]), observer,
+    reporter = ByteProgressReporter(f"Rebuilding databases ({workers} workers)", int(total_row[0]), observer,
                                     activity.update)
     reporter.display(force=True)
     catalog.execute("BEGIN")
@@ -575,7 +575,7 @@ def _rederive(archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connec
     live = sqlite3.connect(sqlite_uri(archive / CATALOG), uri=True)
     items = _work_items(live)
     next_item = next(items, None)
-    pending: deque[tuple[Future[ReprocessedMessage], int]] = deque()
+    pending: deque[tuple[Future[RebuiltMessage], int]] = deque()
     in_flight = 0
     # Parsing and indexing are CPU-bound Python, so threads would share one core through the
     # GIL; spawned worker processes use all configured workers. Only this process writes SQLite.
@@ -589,7 +589,7 @@ def _rederive(archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connec
                     length = next_item.location.byte_length
                     if pending and in_flight + length > MAX_IN_FLIGHT_BYTES:
                         break
-                    pending.append((pool.submit(reprocess_message, archive, index_attachments, next_item), length))
+                    pending.append((pool.submit(rebuild_message, archive, index_attachments, next_item), length))
                     in_flight += length
                     next_item = next(items, None)
                 future, length = pending.popleft()
@@ -607,7 +607,7 @@ def _rederive(archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connec
             raise
         pool.shutdown(wait=True)
     if messages != int(total_row[1]):
-        raise RuntimeError(f"catalog has {total_row[1]} located messages but only {messages} were reprocessed")
+        raise RuntimeError(f"catalog has {total_row[1]} located messages but only {messages} were rebuilt")
     reporter.finish()
-    return ReprocessResult(messages=messages, changed=changed, failures=failures,
+    return RebuildResult(messages=messages, changed=changed, failures=failures,
                            processing_database=(archive / PROCESSING).is_file())

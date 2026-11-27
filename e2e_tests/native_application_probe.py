@@ -240,7 +240,7 @@ def check_antivirus_menu(application: PyWebViewApplication, about: webview.Windo
                 os.environ[key] = value
 
 
-def check_reprocess_menu(application: PyWebViewApplication, api) -> None:
+def check_rebuild_menu(application: PyWebViewApplication, api) -> None:
     """Curator confirmation alone starts replay; Cancel preserves jobs and search data."""
     document = api.document
     assert document is not None and document.path is not None
@@ -266,7 +266,7 @@ def check_reprocess_menu(application: PyWebViewApplication, api) -> None:
                 return
             timer.invalidate()
             try:
-                assert modal.title() == "Reprocess saved mail?"
+                assert modal.title() == "Rebuild databases?"
                 views, texts = [modal.contentView()], []
                 while views:
                     view = views.pop()
@@ -287,8 +287,8 @@ def check_reprocess_menu(application: PyWebViewApplication, api) -> None:
                 native.activateIgnoringOtherApps_(True)
                 api.window.native.makeKeyAndOrderFront_(None)
                 ModalObserver(answer, errors)
-                item = native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Reprocess Saved Mail…")
-                assert item is not None and item.isEnabled(), "Reprocessing menu is missing"
+                item = native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Rebuild Databases…")
+                assert item is not None and item.isEnabled(), "Rebuilding menu is missing"
                 assert native.sendAction_to_from_(item.action(), item.target(), item)
             except Exception:  # pylint: disable=broad-exception-caught
                 errors.append(traceback.format_exc())
@@ -364,12 +364,12 @@ def main() -> None:
     def probe() -> None:
         try:
             assert about.events.loaded.wait(10), "About bridge failed to load"
-            if "--reprocess-only" in sys.argv:
+            if "--rebuild-only" in sys.argv:
                 document = controller.open_document(archive)
                 api = application.create_search_window(controller.new_search_window(document))
-                assert api.window.events.loaded.wait(10), "Reprocess search failed to load"
-                check_reprocess_menu(application, api)
-                print("Curator reprocessing menu passed")
+                assert api.window.events.loaded.wait(10), "Rebuild search failed to load"
+                check_rebuild_menu(application, api)
+                print("Curator rebuilding menu passed")
                 return
             status = evaluate_async(about, "window.pywebview.api.status()")
             assert status["metadata"]["version"], status

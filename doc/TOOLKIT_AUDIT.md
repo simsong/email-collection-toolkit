@@ -84,7 +84,7 @@ CLI, viewer and cancellation regressions, plus 18 converter tests. These last ed
 need independent review before publication; a fresh review cycle was explicitly
 authorized after the ten-round audit.
 On the unlocked Mac, actual lifecycle/focus and standalone-menu acceptance,
-Reprocess, two Quit cases and two native Preferences cases passed. The expanded
+Rebuild, two Quit cases and two native Preferences cases passed. The expanded
 native path exposed an incomplete catalog-only fixture and a viewer authentication
 failure. The fixture now uses real ingestion; viewers request fresh bootstrap
 tickets. Ordered lint/types, 159 GUI/loopback/browser cases and 18 converter tests

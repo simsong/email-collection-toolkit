@@ -702,7 +702,7 @@ def test_native_html_find_smoke(native_smoke_archive: Path, tmp_path: Path) -> N
     sys.platform != "darwin" or os.environ.get("MAILARCHIVER_NATIVE_APPLICATION_E2E") != "1",
     reason="set MAILARCHIVER_NATIVE_APPLICATION_E2E=1 for real curator menu acceptance",
 )
-def test_native_curator_reprocessing(tmp_path: Path) -> None:
+def test_native_curator_rebuilding(tmp_path: Path) -> None:
     """Real menu Cancel preserves work; confirmation replays canonical mail without downloading."""
     from scripts.run_gui import development_bundle, development_environment
     source = tmp_path / "fixture.eml"
@@ -713,10 +713,10 @@ def test_native_curator_reprocessing(tmp_path: Path) -> None:
     source.unlink()
     executable = development_bundle(tmp_path / "launcher")
     result = subprocess.run(
-        [str(executable), str(Path(__file__).with_name("native_application_probe.py")), "--reprocess-only"],
+        [str(executable), str(Path(__file__).with_name("native_application_probe.py")), "--rebuild-only"],
         env=development_environment() | {PROBE_ARCHIVE_ENV: str(archive),
                                         PROBE_PREFERENCES_ENV: str(tmp_path / "preferences.json")},
         capture_output=True, text=True, timeout=40, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Curator reprocessing menu passed" in result.stdout
+    assert "Curator rebuilding menu passed" in result.stdout

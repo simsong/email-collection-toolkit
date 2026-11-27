@@ -143,7 +143,7 @@ writer lease, rejects changed source status IDs, atomically stores typed aborted
 IDs in `processing_settings` and changes outstanding jobs to the existing
 `aborted` state. Status snapshots and canonical data remain intact. Explicit
 message admission retries user-cancelled unpublished ingest roots; cancelled
-derived jobs remain aborted until explicit reprocessing regenerates their inputs.
+derived jobs remain aborted until explicit rebuilding regenerates their inputs.
 
 `app.js` retains notice text in window memory, rendered with
 `textContent`. The banner stays expanded until the user selects Collapse or Dismiss;
@@ -286,20 +286,20 @@ with `restore()`/`show()`; only a document without a window gets a new one.
 issue 76. Windows shell work and frozen application/installers remain owned by
 issues 73, 72, 74, and 75 respectively.
 
-**File → Reprocess Saved Mail…** captures the active search/document and runs
-its confirmation as a tracked command. Accepting runs `reprocess.reprocess_archive`
+**File → Rebuild Databases…** captures the active search/document and runs
+its confirmation as a tracked command. Accepting runs `rebuild.rebuild_archive`
 under `writer_activity` with an observer that stores byte progress per document
-(`GuiIngestOverview.reprocess`, rendered in the status line) and a Quit-polling
+(`GuiIngestOverview.rebuild`, rendered in the status line) and a Quit-polling
 stop; afterwards the archive's search windows are refreshed. When
 `processing.sqlite3` exists it then launches the existing writer-leased service
-with reprocess enabled, content processing enabled and no source roots or ingest
+with rebuild enabled, content processing enabled and no source roots or ingest
 traversal; the Activity window shows that progress. The rebuild itself is also an
-Activity run: `reprocess.ReprocessActivity` writes an `IngestStatus` file with
-`activity_kind="reprocess"` and `run_pk` 0 (no catalog ingest run is created), at
+Activity run: `rebuild.RebuildActivity` writes an `IngestStatus` file with
+`activity_kind="rebuild"` and `run_pk` 0 (no catalog ingest run is created), at
 most once a second, on each phase change and on completion, interruption or
-failure. `ingests.js` titles it "Reprocess saved mail" and shows step bytes,
+failure. `ingests.js` titles it "Rebuild databases" and shows step bytes,
 messages and rate instead of source and worker tables; the search window's status
-line reports the last reprocess by name. Cancellation does
+line reports the last rebuild by name. Cancellation does
 not write. Rootless runs and interruption saves retain the preceding source
 request and separately store current processing overrides. Processing-only CLI/GUI
 continuation and inventory discovery prefer those overrides. Continue Import selects
@@ -308,7 +308,7 @@ are suspended, the typed request retains separate processor configuration so acq
 uses its original plugins/installation settings and saved work uses its processing
 overrides. A new source request
 replaces them; the one-shot replay flag is never persisted. Native menu tests exercise
-Cancel and Reprocess, verify the warning and unchanged canonical bytes, and check
+Cancel and Rebuild, verify the warning and unchanged canonical bytes, and check
 that replay does not scan/file/download saved messages again.
 
 The CLI and GUI construct the same Pydantic `IngestRequest` and call
@@ -753,7 +753,7 @@ filename, and normalized MIME type.
 Indexing parses each message once for FTS body text and attachment metadata;
 `--index-attachments` additionally writes decoded text attachments to
 `attachment_fts`.
-The tables are derived and are replaced together with FTS by `reprocess`.
+The tables are derived and are replaced together with FTS by `rebuild`.
 
 `.eml` export writes the bytes returned by hash-verified direct retrieval.
 Finder dragging uses an `NSPasteboardItem` with exactly one explicitly supplied

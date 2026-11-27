@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a110 — "Rebuild" everywhere
+
+- **File → Reprocess Saved Mail…** is now **File → Rebuild Databases…**, and
+  `ect reprocess` is now `ect rebuild`. The Activity window, the status bar,
+  progress lines and messages all say "rebuild". `ect process --rebuild` replaces
+  `--reprocess`, which still works. Activity entries from earlier versions still
+  display.
+
 ## 1.0.0a109 — quiet Ctrl-C during reprocessing
 
 - Pressing Ctrl-C in the terminal while Reprocess Saved Mail runs no longer

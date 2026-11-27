@@ -46,7 +46,7 @@ verified. Standalone processor harnesses shall keep their original snapshots
 because they have no canonical MBOX fallback. Collection holds the writer lease.
 
 Completed and aborted job records are audit history: their content hashes/paths
-need not name resident working files. Reprocessing shall reconstruct missing raw
+need not name resident working files. Rebuilding shall reconstruct missing raw
 inputs from SHA-256-verified canonical MBOX records and regenerate derived parts;
 it shall preserve manual decisions and antivirus provenance. Never collect through
 symlinks or delete unknown files. Cleanup shall not modify source mail or canonical
@@ -113,7 +113,7 @@ and bound blocking I/O; timed-out results must not be committed. The Rust PST
 importer is the external plugin executable.
 Input content hashes shall be verified before dispatch. Source-code files shall
 not be fingerprinted for checkpoint invalidation. Code, manifest, policy and
-settings changes must not automatically reprocess saved mail or clear its index.
+settings changes must not automatically rebuild saved mail or clear its index.
 Ordinary resume retains completed invocations, including legacy registry metadata.
 Only an explicit curator replay creates a fresh generation, retaining manual
 identity decisions, original scan provenance, canonical bytes and audit history.

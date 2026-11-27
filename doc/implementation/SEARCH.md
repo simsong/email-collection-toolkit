@@ -9,7 +9,7 @@ live in [plans](../plans/README.md); historical evidence does not validate this 
 
 Header parsing decodes and unfolds RFC 2047 Subject values before catalog and
 FTS insertion. `ect-search` displays that catalog value directly. The verified
-MBOX traversal in `reprocess` rederives that catalog field (and the other
+MBOX traversal in `rebuild` rederives that catalog field (and the other
 byte-derived message fields) while rebuilding FTS, so existing archives acquire newly supported legacy-header decoding without
 rewriting canonical mail.
 Its result formatter determines number width from the returned `message_pk`
@@ -79,7 +79,7 @@ source-preserving recovery path.
 
 ## Search schema and indexed projections
 
-`reprocess` rebuilds from verified canonical MBOX locations without constructing
+`rebuild` rebuilds from verified canonical MBOX locations without constructing
 a production processor pipeline or resuming its saved queue (its optional final
 processor replay is separate and skippable). It replaces the catalog and index
 only after both are complete and excludes quarantine mail from search, including
@@ -112,11 +112,11 @@ attachment extraction is planned with per-format extractors and OCR in
 sandboxed workers, without Apache Tika or Java (#159, #163). Rebuild the
 index in a temporary database,
 validate row identities against `archive.sqlite3`, then atomically replace the
-old search database. Live indexing and `reprocess` both exclude
+old search database. Live indexing and `rebuild` both exclude
 `INFECTED` and the reserved `MALFORMED` quarantine category; rebuild recognizes
 numbered quarantine MBOX filenames.
-`reprocess` (CLI) and File → Reprocess Saved Mail… (GUI) share
-`reprocess.reprocess_archive`. Under the writer lease it removes stale
+`rebuild` (CLI) and File → Rebuild Databases… (GUI) share
+`rebuild.rebuild_archive`. Under the writer lease it removes stale
 `*.sqlite3.new.*` files, checks free space, copies the live catalog with the
 SQLite backup API to `archive.sqlite3.new.<id>`, recounts MBOX records only for
 mailboxes modified after the `Bagging-Timestamp` checkpoint (less the checkpoint
@@ -125,7 +125,7 @@ live catalog to a bounded worker pool. Workers verify each record's SHA-256,
 parse `display_entity(raw)` with `parse_message` (the stored-bytes hash stays the
 identity; a date the bytes lack keeps its recorded import-context value) and
 prepare search content. The sole writer updates `messages` (an ID that would
-collide keeps its old value with a `reprocess` defect), replaces `recipients`
+collide keeps its old value with a `rebuild` defect), replaces `recipients`
 and parse-derived `metadata_defects` (other fields such as `antivirus` are kept),
 and writes `search.sqlite3.new.<id>`. Message numbers, locations, observations,
 sources and runs are untouched. `publish` renames each live file to `.old`
@@ -146,7 +146,7 @@ as the live index; a `KeyboardInterrupt` rolls back catalog subject updates,
 removes the incomplete replacement, and reports that the existing index is
 unchanged. A bounded, ordered worker pool verifies source hashes and parses
 MIME content in parallel (all detected CPU cores by default, or two if the
-count is unavailable, configurable with `reprocess --workers`); a sole main-thread SQLite writer retains stable
+count is unavailable, configurable with `rebuild --workers`); a sole main-thread SQLite writer retains stable
 catalog/update order and never shares a SQLite connection across threads.
 Ordinary `ect-search` listings and reports select only `Sent` and `Archive`;
 the authoritative catalog still retains every quarantine record.

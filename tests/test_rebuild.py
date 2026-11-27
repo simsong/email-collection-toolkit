@@ -1,8 +1,8 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Requirements: Reprocess Saved Mail rebuilds derived data into new files and swaps them in safely.
+"""Requirements: Rebuild Databases rebuilds derived data into new files and swaps them in safely.
 
-`reprocess_archive` backs `ect reprocess` and File → Reprocess Saved Mail…. On a real
+`rebuild_archive` backs `ect rebuild` and File → Rebuild Databases…. On a real
 fixture archive these tests check that it re-derives catalog fields from the stored
 bytes (repairing messages stored with a leading ">From " envelope line), keeps message
 numbers, provenance, non-parse defects and import-time context dates, builds a fresh
@@ -23,7 +23,7 @@ import pytest
 
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.mbox import mbox_directory
-from mailarchiver.reprocess import ReprocessInterrupted, ReprocessProgress, reprocess_archive, worker_pool
+from mailarchiver.rebuild import RebuildInterrupted, RebuildProgress, rebuild_archive, worker_pool
 from mailarchiver.search import prepare_search_message
 from tests.test_gui_service import MULTIPART_MESSAGE, make_gui_archive
 
@@ -70,7 +70,7 @@ def test_indexer_parses_mail_after_a_leading_envelope_line() -> None:
     assert prepared.preview == "Plain version."
 
 
-def test_reprocess_repairs_catalog_and_index_and_keeps_old_databases(tmp_path: Path) -> None:
+def test_rebuild_repairs_catalog_and_index_and_keeps_old_databases(tmp_path: Path) -> None:
     """Requirement: re-derived fields come from the bytes; provenance and context survive; old files kept."""
     archive = _archive(tmp_path)
     before = _digests(archive)
@@ -78,9 +78,9 @@ def test_reprocess_repairs_catalog_and_index_and_keeps_old_databases(tmp_path: P
         observations = catalog.execute("SELECT * FROM observations ORDER BY observation_pk").fetchall()
         record_bytes = catalog.execute("SELECT SUM(byte_length) FROM locations").fetchone()[0]
     mailbox_bytes = sum(path.stat().st_size for path in mbox_directory(archive).glob("*.mbox"))
-    seen: list[ReprocessProgress] = []
+    seen: list[RebuildProgress] = []
 
-    result = reprocess_archive(archive, workers=2, observer=seen.append)
+    result = rebuild_archive(archive, workers=2, observer=seen.append)
 
     assert (result.messages, result.failures, result.processing_database) == (4, 0, False)
     assert result.changed >= 1
@@ -105,15 +105,15 @@ def test_reprocess_repairs_catalog_and_index_and_keeps_old_databases(tmp_path: P
     phases = {progress.phase.split(" (")[0]: progress for progress in seen}
     assert phases["Copying catalog"].total_bytes == (archive / "archive.sqlite3.old").stat().st_size
     assert phases["Checking mailboxes for changes"].total_bytes == mailbox_bytes
-    assert phases["Reprocessing saved mail"].total_bytes == record_bytes
+    assert phases["Rebuilding databases"].total_bytes == record_bytes
     assert seen[-1].completed_bytes == seen[-1].total_bytes == record_bytes
 
     activity, = read_ingest_history(archive).statuses  # Shown in the Activity window as its own run.
     assert (activity.activity_kind, activity.state, activity.run_pk, activity.processed_messages, activity.percent) == (
-        "reprocess", "completed", 0, 4, 100.0)
-    assert activity.phase.startswith("Reprocessed 4 messages")
+        "rebuild", "completed", 0, 4, 100.0)
+    assert activity.phase.startswith("Rebuilt from 4 messages")
 
-    reprocess_archive(archive, workers=1)  # A second run replaces the earlier .old files.
+    rebuild_archive(archive, workers=1)  # A second run replaces the earlier .old files.
     assert _digests(archive, ".old") != before
     assert len(read_ingest_history(archive).statuses) == 2
 
@@ -129,12 +129,12 @@ def test_stopping_keeps_the_live_databases(tmp_path: Path, stop_after: int) -> N
         polls.append(1)
         return len(polls) > stop_after
 
-    with pytest.raises(ReprocessInterrupted) as interrupted:
-        reprocess_archive(archive, workers=1, observer=lambda _progress: None, should_stop=should_stop)
+    with pytest.raises(RebuildInterrupted) as interrupted:
+        rebuild_archive(archive, workers=1, observer=lambda _progress: None, should_stop=should_stop)
     assert not interrupted.value.published
     assert _digests(archive) == before
     activity, = read_ingest_history(archive).statuses
-    assert (activity.activity_kind, activity.state) == ("reprocess", "interrupted")
+    assert (activity.activity_kind, activity.state) == ("rebuild", "interrupted")
     assert not list(archive.glob("*.sqlite3.new.*")) and not list(archive.glob("*.old"))
 
 
@@ -146,7 +146,7 @@ def test_mailbox_catalog_mismatch_fails_closed(tmp_path: Path) -> None:
     with mailbox.open("ab") as output:
         output.write(b"\nFrom extra@example.net Thu Jan  4 10:00:00 2024\nSubject: uncatalogued\n\nbody\n")
     with pytest.raises(RuntimeError, match="count mismatch"):
-        reprocess_archive(archive, workers=1, observer=lambda _progress: None)
+        rebuild_archive(archive, workers=1, observer=lambda _progress: None)
     activity, = read_ingest_history(archive).statuses
     assert activity.state == "failed" and "count mismatch" in (activity.failure_detail or "")
     assert _digests(archive) == before
@@ -175,12 +175,12 @@ def test_mailbox_unchanged_since_checkpoint_is_not_reread(tmp_path: Path) -> Non
              if not line.startswith("Bagging-Timestamp:")]
     info.write_text("\n".join([*lines, f"Bagging-Timestamp: {checkpoint.isoformat()}"]) + "\n", encoding="utf-8")
 
-    assert reprocess_archive(archive, workers=1, observer=lambda _progress: None).messages == 4
+    assert rebuild_archive(archive, workers=1, observer=lambda _progress: None).messages == 4
 
     later = (checkpoint + timedelta(minutes=1)).timestamp()  # Modified after the checkpoint: counted again.
     os.utime(archive / "data/mbox" / mailbox.name, (later, later))
     with pytest.raises(RuntimeError, match="count mismatch"):
-        reprocess_archive(archive, workers=1, observer=lambda _progress: None)
+        rebuild_archive(archive, workers=1, observer=lambda _progress: None)
 
 
 def _process_id() -> int:
@@ -188,7 +188,7 @@ def _process_id() -> int:
 
 
 def test_worker_processes_ignore_ctrl_c() -> None:
-    """Requirement: Ctrl-C in the terminal does not kill or traceback reprocess workers; the parent stops them."""
+    """Requirement: Ctrl-C in the terminal does not kill or traceback rebuild workers; the parent stops them."""
     pool = worker_pool(1)
     try:
         worker = pool.submit(_process_id).result(timeout=60)

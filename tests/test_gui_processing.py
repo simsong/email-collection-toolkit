@@ -94,27 +94,27 @@ def test_revalidate_menu_writes_report_and_opens_it(tmp_path: Path, monkeypatch:
         app.shutdown()
 
 
-def test_reprocess_saved_mail_swaps_databases_with_byte_progress(tmp_path: Path) -> None:
-    """SEARCH: File > Reprocess Saved Mail rebuilds catalog and index into new files, keeps .old, shows bytes."""
+def test_rebuild_databases_swaps_databases_with_byte_progress(tmp_path: Path) -> None:
+    """SEARCH: File > Rebuild Databases rebuilds catalog and index into new files, keeps .old, shows bytes."""
     archive = build_deferred_archive(tmp_path)
     app, api = open_headless(archive, tmp_path / "preferences.json")
     assert api.document is not None
     before = {name: (archive / name).stat().st_ino for name in ("archive.sqlite3", "search.sqlite3")}
     seen: list[dict[str, object]] = []
     # The confirmation dialog is native UI; the background work after it is real.
-    worker = Thread(target=app._reprocess_archive, args=(api, api.document, archive))  # pylint: disable=protected-access
+    worker = Thread(target=app._rebuild_archive, args=(api, api.document, archive))  # pylint: disable=protected-access
     try:
         worker.start()
         while worker.is_alive():
-            reprocess = api.ingest_overview()["reprocess"]
-            if reprocess is not None:
-                seen.append(reprocess)
+            rebuild = api.ingest_overview()["rebuild"]
+            if rebuild is not None:
+                seen.append(rebuild)
             time.sleep(0.005)
         worker.join()
         wait_for_import(api)
-        assert any("Reprocessed" in notice.message for notice in app.window_notices(None)), \
+        assert any("Rebuilt the databases" in notice.message for notice in app.window_notices(None)), \
             [notice.message for notice in app.window_notices(None)]
-        assert api.ingest_overview()["reprocess"] is None
+        assert api.ingest_overview()["rebuild"] is None
         for name, inode in before.items():
             assert (archive / f"{name}.old").stat().st_ino == inode
             assert (archive / name).stat().st_ino != inode

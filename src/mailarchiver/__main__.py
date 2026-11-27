@@ -55,13 +55,13 @@ from .imap_source import IMAP_BUSY_PHASE
 from .imap_preferences import ImapConnectionLimit
 from .imap_transport import ImapTransport
 from .worker_preferences import half_cpus, worker_argument
-from .reprocess import (
+from .rebuild import (
     ByteProgressReporter,
-    ReprocessInterrupted,
-    ReprocessProgress,
+    RebuildInterrupted,
+    RebuildProgress,
     formatted_bytes,
     formatted_duration,
-    reprocess_archive,
+    rebuild_archive,
 )
 from .archive_integrity import ArchiveIntegrityWarning, MailbagArchiveIntegrityControls
 from .bagit import CheckpointInterrupted
@@ -2718,7 +2718,7 @@ def rebuild_search_index(
     workers: int = REBUILD_INDEX_DEFAULT_WORKERS,
     *,
     writer_lease: WriterLease | None = None,
-    observer: Callable[[ReprocessProgress], None] | None = None,
+    observer: Callable[[RebuildProgress], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
 ) -> None:
     """Build and publish a replacement search database under the writer lease.
@@ -2748,7 +2748,7 @@ def rebuild_search_index(
 
 def _rebuild_search_index(
     archive: Path, index_attachments: bool, workers: int,
-    observer: Callable[[ReprocessProgress], None] | None = None,
+    observer: Callable[[RebuildProgress], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
 ) -> None:
     temporary = archive / "search.sqlite3.tmp"
@@ -2869,20 +2869,20 @@ def _rebuild_search_index(
     except KeyboardInterrupt as error:
         if catalog.in_transaction:
             catalog.rollback()
-        raise ReprocessInterrupted(published) from error
+        raise RebuildInterrupted(published) from error
     finally:
         catalog.close()
         temporary.unlink(missing_ok=True)
 
 
-def reprocess_command(args: argparse.Namespace) -> None:
+def rebuild_command(args: argparse.Namespace) -> None:
     """Rebuild derived catalog fields and the search index from stored mail, then processors."""
-    print("reprocess: Ctrl-C discards the new databases; the existing catalog and search index remain unchanged",
+    print("rebuild: Ctrl-C discards the new databases; the existing catalog and search index remain unchanged",
           file=sys.stderr, flush=True)
-    result = reprocess_archive(Path(args.archive), workers=configured_workers(args.workers),
+    result = rebuild_archive(Path(args.archive), workers=configured_workers(args.workers),
                                index_attachments=True if args.index_attachments else None,
                                application_version=version("mailarchiver"))
-    print(f"reprocessed {result.messages:,} messages; {result.changed:,} catalog entries changed; "
+    print(f"rebuilt from {result.messages:,} messages; {result.changed:,} catalog entries changed; "
           f"{result.failures:,} kept previous values. Previous databases: archive.sqlite3.old, search.sqlite3.old")
     if result.processing_database and not args.skip_processors:
         print("re-running processors (extracted content and identity evidence)", file=sys.stderr, flush=True)
@@ -2927,7 +2927,8 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     processing = commands.add_parser("process", help="resume saved processing jobs without rereading source mailboxes")
     processing.add_argument("--phase", choices=("ingest", "content", "all"), default="content")
     processing.add_argument("--max-jobs", type=positive_integer, help="stop after this many content/message jobs")
-    processing.add_argument("--reprocess", action="store_true", help="queue a fresh processing generation, preserving manual identity decisions")
+    processing.add_argument("--rebuild", "--reprocess", dest="reprocess", action="store_true",
+                            help="queue a fresh processing generation, preserving manual identity decisions")
     processing.add_argument("--workers", type=worker_argument, help="override worker preferences (maximum: twice CPUs)")
     processing.add_argument("--plugin-dir", type=Path, action="append", default=[])
     processing.add_argument("--installation-config", type=Path)
@@ -2960,18 +2961,18 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     contacts_parser.add_argument("--all", action="store_true", help="include all human header addresses, not only direct Contacts")
     contacts_parser.add_argument("--format", choices=("table", "tsv", "json"), default="table")
     contacts_parser.set_defaults(function=contact_list)
-    reprocess_parser = commands.add_parser(
-        "reprocess", help="rebuild catalog metadata and the search index from stored mail, without reimporting")
-    reprocess_parser.add_argument("--index-attachments", action="store_true",
+    rebuild_parser = commands.add_parser(
+        "rebuild", help="rebuild catalog metadata and the search index from stored mail, without reimporting")
+    rebuild_parser.add_argument("--index-attachments", action="store_true",
                                   help="index text attachments (default: keep the current index's setting)")
-    reprocess_parser.add_argument(
+    rebuild_parser.add_argument(
         "--workers",
         type=worker_argument,
         help="verified-message workers; override preferences (default: half CPUs; maximum: twice CPUs)",
     )
-    reprocess_parser.add_argument("--skip-processors", action="store_true",
+    rebuild_parser.add_argument("--skip-processors", action="store_true",
                                   help="rebuild the catalog and search index only; do not re-run processors")
-    reprocess_parser.set_defaults(function=reprocess_command)
+    rebuild_parser.set_defaults(function=rebuild_command)
     for child in commands.choices.values():
         child.add_argument("--archive", type=Path, default=argparse.SUPPRESS,
                            help="archive directory; defaults to $MAIL_ARCHIVE_DIR")
@@ -2990,7 +2991,7 @@ def execute(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         args.function(args)
     except ContactInputError as error:
         parser.error(str(error))
-    except ReprocessInterrupted as error:
+    except RebuildInterrupted as error:
         message = (
             "interrupted: the new databases were already published; no partial database exists"
             if error.published

@@ -101,7 +101,7 @@ both. Do not add daily counts together to get a total.
 
 ## Rebuilding derived data
 
-**File → Reprocess Saved Mail…** re-reads every message saved in the archive
+**File → Rebuild Databases…** re-reads every message saved in the archive
 and rebuilds what is derived from it: each message's catalog details
 (Message-ID, sender, recipients, subject and date) and the search index, then
 extracted text and automatic name evidence. Nothing is reimported or
@@ -113,7 +113,7 @@ keeps working on the current ones until they are finished. Then the current
 files are renamed `archive.sqlite3.old` and `search.sqlite3.old` and the new
 ones take their place. Progress, measured in bytes of mail processed, appears
 in the bar at the bottom of the search window. Quitting stops the work and
-keeps the current databases. From the command line, `ect reprocess` does the
+keeps the current databases. From the command line, `ect rebuild` does the
 same and shows the same progress.
 
 ## Settings

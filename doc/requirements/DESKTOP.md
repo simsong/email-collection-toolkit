@@ -52,7 +52,7 @@ zero means no known unfinished saved-message work, not that future downloads
 are complete. Explain that an email leaves the count only when all its tasks finish;
 the count may stay level while earlier processing stages complete tasks.
 Old snapshots without the counter show Unavailable. This reporting
-must not change the processor configuration or trigger reprocessing.
+must not change the processor configuration or trigger rebuilding.
 
 During archived-content and pending-ingest recovery, show the active processor,
 job activity and finished-job count. Use an indeterminate progress bar while the
@@ -107,7 +107,7 @@ Stop import cancels all displayed saved traversal and pending,
 running or failed jobs under the archive writer lease, retaining archived mail,
 source checkpoints and run history. A changed source history blocks a stale stop request.
 A later explicit import can begin a new continuation; cancelled derived work may
-be regenerated with explicit reprocessing.
+be regenerated with explicit rebuilding.
 
 Search-window warnings and errors stay expanded until the user selects Collapse
 messages or Dismiss messages. Collapse leaves a bottom message pill. The pill reopens all messages received in that
@@ -238,7 +238,7 @@ CPU ratios on the current machine and bound a migrated custom value to its cap.
 Apply choices to newly started or continued importing and saved-mail processing;
 do not resize an active pool. CLI `--workers N` takes precedence, leaves the saved
 choice unchanged and disables all worker preference controls, with the note
-`# workers set to {number} on command line`. Generic ingest, process, reprocess
+`# workers set to {number} on command line`. Generic ingest, process, rebuild
 and standalone IMAP use the preference when their flag is omitted.
 
 Preferences also expose **Maximum IMAP connections per account**, default 8,
@@ -437,20 +437,20 @@ including senders from prior imports and applying exclusions. Detected addresses
 are derived evidence, never expanded into YAML or reused as implicit owner rules.
 Existing Sent/Archive classifications remain unchanged by rule edits or
 reindexing; correcting historical misclassification requires a fresh rebuild.
-CLI processing, Continue Processing and explicit reprocessing replay their saved
+CLI processing, Continue Processing and explicit rebuilding replay their saved
 ingest policy without overwriting later owner defaults in `config.yaml`.
 Only an explicitly requested import saves its owner rules as document defaults.
 
-**File → Reprocess Saved Mail…** targets the selected archive. Before changing
+**File → Rebuild Databases…** targets the selected archive. Before changing
 anything, confirm that rebuilding catalog details, search, derived content and
 automatic identity evidence may take a long time. Cancel preserves all work.
-It first runs the same rebuild as `ect reprocess` in the background (byte
+It first runs the same rebuild as `ect rebuild` in the background (byte
 progress in the search window's status line; search uses the current databases
 until the new ones are published; Quit discards the replacement), then, when a
 processing database exists, replays processors through the normal background
 processing/status/suspension path. Each rebuild appears in the Activity window
-as its own "Reprocess saved mail" run with its step, percent, bytes, ETA, message
-count and final state, whether started from the menu or `ect reprocess`. Replay retains canonical messages, source
+as its own "Rebuild databases" run with its step, percent, bytes, ETA, message
+count and final state, whether started from the menu or `ect rebuild`. Replay retains canonical messages, source
 provenance and curator edits, does not download source mail, and preserves saved
 source-import settings. Active work must finish or suspend before it starts.
 
@@ -600,7 +600,7 @@ Messages…** saves the selection through a save dialog as MBOX (the default),
 a ZIP of `.eml` files, or, for one message, an `.eml`, chosen by the file type.
 The File menu is grouped by separators: the archive file (New, Open…, Open
 Recent); mail in and out of it and its settings (Import Mail…, Export Selected
-Messages…, Document Options…); whole-archive maintenance (Reprocess Saved Mail…,
+Messages…, Document Options…); whole-archive maintenance (Rebuild Databases…,
 Revalidate Archive, and on Windows Show Archive in Explorer); then Close. Application settings are not in File: **Default Lists…**
 follows **Preferences…** in the macOS application menu and the Windows Help menu.
 Validate with `tests/test_gui_service.py::test_native_menus_route_through_the_application_controller`.

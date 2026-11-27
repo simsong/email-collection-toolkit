@@ -296,7 +296,7 @@ def test_ingest_routes_preserves_and_indexes_messages(
         rebuilt.close()
 
     refreshed = subprocess.run(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "reprocess", "--workers", str(REBUILD_INDEX_DEFAULT_WORKERS)],
+        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "rebuild", "--workers", str(REBUILD_INDEX_DEFAULT_WORKERS)],
         check=False,
         capture_output=True,
         text=True,
@@ -325,7 +325,7 @@ def test_ingest_routes_preserves_and_indexes_messages(
     assert "Archive integrity verified." in verified.stdout
 
 
-def test_reprocess_excludes_quarantine_mailboxes_from_search(tmp_path: Path) -> None:
+def test_rebuild_excludes_quarantine_mailboxes_from_search(tmp_path: Path) -> None:
     """Requirement: FTS rebuild excludes infected and malformed quarantine mail."""
     archive = tmp_path / "archive"
     archive.mkdir()
@@ -371,14 +371,14 @@ def test_reprocess_excludes_quarantine_mailboxes_from_search(tmp_path: Path) -> 
         catalog.close()
 
     refreshed = subprocess.run(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "reprocess", "--workers", "1"],
+        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "rebuild", "--workers", "1"],
         check=False,
         capture_output=True,
         text=True,
     )
 
     assert_success(refreshed)
-    assert "Reprocessing saved mail (1 workers)" in refreshed.stderr
+    assert "Rebuilding databases (1 workers)" in refreshed.stderr
     search = sqlite3.connect(archive / "search.sqlite3")
     try:
         assert search.execute("SELECT sha256 FROM message_fts").fetchall() == [
@@ -388,7 +388,7 @@ def test_reprocess_excludes_quarantine_mailboxes_from_search(tmp_path: Path) -> 
         search.close()
     catalog = sqlite3.connect(archive / "archive.sqlite3")
     try:
-        # Reprocessing re-derives the catalog Message-ID from the stored bytes.
+        # Rebuilding re-derives the catalog Message-ID from the stored bytes.
         assert catalog.execute("SELECT subject FROM messages WHERE message_id_normalized = ?", ("normal@example",)).fetchone() == (
             "이렇게 하면 부자가 됩니다",
         )
@@ -396,7 +396,7 @@ def test_reprocess_excludes_quarantine_mailboxes_from_search(tmp_path: Path) -> 
         catalog.close()
 
 
-def test_reprocess_preserves_prior_databases_when_mbox_and_catalog_disagree(tmp_path: Path) -> None:
+def test_rebuild_preserves_prior_databases_when_mbox_and_catalog_disagree(tmp_path: Path) -> None:
     """Requirement: FTS replacement fails closed unless every normal MBOX row is catalogued."""
     archive = tmp_path / "archive"
     mbox_directory(archive).mkdir(parents=True)
@@ -415,7 +415,7 @@ def test_reprocess_preserves_prior_databases_when_mbox_and_catalog_disagree(tmp_
     old_search.close()
 
     refreshed = subprocess.run(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "reprocess"],
+        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "rebuild"],
         check=False,
         capture_output=True,
         text=True,
@@ -429,8 +429,8 @@ def test_reprocess_preserves_prior_databases_when_mbox_and_catalog_disagree(tmp_
         search.close()
 
 
-def test_reprocess_interrupt_retains_prior_databases(tmp_path: Path) -> None:
-    """Requirement: Ctrl-C discards uncommitted reprocess replacements and keeps the live databases."""
+def test_rebuild_interrupt_retains_prior_databases(tmp_path: Path) -> None:
+    """Requirement: Ctrl-C discards uncommitted rebuild replacements and keeps the live databases."""
     archive = tmp_path / "archive"
     path = mbox_directory(archive) / "2024-Archive1.mbox"
     path.parent.mkdir(parents=True)
@@ -476,7 +476,7 @@ def test_reprocess_interrupt_retains_prior_databases(tmp_path: Path) -> None:
     finally:
         old_search.close()
 
-    with CapturedCommand(python_module("mailarchiver", ["--archive", str(archive), "reprocess"])) as command:
+    with CapturedCommand(python_module("mailarchiver", ["--archive", str(archive), "rebuild"])) as command:
         safety_notice = command.stderr.get(timeout=20).decode()
         assert "Ctrl-C discards the new databases" in safety_notice
         progress = command.stderr.get(timeout=20).decode()

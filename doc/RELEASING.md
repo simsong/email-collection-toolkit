@@ -352,8 +352,8 @@ A successful build does not establish these manual checks.
   import/search remain responsive. Closing the last importing search window must
   explain that Quit suspends import. Quit must dim windows with Shutting down,
   retain resumable work, and exit without a beach ball or hung process.
-- Choose File > Reprocess Saved Mail: cancel the long-duration confirmation and
-  verify nothing starts. On a disposable archive, confirm a deliberate reprocess
+- Choose File > Rebuild Databases: cancel the long-duration confirmation and
+  verify nothing starts. On a disposable archive, confirm a deliberate rebuild
   works. Ordinary app upgrades must not automatically replay completed work.
 
 Windows uses Ctrl shortcuts and its own title-bar controls. macOS Command-Tab

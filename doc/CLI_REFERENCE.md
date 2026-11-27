@@ -189,18 +189,18 @@ ect review --archive collection.mailarchive
 ect processors --archive collection.mailarchive
 ect processing-status --archive collection.mailarchive
 ect process --archive collection.mailarchive --phase content
-ect reprocess --archive collection.mailarchive
+ect rebuild --archive collection.mailarchive
 ```
 
 `process` resumes saved work. `--phase` is `ingest`, `content` (default), or `all`;
-`--max-jobs N` bounds a run; `--reprocess` explicitly queues a fresh generation.
-`reprocess` re-reads every stored message and rebuilds the catalog's derived
+`--max-jobs N` bounds a run; `--rebuild` explicitly queues a fresh generation.
+`rebuild` re-reads every stored message and rebuilds the catalog's derived
 message fields (Message-ID, sender, recipients, subject, date, parse defects) and
 the search index into new files, keeping message numbers and source provenance;
 the previous databases are kept as `archive.sqlite3.old` and `search.sqlite3.old`.
 It then re-runs processors if the archive has a processing database
 (`--skip-processors` omits that). Both accept `--workers N`;
-`reprocess --index-attachments` indexes supported text attachments. Source acquisition requires `ect import`.
+`rebuild --index-attachments` indexes supported text attachments. Source acquisition requires `ect import`.
 
 ## Identities and Contacts
 

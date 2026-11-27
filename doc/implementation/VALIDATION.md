@@ -271,7 +271,7 @@ message/MBOX preparation uses hard links when possible and copies otherwise;
 public-inbox Git blobs are streamed through one `git cat-file --batch` process.
 Individual-message files with Unix MBOX envelope lines are parsed into derived
 RFC 5322 files instead of being mistaken for multi-message mailboxes.
-Babyl-to-RFC conversion is a derived SF-LOVERS preprocessing step, with every
+Babyl-to-RFC conversion is a derived SF-LOVERS prebuilding step, with every
 downloaded source retained separately.
 
 `make validation-run` invokes the ordinary ingest CLI and its private on-demand
@@ -524,7 +524,7 @@ and visible-window state when its bounded personal-list focus check fails.
 Its shared smoke fixture uses real ingestion and verifies canonical message bytes;
 catalog/search rows alone cannot support standalone viewing or export acceptance.
 This distinguishes an inactive/locked desktop from an assumed menu regression;
-non-interactive reprocessing and Quit checks remain separate evidence.
+non-interactive rebuilding and Quit checks remain separate evidence.
 
 The processing-history browser fixture uses a live-process typed snapshot while
 checking search/About footers; it requires no heartbeat producer. Full Make validation batches run serially to retain

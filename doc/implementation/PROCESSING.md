@@ -232,7 +232,7 @@ uses actual CLI archives to check failure, preservation and configuration retry.
 
 The processing package implements API v2 manifests, typed objects/results,
 in-process execution and a serial rank-barrier dispatcher. Make processor
-provides init, plugins, submit, run, status and explicit reprocess commands.
+provides init, plugins, submit, run, status and explicit rebuild commands.
 Each archive is protected by the existing writer lease. Queue release and job
 checkpoints use SQLite transactions; emission files are copied and fsynced
 before committing references. Parent-job dependencies prevent work from
@@ -481,8 +481,8 @@ selecting a signature or last-line window. The host stores these as generic `pho
 on the sender address without inserting email-address observations. Identity
 queries deduplicate numbers within the visible date range. Processor version 2
 collects these observations during content processing; previously processed
-archives need explicit reprocessing to acquire them. Merely opening the picker
-does not reprocess messages or import private research evidence.
+archives need explicit rebuilding to acquire them. Merely opening the picker
+does not rebuild messages or import private research evidence.
 
 ## Optional name-linkage comparison
 

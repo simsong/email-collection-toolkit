@@ -98,7 +98,7 @@ opt-in. They do not run in CI.
 | `test-native-gui` | | Hidden Cocoa/WKWebView bridge |
 | `test-native-html-find` | | WKWebView find highlighting and scrolling |
 | `test-native-quit` | `MAILARCHIVER_NATIVE_GUI_E2E=1` | Quit during status delivery |
-| `test-native-reprocessing` | `MAILARCHIVER_NATIVE_APPLICATION_E2E=1` | Reprocess menu confirmation and Cancel |
+| `test-native-rebuild` | `MAILARCHIVER_NATIVE_APPLICATION_E2E=1` | Rebuild menu confirmation and Cancel |
 | `test-native-worker-preferences` | `MAILARCHIVER_NATIVE_APPLICATION_E2E=1` | Preferences window, Close, saved edits |
 | `test-quit` | | Process exit, message-boundary stops, recovery |
 

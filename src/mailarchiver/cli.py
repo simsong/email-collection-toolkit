@@ -44,7 +44,7 @@ COMMANDS = (
     Command(name="validation", module="validation", help="manage explicitly selected validation corpora"),
     Command(name="processor", module="processing.__main__", help="run the disposable processor development harness"),
 )
-ARCHIVE_COMMANDS = ("process", "processing-status", "processors", "review", "report", "reprocess",
+ARCHIVE_COMMANDS = ("process", "processing-status", "processors", "review", "report", "rebuild",
                     "identities", "human-contacts")
 
 

@@ -122,7 +122,7 @@ test-release-files: ruff
 	uv run --locked pyright scripts/release_files.py tests/test_release_files.py --warnings
 	uv run --locked pytest -q tests/test_release_files.py
 .PHONY: install-test-browser ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run search summary-smoke test test-bagit test-data-quality
-.PHONY: test-application test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-reprocess test-website validation-aws-start validation-aws-start-all
+.PHONY: test-application test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-rebuild test-website validation-aws-start validation-aws-start-all
 
 .PHONY: test-apple-mail-compare
 .PHONY: validation-fetch validation-list validation-prepare validation-run validation-run-all validation-sam-build validation-sam-deploy validation-sam-validate validation-test verify
@@ -587,9 +587,9 @@ test-native-application: ruff
 	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run pytest -q e2e_tests/test_ingest_verify.py::test_native_application_lifecycle
 
 # Reuse the native opt-in for menu/confirmation replay against actual synthetic canonical mail.
-.PHONY: test-native-reprocessing
-test-native-reprocessing: ruff
-	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run --locked pytest -q e2e_tests/test_ingest_verify.py::test_native_curator_reprocessing
+.PHONY: test-native-rebuild
+test-native-rebuild: ruff
+	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run --locked pytest -q e2e_tests/test_ingest_verify.py::test_native_curator_rebuilding
 
 .PHONY: check-archive-open
 check-archive-open:
@@ -751,8 +751,8 @@ test-archive-status:
 test-provenance:
 	uv run pytest -q tests/test_catalog.py tests/test_sources.py
 
-test-reprocess:
-	uv run pytest -q tests/test_reprocess.py tests/test_end_to_end.py::test_reprocess_excludes_quarantine_mailboxes_from_search tests/test_end_to_end.py::test_reprocess_interrupt_retains_prior_databases
+test-rebuild:
+	uv run pytest -q tests/test_rebuild.py tests/test_end_to_end.py::test_rebuild_excludes_quarantine_mailboxes_from_search tests/test_end_to_end.py::test_rebuild_interrupt_retains_prior_databases
 
 .PHONY: test-ingest-recovery
 test-ingest-recovery:

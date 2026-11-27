@@ -90,7 +90,7 @@ attachments. The archive
 must be indexed with attachment support first:
 
 ```sh
-ect reprocess --archive collection.mailarchive --index-attachments
+ect rebuild --archive collection.mailarchive --index-attachments
 ```
 
 Text from PDF, Word, Excel, and PowerPoint attachments, and text in scanned

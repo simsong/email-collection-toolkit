@@ -44,10 +44,10 @@ marking messages read or changing server state.
 **Import/Rebuild** also visits every enabled source, but ignores the local
 modification-time shortcut and recomputes the complete SHA-256 of every local
 source file. An unchanged digest may skip parsing after hashing; a changed
-digest is reprocessed. For IMAP, Rebuild performs a complete folder and UID
+digest is rebuilt. For IMAP, Rebuild performs a complete folder and UID
 reconciliation rather than relying only on the incremental cursor. Both modes
 remain message-idempotent, retain source observations, and never clear or
-recreate canonical mail. `reprocess` is unrelated: it rebuilds derived catalog
+recreate canonical mail. `rebuild` is unrelated: it rebuilds derived catalog
 fields and the search database from already archived messages.
 
 The user manual and the website importing page must show the three source

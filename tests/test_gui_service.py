@@ -466,7 +466,7 @@ def test_native_menus_route_through_the_application_controller(
     assert file_titles == [
         "New", "Open…", separator,
         "Import Mail…", "Export Selected Messages…", "Document Options…", separator,
-        "Reprocess Saved Mail…", "Revalidate Archive", *explorer, separator,
+        "Rebuild Databases…", "Revalidate Archive", *explorer, separator,
         "Close", *quit_items,
     ]
     if sys.platform == "win32":
