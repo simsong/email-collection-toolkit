@@ -235,3 +235,14 @@ def test_collection_pins_running_raw_input_until_checkpoint(tmp_path: Path) -> N
             database.execute("UPDATE jobs SET status='pending'")
         assert collect_objects(database, archive, lambda _digest: MESSAGE.read_bytes()) == 1
         assert not root.exists()
+
+
+def test_autosave_excluded_message_releases_its_working_copy(tmp_path: Path) -> None:
+    """PROCESSING: an excluded autosave draft is never archived, so its working copy is released, not kept forever."""
+    archive, source = ingest(tmp_path, HEADER.replace(b"Subject: Parent", b"X-Apple-Auto-Saved: yes\r\nSubject: Draft")
+                             + b"\r\nunsent draft\r\n")
+    with sqlite3.connect(archive / "archive.sqlite3") as catalog:
+        assert catalog.execute("SELECT disposition FROM observations").fetchall() == [("autosave-excluded",)]
+        assert catalog.execute("SELECT count(*) FROM messages").fetchone() == (0,)
+    assert objects(archive) == set()
+    assert source.read_bytes().endswith(b"unsent draft\r\n")

@@ -448,7 +448,9 @@ It first runs the same rebuild as `ect reprocess` in the background (byte
 progress in the search window's status line; search uses the current databases
 until the new ones are published; Quit discards the replacement), then, when a
 processing database exists, replays processors through the normal background
-processing/status/suspension path. Replay retains canonical messages, source
+processing/status/suspension path. Each rebuild appears in the Activity window
+as its own "Reprocess saved mail" run with its step, percent, bytes, ETA, message
+count and final state, whether started from the menu or `ect reprocess`. Replay retains canonical messages, source
 provenance and curator edits, does not download source mail, and preserves saved
 source-import settings. Active work must finish or suspend before it starts.
 

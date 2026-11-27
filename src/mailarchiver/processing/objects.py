@@ -6,7 +6,8 @@ Purpose: Release working bytes at committed message/job boundaries without losin
 
 How it works:
 Index job inputs and checkpoint outputs, protect live derived references, and
-release raw copies only when canonical MBOX bytes can reconstruct them.
+release raw copies only when canonical MBOX bytes can reconstruct them, or when the
+message was filed as excluded (never archived) and no live job still needs it.
 
 Fundamental dependents:
 
@@ -96,7 +97,12 @@ def collect_objects(database: sqlite3.Connection, archive: Path,
         if roles - {'raw'}:
             continue
         original = bool(roles) or database.execute("SELECT 1 FROM messages WHERE sha256=? LIMIT 1", (path.name,)).fetchone()
-        if original:
+        # A message filed as excluded (an autosave draft) is deliberately never archived and
+        # stays in its source; once no live job needs it, its working copy has no further use.
+        excluded = not roles and database.execute(
+            "SELECT 1 FROM message_state WHERE message_id=? AND excluded=1 AND catalog_message_pk IS NULL",
+            (path.name,)).fetchone() is not None
+        if original and not excluded:
             if canonical_reader is None:
                 continue
             try:

@@ -6,6 +6,24 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a107 — reprocessing in the Activity window
+
+- **Reprocess Saved Mail** now appears in the Activity window as its own run,
+  "Reprocess saved mail", with its current step, percent, bytes done of the
+  total, time remaining, messages reprocessed and elapsed time. Finished,
+  stopped and failed runs stay in the history like imports do.
+- After a reprocess, the bar at the bottom of the search window reports
+  "Last reprocess completed" instead of describing it as an import.
+- Reprocessing now uses all its workers. Parsing ran in threads that shared one
+  CPU core; it now runs in separate worker processes. On a 20,000-message sample
+  of a real archive it went from about one core to roughly 39 MB/s with 16
+  workers.
+- Working copies of excluded autosave drafts are deleted once they are no longer
+  needed. Before, they were never removed and accumulated in the archive's
+  `objects/` folder; the next import or processing run clears existing ones.
+- The repository pins Python 3.12 (`.python-version`), the version CI and
+  releases use.
+
 ## 1.0.0a106 — faster CI
 
 - Ordinary pushes now run a quick test tier (`make check-quick-tests`) that

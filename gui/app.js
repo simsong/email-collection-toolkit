@@ -532,6 +532,14 @@ async function refreshIngestOverview() {
   }
   const messages = Number(status.processed_messages).toLocaleString();
   const percent = Number(status.percent).toFixed(1);
+  if (status.activity_kind === "reprocess") {
+    setIngestStatusText(status.state === "running"
+      ? `${status.phase} · ${percent}% · ${formatBytes(status.bytes_processed)} of ${formatBytes(status.bytes_total)} · ETA ${status.eta}`
+      : status.state === "completed"
+        ? `Last reprocess completed · ${messages} messages · ${formatElapsed(status.elapsed_seconds)} · Click for history`
+        : `Last reprocess ${status.state}: ${status.phase} · Click for details`);
+    return;
+  }
   const phase = status.phase === "recovering archived content" ? "Processing saved mail" : status.phase;
   if (status.state === "running" && (status.processing_active || status.activity_kind === "processing")) {
     const jobs = Number(status.processing_jobs_completed).toLocaleString();

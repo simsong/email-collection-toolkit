@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.mbox import mbox_directory
 from mailarchiver.reprocess import ReprocessInterrupted, ReprocessProgress, reprocess_archive
 from mailarchiver.search import prepare_search_message
@@ -104,8 +105,14 @@ def test_reprocess_repairs_catalog_and_index_and_keeps_old_databases(tmp_path: P
     assert phases["Reprocessing saved mail"].total_bytes == record_bytes
     assert seen[-1].completed_bytes == seen[-1].total_bytes == record_bytes
 
+    activity, = read_ingest_history(archive).statuses  # Shown in the Activity window as its own run.
+    assert (activity.activity_kind, activity.state, activity.run_pk, activity.processed_messages, activity.percent) == (
+        "reprocess", "completed", 0, 4, 100.0)
+    assert activity.phase.startswith("Reprocessed 4 messages")
+
     reprocess_archive(archive, workers=1)  # A second run replaces the earlier .old files.
     assert _digests(archive, ".old") != before
+    assert len(read_ingest_history(archive).statuses) == 2
 
 
 @pytest.mark.parametrize("stop_after", [0, 2, 3])
@@ -123,6 +130,8 @@ def test_stopping_keeps_the_live_databases(tmp_path: Path, stop_after: int) -> N
         reprocess_archive(archive, workers=1, observer=lambda _progress: None, should_stop=should_stop)
     assert not interrupted.value.published
     assert _digests(archive) == before
+    activity, = read_ingest_history(archive).statuses
+    assert (activity.activity_kind, activity.state) == ("reprocess", "interrupted")
     assert not list(archive.glob("*.sqlite3.new.*")) and not list(archive.glob("*.old"))
 
 
@@ -135,5 +144,7 @@ def test_mailbox_catalog_mismatch_fails_closed(tmp_path: Path) -> None:
         output.write(b"\nFrom extra@example.net Thu Jan  4 10:00:00 2024\nSubject: uncatalogued\n\nbody\n")
     with pytest.raises(RuntimeError, match="count mismatch"):
         reprocess_archive(archive, workers=1, observer=lambda _progress: None)
+    activity, = read_ingest_history(archive).statuses
+    assert activity.state == "failed" and "count mismatch" in (activity.failure_detail or "")
     assert _digests(archive) == before
     assert not list(archive.glob("*.sqlite3.new.*"))

@@ -18,7 +18,9 @@ Progress is measured in bytes known before reading.
 
 from __future__ import annotations
 
+import logging
 import math
+import multiprocessing
 import os
 import shutil
 import signal
@@ -28,9 +30,9 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterator
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor
 from contextlib import closing
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
 from uuid import uuid4
@@ -38,6 +40,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from .catalog import address_pk, create_catalog, create_search
+from .ingest_status import IngestCounts, IngestState, IngestStatus, IngestStatusFile, new_status_id
 from .layout import mbox_directory, mbox_path
 from .mbox import MboxLocation, read_verified_location
 from .message import MetadataDefect, ParsedMessage, display_entity, parse_message
@@ -123,9 +126,11 @@ class ByteProgressReporter:
     """Report byte progress to a terminal, or to a callback such as the GUI."""
 
     def __init__(self, phase: str, total_bytes: int,
-                 observer: Callable[[ReprocessProgress], None] | None = None) -> None:
+                 observer: Callable[[ReprocessProgress], None] | None = None,
+                 listener: Callable[[ReprocessProgress], None] | None = None) -> None:
         self.progress = ReprocessProgress(phase=phase, total_bytes=total_bytes)
         self.observer = observer
+        self.listener = listener  # Always notified (the Activity status file), besides observer or terminal.
         self.tty = sys.stderr.isatty()
         self.last_tenth: int | None = None
 
@@ -134,6 +139,8 @@ class ByteProgressReporter:
         if not force and self.last_tenth == tenth:
             return
         self.last_tenth = tenth
+        if self.listener is not None:
+            self.listener(self.progress.model_copy())
         if self.observer is not None:
             self.observer(self.progress.model_copy())
             return
@@ -180,6 +187,64 @@ class UninterruptiblePublication:
                  _traceback: TracebackType | None) -> None:
         if self.previous_handler is not None:
             signal.signal(signal.SIGINT, self.previous_handler)
+
+
+class ReprocessActivity:
+    """Show one reprocess run in the Activity window, as an ingest-status file of kind "reprocess".
+
+    Progress is written at most once a second and on completion; a status that cannot
+    be written never stops the rebuild itself.
+    """
+
+    def __init__(self, archive: Path, workers: int, application_version: str) -> None:
+        self.archive, self.workers, self.version = archive, workers, application_version or None
+        self.started_at = datetime.now(UTC)
+        self.started = self.phase_started = time.monotonic()
+        self.messages = 0
+        self.progress = ReprocessProgress(phase="Preparing to reprocess saved mail", total_bytes=0)
+        self.last_write = 0.0
+        self.status_id = new_status_id(self.started_at, 0, os.getpid())
+        self.file: IngestStatusFile | None = None
+        try:
+            self.file = IngestStatusFile(archive, self.status_id)
+        except OSError:
+            logging.getLogger(__name__).warning("Could not create the reprocess activity status", exc_info=True)
+        self._write("running", force=True)
+
+    def update(self, progress: ReprocessProgress) -> None:
+        new_phase = progress.phase != self.progress.phase
+        if new_phase:
+            self.phase_started = time.monotonic()
+        self.progress = progress
+        self._write("running", force=new_phase or progress.completed_bytes >= progress.total_bytes)
+
+    def finish(self, state: IngestState, phase: str, detail: str | None = None) -> None:
+        self.progress = self.progress.model_copy(update={"phase": phase})
+        self._write(state, detail=detail, force=True)
+
+    def _write(self, state: IngestState, *, detail: str | None = None, force: bool = False) -> None:
+        now = time.monotonic()
+        if self.file is None or (not force and now - self.last_write < 1.0):
+            return
+        self.last_write = now
+        elapsed = max(now - self.started, 0.0)
+        running = state == "running"
+        progress = self.progress
+        try:
+            self.file.write(IngestStatus(
+                status_id=self.status_id, archive=str(self.archive), run_pk=0, process_id=os.getpid(),
+                application_version=self.version, source_roots=[], started_at=self.started_at,
+                updated_at=datetime.now(UTC), completed_at=None if running else datetime.now(UTC), state=state,
+                phase=progress.phase, elapsed_seconds=elapsed, phase_elapsed_seconds=max(now - self.phase_started, 0.0),
+                processed_messages=self.messages, message_rate=self.messages / max(elapsed, 0.001),
+                files_processed=0, files_total=0, bytes_processed=progress.completed_bytes,
+                bytes_total=progress.total_bytes,
+                percent=100.0 if state == "completed" else progress.percent,
+                eta=progress.eta(now) if running else "0s", active_workers=self.workers if running else 0,
+                peak_workers=self.workers, configured_workers=self.workers, workers=[], counts=IngestCounts(),
+                years=[], failure_detail=detail, activity_kind="reprocess"))
+        except (OSError, ValueError):
+            logging.getLogger(__name__).warning("Could not update the reprocess activity status", exc_info=True)
 
 
 class ReprocessWork(BaseModel):
@@ -292,12 +357,14 @@ def _apply(catalog: sqlite3.Connection, result: ReprocessedMessage) -> bool:
 
 
 def _check_mailboxes(archive: Path, catalog: sqlite3.Connection, observer: Callable[[ReprocessProgress], None] | None,
-                     should_stop: Callable[[], bool] | None) -> None:
+                     should_stop: Callable[[], bool] | None, listener: Callable[[ReprocessProgress], None] | None = None,
+                     ) -> None:
     """Refuse to rebuild when the catalog and the canonical MBOX record counts disagree."""
     expected = dict(catalog.execute(
         "SELECT g.filename, COUNT(*) FROM mbox_generations g JOIN locations l USING (generation_pk) GROUP BY g.filename"))
     mailboxes = sorted(mbox_directory(archive).glob("*.mbox"))
-    reporter = ByteProgressReporter("Checking canonical mailboxes", sum(path.stat().st_size for path in mailboxes), observer)
+    reporter = ByteProgressReporter("Checking canonical mailboxes", sum(path.stat().st_size for path in mailboxes),
+                                    observer, listener)
     reporter.display(force=True)
     for path in mailboxes:
         if should_stop is not None and should_stop():
@@ -315,8 +382,9 @@ def _check_mailboxes(archive: Path, catalog: sqlite3.Connection, observer: Calla
 
 
 def _copy_catalog(source: Path, destination: Path, observer: Callable[[ReprocessProgress], None] | None,
-                  should_stop: Callable[[], bool] | None) -> None:
-    reporter = ByteProgressReporter("Copying catalog", source.stat().st_size, observer)
+                  should_stop: Callable[[], bool] | None, listener: Callable[[ReprocessProgress], None] | None = None,
+                  ) -> None:
+    reporter = ByteProgressReporter("Copying catalog", source.stat().st_size, observer, listener)
     reporter.display(force=True)
 
     def progress(_status: int, remaining: int, total: int) -> None:
@@ -397,8 +465,21 @@ def reprocess_archive(
             lease.release()
         raise ValueError("an acquired writer lease for this archive is required")
     try:
-        return _reprocess(archive, workers, _search_has_attachments(archive) if index_attachments is None
-                          else index_attachments, observer, should_stop)
+        activity = ReprocessActivity(archive, workers, application_version)
+        try:
+            result = _reprocess(archive, workers, _search_has_attachments(archive) if index_attachments is None
+                                else index_attachments, observer, should_stop, activity)
+        except ReprocessInterrupted as error:
+            activity.finish("completed" if error.published else "interrupted",
+                            "Published; stopped afterwards" if error.published
+                            else "Stopped; the existing databases are unchanged")
+            raise
+        except BaseException as error:
+            activity.finish("failed", "Failed; the existing databases are unchanged", f"{type(error).__name__}: {error}")
+            raise
+        activity.finish("completed", f"Reprocessed {result.messages:,} messages; {result.changed:,} catalog entries "
+                        "changed; previous databases kept as .old")
+        return result
     finally:
         if owned:
             lease.release()
@@ -406,7 +487,7 @@ def reprocess_archive(
 
 def _reprocess(archive: Path, workers: int, index_attachments: bool,
                observer: Callable[[ReprocessProgress], None] | None,
-               should_stop: Callable[[], bool] | None) -> ReprocessResult:
+               should_stop: Callable[[], bool] | None, activity: ReprocessActivity) -> ReprocessResult:
     _discard_stale_new_files(archive)
     needed = sum((archive / name).stat().st_size for name in (CATALOG, SEARCH) if (archive / name).exists())
     free = shutil.disk_usage(archive).free
@@ -418,13 +499,13 @@ def _reprocess(archive: Path, workers: int, index_attachments: bool,
     new_search = archive / f"{SEARCH}{NEW_INFIX}{token}"
     published = False
     try:
-        _copy_catalog(archive / CATALOG, new_catalog, observer, should_stop)
+        _copy_catalog(archive / CATALOG, new_catalog, observer, should_stop, activity.update)
         catalog = create_catalog(new_catalog)
         try:
             search = create_search(new_search)
             try:
-                _check_mailboxes(archive, catalog, observer, should_stop)
-                result = _rederive(archive, catalog, search, workers, index_attachments, observer, should_stop)
+                _check_mailboxes(archive, catalog, observer, should_stop, activity.update)
+                result = _rederive(archive, catalog, search, workers, index_attachments, observer, should_stop, activity)
                 catalog.commit()
                 search.commit()
             finally:
@@ -445,10 +526,11 @@ def _reprocess(archive: Path, workers: int, index_attachments: bool,
 
 def _rederive(archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connection, workers: int,
               index_attachments: bool, observer: Callable[[ReprocessProgress], None] | None,
-              should_stop: Callable[[], bool] | None) -> ReprocessResult:
+              should_stop: Callable[[], bool] | None, activity: ReprocessActivity) -> ReprocessResult:
     total_row = catalog.execute("SELECT COALESCE(SUM(byte_length), 0), COUNT(*) FROM locations").fetchone()
     assert total_row is not None
-    reporter = ByteProgressReporter(f"Reprocessing saved mail ({workers} workers)", int(total_row[0]), observer)
+    reporter = ByteProgressReporter(f"Reprocessing saved mail ({workers} workers)", int(total_row[0]), observer,
+                                    activity.update)
     reporter.display(force=True)
     catalog.execute("BEGIN")
     messages = changed = failures = 0
@@ -457,7 +539,10 @@ def _rederive(archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connec
     next_item = next(items, None)
     pending: deque[tuple[Future[ReprocessedMessage], int]] = deque()
     in_flight = 0
-    with closing(live), ThreadPoolExecutor(max_workers=workers, thread_name_prefix="reprocess") as pool:
+    # Parsing and indexing are CPU-bound Python, so threads would share one core through the
+    # GIL; spawned worker processes use all configured workers. Only this process writes SQLite.
+    pool = ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"))
+    with closing(live):
         try:
             while next_item is not None or pending:
                 if should_stop is not None and should_stop():
@@ -477,11 +562,12 @@ def _rederive(archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connec
                 if result.indexed is not None:
                     write_prepared_search_message(search, result.indexed, date_utc=result.date_utc)
                 messages += 1
+                activity.messages = messages
                 reporter.advance(length)
         except BaseException:
-            for future, _length in pending:
-                future.cancel()
+            pool.shutdown(wait=True, cancel_futures=True)
             raise
+        pool.shutdown(wait=True)
     if messages != int(total_row[1]):
         raise RuntimeError(f"catalog has {total_row[1]} located messages but only {messages} were reprocessed")
     reporter.finish()

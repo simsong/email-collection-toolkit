@@ -293,7 +293,13 @@ under `writer_activity` with an observer that stores byte progress per document
 stop; afterwards the archive's search windows are refreshed. When
 `processing.sqlite3` exists it then launches the existing writer-leased service
 with reprocess enabled, content processing enabled and no source roots or ingest
-traversal; the Activity window shows that progress. Cancellation does
+traversal; the Activity window shows that progress. The rebuild itself is also an
+Activity run: `reprocess.ReprocessActivity` writes an `IngestStatus` file with
+`activity_kind="reprocess"` and `run_pk` 0 (no catalog ingest run is created), at
+most once a second, on each phase change and on completion, interruption or
+failure. `ingests.js` titles it "Reprocess saved mail" and shows step bytes,
+messages and rate instead of source and worker tables; the search window's status
+line reports the last reprocess by name. Cancellation does
 not write. Rootless runs and interruption saves retain the preceding source
 request and separately store current processing overrides. Processing-only CLI/GUI
 continuation and inventory discovery prefer those overrides. Continue Import selects
