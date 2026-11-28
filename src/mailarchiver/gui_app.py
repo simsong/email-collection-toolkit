@@ -2390,6 +2390,18 @@ class PyWebViewApplication:
         native = webview.active_window()
         return self.document_for_native_window(native.uid) if native is not None else self.controller.active_document
 
+    def menu_context(self, active: Any, *, open_window: bool = True) -> MenuContext:
+        """Which archive commands the focused native window supports (none when it is closed)."""
+        if active is None or not open_window:
+            return MenuContext()
+        with self._lock:
+            search_id = self._native_search_ids.get(active.uid)
+            search_api = self._apis.get(search_id) if search_id is not None else None
+            child_id = self._native_child_ids.get(active.uid)
+        search = bool(search_api and search_api.document and search_api.document.path)
+        child = self.controller.document(child_id) if child_id else None
+        return MenuContext(search=search, archive=search or bool(child and child.path))
+
     def active_api(self) -> GuiApi | None:
         native = webview.active_window()
         if native is not None:
@@ -3497,7 +3509,8 @@ class PyWebViewApplication:
 
         if sys.platform == "darwin" and self._menu_observer is not None:
             from Foundation import NSNotificationCenter  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
-            release(lambda: NSNotificationCenter.defaultCenter().removeObserver_(self._menu_observer))
+            for observer in self._menu_observer:
+                release(lambda observer=observer: NSNotificationCenter.defaultCenter().removeObserver_(observer))
             self._menu_observer = None
         if self._sparkle is not None:
             release(self._sparkle.close)
@@ -3582,10 +3595,11 @@ class PyWebViewApplication:
             if active is None:
                 return
             if self._menu_observer is None:
-                self._menu_observer = NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
-                    "NSWindowDidBecomeKeyNotification", None, None,
-                    lambda _notification: self._refresh_macos_menu(),
-                )
+                center = NSNotificationCenter.defaultCenter()
+                # Closing the last archive window must disable archive commands at once.
+                self._menu_observer = tuple(center.addObserverForName_object_queue_usingBlock_(
+                    name, None, None, lambda _notification: self._refresh_macos_menu())
+                    for name in ("NSWindowDidBecomeKeyNotification", "NSWindowWillCloseNotification"))
             for native in BrowserView.instances.values():
                 native.menu = active.menu
             instance = BrowserView.instances.get(active.uid)
@@ -3626,16 +3640,18 @@ class PyWebViewApplication:
                         item.setKeyEquivalent_(key)
                         item.setKeyEquivalentModifierMask_(1 << 20)
             close_item = file_item.submenu().itemWithTitle_("Close") if file_item else None
-            window_item = menu.itemWithTitle_("Window")
-            if window_item is not None:
-                submenu = window_item.submenu()
+            context = self.menu_context(active, open_window=bool(instance.window.isVisible() or instance.window.isMiniaturized()))
+            for heading in ("File", "Window"):
+                heading_item = menu.itemWithTitle_(heading)
+                if heading_item is None:
+                    continue
+                submenu = heading_item.submenu()
+                # Explicit enabled states; Cocoa's autoenabling would re-enable every targeted item.
                 submenu.setAutoenablesItems_(False)
-                new_search = submenu.itemWithTitle_("New Search Window")
-                if new_search is not None:
-                    with self._lock:
-                        search_id = self._native_search_ids.get(active.uid)
-                        search_api = self._apis.get(search_id) if search_id is not None else None
-                    new_search.setEnabled_(bool(search_api and search_api.document and search_api.document.path))
+                for entry in submenu.itemArray():
+                    enabled = menu_item_enabled(str(entry.title()), context)
+                    if enabled is not None:
+                        entry.setEnabled_(enabled)
             if close_item is not None:
                 with self._lock:
                     search_id = self._native_search_ids.get(active.uid)
@@ -3693,6 +3709,29 @@ def application_metadata() -> ApplicationMetadata:
         version=APPLICATION_VERSION,
         copyright="Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.",
     )
+
+
+class MenuContext(BaseModel):
+    """What the focused window offers to archive menu commands."""
+
+    archive: bool = False  # Any window of an open archive (search, Activity, Document Options…).
+    search: bool = False  # A search window of an open archive (selection, new sibling window).
+
+
+# Commands that act on an open archive, or specifically on its search window. Everything
+# else (New, Open…, Open Recent, Help, window list) works with no archive window open.
+ARCHIVE_MENU_ITEMS = frozenset({"Import Mail…", "Document Options…", "Rebuild Databases…", "Revalidate Archive",
+                                "Show Archive in Explorer", "Activity…"})
+SEARCH_MENU_ITEMS = frozenset({"Export Selected Messages…", "New Search Window"})
+
+
+def menu_item_enabled(title: str, context: MenuContext) -> bool | None:
+    """Return whether an archive command is available, or None for commands that always are."""
+    if title in SEARCH_MENU_ITEMS:
+        return context.search
+    if title in ARCHIVE_MENU_ITEMS:
+        return context.archive
+    return None
 
 
 def application_menu(application: PyWebViewApplication) -> list[Menu]:

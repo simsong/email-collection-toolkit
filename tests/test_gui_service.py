@@ -28,6 +28,8 @@ from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.mailsearch import read_message_bytes
 from mailarchiver.configuration import application_configuration, load_configuration
 from mailarchiver.gui_app import (
+    MenuContext,
+    menu_item_enabled,
     GuiApi,
     PyWebViewApplication,
     application_icon_path,
@@ -480,6 +482,32 @@ def test_native_menus_route_through_the_application_controller(
     for action in menus[1].items:
         assert isinstance(action, MenuAction)
         assert not action.function()
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_archive_menu_commands_need_an_open_archive_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
+    """Requirement: with no archive window open, every File/Window command that needs one is disabled."""
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    application = PyWebViewApplication(controller)
+    monkeypatch.setattr(sys, "platform", platform)
+    titles = {item.title for menu in application_menu(application) if menu.title in {"File", "Window"}
+              for item in menu.items if isinstance(item, MenuAction)}
+    archive_commands = {"Import Mail…", "Export Selected Messages…", "Document Options…", "Rebuild Databases…",
+                        "Revalidate Archive", "Activity…", "New Search Window"}
+    if platform == "win32":
+        archive_commands.add("Show Archive in Explorer")
+    assert archive_commands <= titles
+    nothing, child, search = MenuContext(), MenuContext(archive=True), MenuContext(archive=True, search=True)
+    for title in archive_commands:
+        assert menu_item_enabled(title, nothing) is False, title
+        assert menu_item_enabled(title, search) is True, title
+    # An archive's Activity or Document Options window supports archive commands, not selection ones.
+    assert menu_item_enabled("Rebuild Databases…", child) and not menu_item_enabled("Export Selected Messages…", child)
+    for title in titles - archive_commands - {"Close"}:  # Close keeps its own window-specific rule.
+        assert menu_item_enabled(title, nothing) is None, title
+    assert application.menu_context(None) == nothing
 
 
 @pytest.mark.parametrize("platform", ["darwin", "win32"])

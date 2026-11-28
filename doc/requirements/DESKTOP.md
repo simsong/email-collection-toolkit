@@ -607,7 +607,10 @@ a ZIP of `.eml` files, or, for one message, an `.eml`, chosen by the file type.
 The File menu is grouped by separators: the archive file (New, Open…, Open
 Recent); mail in and out of it and its settings (Import Mail…, Export Selected
 Messages…, Document Options…); whole-archive maintenance (Rebuild Databases…,
-Revalidate Archive, and on Windows Show Archive in Explorer); then Close. Application settings are not in File: **Default Lists…**
+Revalidate Archive, and on Windows Show Archive in Explorer); then Close. Application settings are not in File: With no archive window in front, commands that need one (Import Mail…, Export
+Selected Messages…, Document Options…, Rebuild Databases…, Revalidate Archive, Close,
+Activity…, New Search Window) are disabled on macOS; selection commands also need a
+search window. **Default Lists…**
 follows **Preferences…** in the macOS application menu and the Windows Help menu.
 Validate with `tests/test_gui_service.py::test_native_menus_route_through_the_application_controller`.
 **File → Revalidate Archive** rereads every catalogued message and every file

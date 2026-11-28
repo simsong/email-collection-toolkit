@@ -6,6 +6,15 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a115 — menus follow the open window
+
+- With no archive window open, File and Window commands that need one are
+  disabled: Import Mail…, Export Selected Messages…, Document Options…, Rebuild
+  Databases…, Revalidate Archive, Close, Activity… and New Search Window. New,
+  Open…, Open Recent and Help stay available. Export Selected Messages… and New
+  Search Window also need a search window in front. Before, macOS menu
+  auto-enabling left every command enabled.
+
 ## 1.0.0a113 — Cancel a rebuild; warn before quitting one
 
 - While a rebuild is running, the Activity window's stop button reads **Cancel**

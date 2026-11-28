@@ -273,8 +273,8 @@ def check_rebuild_menu(application: PyWebViewApplication, api) -> None:
                     views.extend(view.subviews())
                     if hasattr(view, "stringValue"):
                         texts.append(str(view.stringValue()))
-                assert "very long time" in "\n".join(texts)
-                assert "No mail will be downloaded" in "\n".join(texts)
+                assert "long time" in "\n".join(texts)
+                assert "No mail is downloaded" in "\n".join(texts)
             except Exception:  # pylint: disable=broad-exception-caught
                 errors.append(traceback.format_exc())
             finally:
@@ -419,6 +419,14 @@ def main() -> None:
                     assert not native_about.isVisible(), "Dock activation reopened About"
                     menu = native.mainMenu()
                     assert menu.itemWithTitle_("File").submenu().itemWithTitle_("Open…").isEnabled(), "File/Open is disabled"
+                    # With no archive window open, commands that need one are disabled.
+                    for heading, title in (("File", "Import Mail…"), ("File", "Export Selected Messages…"),
+                                           ("File", "Document Options…"), ("File", "Rebuild Databases…"),
+                                           ("File", "Revalidate Archive"), ("File", "Close"),
+                                           ("Window", "Activity…"), ("Window", "New Search Window")):
+                        entry = menu.itemWithTitle_(heading).submenu().itemWithTitle_(title)
+                        assert entry is not None and not entry.isEnabled(), f"{heading}/{title} is enabled with no archive window"
+                    assert menu.itemWithTitle_("File").submenu().itemWithTitle_("New").isEnabled(), "File/New is disabled"
                     item = menu.itemAtIndex_(0).submenu().itemAtIndex_(0)
                     assert native.sendAction_to_from_(item.action(), item.target(), item), f"About action failed: {item.action()!r}"
                 except Exception as error:  # pylint: disable=broad-exception-caught
