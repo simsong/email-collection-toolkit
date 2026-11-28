@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import signal
+import re
 import sqlite3
 import subprocess
 import sys
@@ -51,7 +52,7 @@ from mailarchiver.standalone_verify import INSTALLED_NAME
 DATA = Path(__file__).parent / "data"
 PROCESSED_MESSAGE_COUNT = 210
 GUI_API_METHODS = (
-    "activate", "attachment", "choose_archive", "delete_filter_set", "mailbox_tree", "message",
+    "activate", "attachment", "choose_archive", "delete_filter_set", "mailbox_tree", "message", "message_metadata",
     "copy_link", "copy_source_path", "copy_visible_text", "ingest_overview", "open_attachment", "open_ingest_window", "open_link", "open_message_window", "part", "prepare_drag", "rename_filter_set",
     "request_previews", "save_attachment", "save_filter_set", "save_message",
     "saved_filter_sets", "search", "search_count", "status", "suggestions", "suggestions_start", "suggestions_status", "suggestions_cancel", "take_previews",
@@ -287,7 +288,25 @@ def test_ingest_history_ui_end_to_end(built_archive: BuiltArchive, page: Page) -
     page.wait_for_selector(".history-row")
     assert page.locator(".history-row").count() == 1
     assert "Completed" in page.locator(".history-row").inner_text()
-    assert page.locator(".worker-table tbody tr").count() == 2
+    # Finished runs sit under "Past Activity"; with nothing in progress there is no rule above it.
+    expect(page.locator("#history-list > *").first).to_have_text("Past Activity")
+    expect(page.locator(".history-divider.after-current")).to_have_count(0)
+    # A run in progress leads the list, separated from past runs by a rule and the label.
+    page.evaluate("""() => {
+      statuses = [{...statuses[0], status_id: "current-run", state: "running"}, ...statuses];
+      render();
+    }""")
+    children = page.locator("#history-list > *")
+    expect(children).to_have_count(3)
+    expect(children.nth(0)).to_have_class(re.compile(r"history-row"))
+    expect(children.nth(1)).to_have_class("history-divider after-current")
+    expect(children.nth(1)).to_have_text("Past Activity")
+    expect(children.nth(2)).to_contain_text("completed")
+    page.evaluate("""() => { statuses = statuses.slice(1); render(); }""")
+    tables = page.locator(".worker-table")
+    expect(tables).to_have_count(2)
+    for table in tables.all():
+        expect(table.locator("tbody tr td:first-child")).to_have_text(["1", "2"])
     assert str(PROCESSED_MESSAGE_COUNT) in page.locator(".statistics").inner_text()
 
 
@@ -683,7 +702,7 @@ def test_native_html_find_smoke(native_smoke_archive: Path, tmp_path: Path) -> N
     sys.platform != "darwin" or os.environ.get("MAILARCHIVER_NATIVE_APPLICATION_E2E") != "1",
     reason="set MAILARCHIVER_NATIVE_APPLICATION_E2E=1 for real curator menu acceptance",
 )
-def test_native_curator_reprocessing(tmp_path: Path) -> None:
+def test_native_curator_rebuilding(tmp_path: Path) -> None:
     """Real menu Cancel preserves work; confirmation replays canonical mail without downloading."""
     from scripts.run_gui import development_bundle, development_environment
     source = tmp_path / "fixture.eml"
@@ -694,10 +713,10 @@ def test_native_curator_reprocessing(tmp_path: Path) -> None:
     source.unlink()
     executable = development_bundle(tmp_path / "launcher")
     result = subprocess.run(
-        [str(executable), str(Path(__file__).with_name("native_application_probe.py")), "--reprocess-only"],
+        [str(executable), str(Path(__file__).with_name("native_application_probe.py")), "--rebuild-only"],
         env=development_environment() | {PROBE_ARCHIVE_ENV: str(archive),
                                         PROBE_PREFERENCES_ENV: str(tmp_path / "preferences.json")},
         capture_output=True, text=True, timeout=40, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Curator reprocessing menu passed" in result.stdout
+    assert "Curator rebuilding menu passed" in result.stdout

@@ -10,8 +10,10 @@ platform/release acceptance. Deferred features live in [plans](../plans/README.m
 Search ignores case and combining accents and treats `ß`/`ẞ` as `ss`, without
 stemming or a case-sensitivity option. The same normalization applies to query
 text, indexed derivatives, subject/address/name selectors and suggestions.
-Existing word indexes remain usable without reindexing: query compilation must
-include native vocabulary spellings that normalize to the requested words.
+Indexed text is folded before it is written, and a new index is marked as
+folded. Search never adapts to older, unfolded indexes: searching an unmarked
+index reports that the databases must be rebuilt, and the desktop app offers
+the rebuild in a pop-up, instead of returning incomplete results.
 Canonical bytes, hashes, displayed headers and previews remain unchanged.
 Inside quotes, punctuation and symbols are significant, including prefixes,
 suffixes and separators: `"CACM-"` requires the hyphen and `"Ham+Sandwhich"`
@@ -42,7 +44,7 @@ The search database must be fully rebuildable from the
 canonical MBOX files and `archive.sqlite3`, and is not backed up as a required
 preservation object.
 It excludes `INFECTED` and `MALFORMED` quarantine categories even when
-attachment indexing is requested. `refresh-index` applies the same exclusion
+attachment indexing is requested. `rebuild` applies the same exclusion
 when rebuilding from canonical MBOX files.
 Text extraction must decode MIME payload bytes before introducing replacement
 characters. A valid declared charset, including legacy labels such as
@@ -64,7 +66,7 @@ derived catalog, search, and viewer text; canonical header bytes remain exact.
 For every indexed message, the disposable database records an attachment count
 and one ordered metadata row per MIME attachment containing its MIME-walk part
 ID, decoded filename, and normalized MIME type. This metadata is derived during
-the same MIME parse as body indexing and is rebuilt by `refresh-index`; it does
+the same MIME parse as body indexing and is rebuilt by `rebuild`; it does
 not make attachment payload bytes canonical database content.
 The message metadata also stores a deterministic, whitespace-collapsed preview
 of the first 18 words of the preferred non-attachment body. An ellipsis marks a
@@ -88,7 +90,9 @@ When more rows exist, the GUI immediately displays that ordered prefix,
 automatically retrieves the complementary remainder in the background, and
 then displays the complete result set and exact count. During that continuation,
 the result status is red and says **Searching in background** with the displayed
-count. A newer
+count. While a query is pending, the cleared result table must not claim
+**No messages.**; the status line shows **Searching…** and the table stays blank
+until results arrive. A completed empty search reports **0 messages**. A newer
 query supersedes the continuation; a failure retains the first 2,000 results
 and reports that the background search failed. The GUI has no **Find older
 ones**, **Load more**, or **Load all** interaction. Limiting an unordered FTS
@@ -99,7 +103,7 @@ must show the complete search language, AND and phrase behavior, every
 supported operator, and concrete examples.
 Index extraction and insertion happen after canonical MBOX/catalog publication.
 An indexing failure is recorded as a metadata defect and does not reject mail;
-`refresh-index` repairs missing disposable content.
+`rebuild` repairs missing disposable content.
 Index-only repair must not resume pending ingestion, contact mail sources, or
 modify canonical MBOX bytes or the durable processing queue. Rebuild searchable
 non-quarantine mail from verified canonical locations and publish the replacement
@@ -116,6 +120,14 @@ in its current manually assigned person group without rebuilding indexes.
 Canonical and merged alias names have the same expansion. Email substring queries
 remain address-specific; organization names retain their domain-based membership.
 `make test-gui-processing` verifies live merge and separation behavior.
+
+## Word search latency
+
+On a warm machine, a single-word desktop search shows its first page in under
+1 s and completes page plus count in under 5 s, including the first search after
+launch or after a rebuild. A search must not wait for any scan of the whole index.
+`make benchmark-search` measures this end to end on a real archive; the
+natural-search tests check date-walk equivalence.
 
 ## Autocomplete responsiveness
 

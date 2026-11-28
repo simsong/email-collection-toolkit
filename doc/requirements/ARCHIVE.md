@@ -197,6 +197,14 @@ The archive lives on the encrypted laptop filesystem.  BorgBackup and
 Backblaze provide independent backup; archive-internal encryption is not a
 requirement.
 
+A routine checkpoint (after an import, or recovering an interrupted
+publication) rereads only MBOX files modified since the previous checkpoint
+began. An unmodified MBOX keeps its previously verified SHA-256, integrity tag
+and Mailbag CSV rows when its size, message count and digest agree across the
+catalog and the previous payload manifest; anything else is reread and
+reverified. Whole-archive rereading happens only when the user asks for it
+(**File → Revalidate Archive**, `ect verify`).
+
 Each new BagIt checkpoint records the installed application version as
 `Mailbag-Agent-Version`. Existing historical bags are not rewritten merely
 because a new software version is installed.
@@ -210,7 +218,7 @@ existing evidence and must not modify source mail or the canonical archive.
 ## Deduplication and provenance
 
 On macOS, Command-Q during an active import must offer Cancel or Stop Import
-and Quit. Explain that quitting stops imports, that **Continue Processing**
+and Quit. Explain that quitting stops imports, that **Continue Importing…**
 resumes saved work (or File → Import retries the source), and that already
 archived messages are not imported twice. Cancel leaves imports running. Confirmed
 Quit disallows new imports and signals every local/native and API import to stop
@@ -222,6 +230,9 @@ finishes. A deadline can interrupt a message or checkpoint: SQLite transaction
 rollback and the durable MBOX append journal support recovery on the next ingest;
 an interrupted archive is not promised to have current BagIt manifests. Continue
 Processing or reimport repairs checkpoints and deduplicates committed messages.
+On macOS, canonical durability points (MBOX appends and their journal, stored
+objects, integrity/BagIt checkpoints, directory entries and SQLite commits) shall
+use `F_FULLFSYNC`, because plain `fsync` there does not flush the drive's cache.
 Do not bypass Sparkle's deferred/installing handoff. Window-close restrictions
 during ingest remain intact.
 
@@ -236,7 +247,7 @@ including while a scan is blocked. Replayed ingest work follows the same
 current-message cancellation boundary as newly acquired mail. GUI Open must
 recover hot SQLite rollback journals under the archive writer lease before
 read-only schema validation, retaining database and sidecar path-safety checks.
-Include the optional existing processing database so Continue Processing can
+Include the optional existing processing database so Continue Importing… can
 read its queue and saved policy after a crash. Import startup remains tracked
 from lease acquisition and settings writes through job registration; failed
 startup releases its lease before reporting completion. Definition refreshes
@@ -316,7 +327,7 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
   SHA-256 skips the file without parsing its messages.  If a file grew, ingest
   first compares the SHA-256 of the old length.  A matching MBOX prefix followed
   by a valid `From ` boundary resumes at that byte offset; all other changes
-  reprocess the whole file.  The checkpoint is updated only after the selected
+  reread the whole file.  The checkpoint is updated only after the selected
   region finishes and the source metadata remains stable.
   A lightweight preliminary pass counts recognized source containers and their
   available byte estimates without hashing or retaining message contents. It
@@ -425,18 +436,25 @@ table also stores explicitly labeled non-email Google Chat identities.
 * Mailbag CSV uses CRLF record endings. Folded source headers used as CSV
   metadata are unfolded to single-line values; canonical message bytes are
   unchanged.
-* `refresh-index` rebuilds the disposable FTS database in a temporary file,
-  verifies every normal MBOX message against the catalog and the total
-  searchable-message count, and replaces the prior index only after those
-  checks succeed. It visibly reports a progress bar, completion count, and
-  ETA weighted by catalogued message counts for mailbox verification and
-  message indexing. It announces before starting that `Ctrl-C` discards the
-  incomplete replacement and retains the existing search index. Its
+* `rebuild` (and **File → Rebuild Databases…**) rebuilds the catalog's
+  byte-derived message fields and the disposable FTS database into new files
+  (`*.sqlite3.new.<id>`), counts the records only of mailboxes modified since
+  the last completed checkpoint (or whose size or count differs from what it
+  recorded; **File → Revalidate Archive** is the full recheck), verifies the
+  total located-message count, and only then renames the live catalog and
+  index to `.old` and moves the new files into place. Message numbers,
+  locations, source provenance, import runs and non-parse defects are kept;
+  dates the bytes lack keep their recorded import-context value. It visibly
+  reports a progress bar, bytes done of the known byte total, rate and ETA for
+  catalog copying, mailbox verification and message rebuilding; the GUI shows
+  the same in the search window's status line, and quitting or Ctrl-C deletes
+  the incomplete replacement and keeps the live databases. It announces before
+  starting that `Ctrl-C` discards the new databases. Its
   `--workers` option defaults to the available CPU count (or two if it cannot
   be determined), and parallelizes bounded verified-MBOX read/hash/MIME work while
-  retaining one ordered SQLite writer. While it reads each verified message, it also refreshes the
-  derived catalog subject from canonical header bytes, repairing newly supported
-  legacy charset recovery without changing canonical mail. `review` queries the
+  retaining one ordered SQLite writer. Re-deriving from canonical header bytes
+  repairs newly supported legacy charset recovery and messages stored with a
+  leading `>From ` envelope line without changing canonical mail. `review` queries the
   committed source-observation log by run, source, and disposition. Derived
   catalog fields and canonical locations are created correctly during ingest.
 

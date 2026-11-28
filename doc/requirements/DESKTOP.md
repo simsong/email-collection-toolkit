@@ -23,7 +23,7 @@ origin of a timeout in a mixed-source run. A real failure
 that merely contains a timeout in its exception chain must remain a failure.
 
 Show the launch application version in parentheses at the top right of native
-application windows, including Search, Ingests, About and Preferences. macOS uses
+application windows, including Search, Activity, About and Preferences. macOS uses
 the title bar; Windows uses its native menu bar and includes it in the caption. Preserve
 custom titles and the native document-path menu. Repeated activation must not
 add duplicate version labels; later editable installs must not relabel a running
@@ -52,7 +52,7 @@ zero means no known unfinished saved-message work, not that future downloads
 are complete. Explain that an email leaves the count only when all its tasks finish;
 the count may stay level while earlier processing stages complete tasks.
 Old snapshots without the counter show Unavailable. This reporting
-must not change the processor configuration or trigger reprocessing.
+must not change the processor configuration or trigger rebuilding.
 
 During archived-content and pending-ingest recovery, show the active processor,
 job activity and finished-job count. Use an indeterminate progress bar while the
@@ -62,13 +62,22 @@ History status circles are at least 22 pixels, with a check for running/complete
 an X for failed/disk-full/stale, and a pause symbol for interrupted runs, alongside
 text labels. Accepted GUI imports show startup immediately while archive
 preparation precedes the first saved run snapshot; old failures retain their state.
+Each saved run must retain the application version captured at producer launch,
+including a later failure. Show it in parentheses after the timestamp in the
+history entry and selected run details.
+An editable reinstall or a newer history viewer must not relabel a saved run.
+Older snapshots without a version display **(version unavailable)** without rewriting them.
 Explain that finished processing jobs are work for messages or MIME parts,
 potentially several per email, rather than newly imported message counts.
 Label saved work **Processing saved mail**. During processing stages, including
 intervals between jobs, show finished tasks and average tasks/second instead of
 zero source-message/file/rate cards. History summaries use processing counts too.
 The worker table separates operation, current task/source, download/import
-progress and that worker's finished processing tasks. Preserve each worker's
+progress and that worker's finished processing tasks. Keep Thread, Operation,
+download/import progress and finished-task columns at constant widths across
+activity updates and window resizing. Current task/source takes the remaining
+width and wraps long paths. Narrow windows may scroll the table horizontally.
+Preserve each worker's
 count across tasks and idle periods; never copy the global total into its row.
 Old snapshots without worker totals display unavailable rather than invented
 counts. Describe IMAP source containers as download partitions, not files.
@@ -93,12 +102,12 @@ phase checkboxes. Leaving suspended and closing the dialog preserve work and ask
 again on reopening; Continue Import resumes both ingest and content processing
 using saved policy. Initially focus Leave import suspended so Enter preserves
 the checkpoint. Focus changes and count/name/message navigation must not
-repeat the automatic prompt; Continue Processing remains an explicit way to open it.
+repeat the automatic prompt; Continue Importing… remains an explicit way to open it.
 Stop import cancels all displayed saved traversal and pending,
 running or failed jobs under the archive writer lease, retaining archived mail,
 source checkpoints and run history. A changed source history blocks a stale stop request.
 A later explicit import can begin a new continuation; cancelled derived work may
-be regenerated with explicit reprocessing.
+be regenerated with explicit rebuilding.
 
 Search-window warnings and errors stay expanded until the user selects Collapse
 messages or Dismiss messages. Collapse leaves a bottom message pill. The pill reopens all messages received in that
@@ -117,7 +126,9 @@ Application-wide warnings remain shared, and About may retain the aggregate hist
 ## Shutdown feedback
 
 During active import, Quit offers **Suspend import and quit** and explains that
-saved work resumes later without duplicate imports. After confirmation, loaded
+saved work resumes later without duplicate imports. During a rebuild, Quit asks
+**Abort rebuild and quit?**, explains that quitting aborts the rebuild, discards the
+partly rebuilt databases and keeps the current ones, and offers **Keep Rebuilding**. After confirmation, loaded
 application windows show a full-window translucent gray overlay (20% gray fill)
 with centered black **Shutting down…** text at 50% opacity. It covers existing
 dialogs, blocks content interaction and cannot be dismissed with Escape. Canceling
@@ -229,7 +240,7 @@ CPU ratios on the current machine and bound a migrated custom value to its cap.
 Apply choices to newly started or continued importing and saved-mail processing;
 do not resize an active pool. CLI `--workers N` takes precedence, leaves the saved
 choice unchanged and disables all worker preference controls, with the note
-`# workers set to {number} on command line`. Generic ingest, process, refresh-index
+`# workers set to {number} on command line`. Generic ingest, process, rebuild
 and standalone IMAP use the preference when their flag is omitted.
 
 Preferences also expose **Maximum IMAP connections per account**, default 8,
@@ -268,9 +279,12 @@ window, child window, or ingest operation uses it.
 Every search window has a lifetime-stable document binding and independent
 query, sort, selection, mailbox-filter, and geometry state. **New Search
 Window** in the **Window** menu attaches another window to the active document;
-it is disabled when no saved archive search window is active. **Open** and an
-operating-system open event create a window for the requested document; they
-must not silently retarget an existing search window.
+it is disabled when no saved archive search window is active. **Open**, **Open
+Recent**, and an operating-system open event create a window for the requested
+document only when it has none; when the archive (or any alias of it) already
+has a search window, they bring that window to the front instead of opening a
+second copy, preferring the active window. They must not silently retarget a
+search window of a different archive.
 
 Startup opens explicit document paths first, otherwise the last valid archive.
 When neither is available, show a single setup window with all three numbered
@@ -287,7 +301,7 @@ any setup dialog is pending. Reject equal or nested source/destination folders,
 including symlink, Unicode, and case aliases, before creating or opening a
 destination. Start
 import reuses the selected root without asking for it again, retains owner email rule
-setup and antivirus confirmation, and opens the Ingests progress window after
+setup and antivirus confirmation, and opens the Activity progress window after
 starting the worker. Cancellation of import settings keeps the setup choices available for retry.
 A **Cancel** button beside Start import (also Escape) quits the application.
 The Cancel action itself must not create an archive, start import, or write
@@ -350,28 +364,32 @@ window; see [processing](PROCESSING.md#registered-processor-graph).
 **File → New** asks for a new or empty permanent `.mailarchive` destination
 before creating its blank search window. It initializes BagIt, both databases,
 and operational status state, and refuses to overwrite an existing archive or
-nonempty invalid directory. **File → Import…** collects one or more supported
+nonempty invalid directory. **File → Import Mail…** collects one or more supported
 local files or directories, owner names, explicit final
 confirmation, and starts the same typed ingest service used by the CLI on a
 worker thread. ClamAV has an explicit opt-out; the DMG bundles the engine and
 project definitions, while development uses a local library and `etc/clamdb/`. Missing library
-or configuration files produce a warning banner in the Ingests window and
+or configuration files produce a warning banner in the Activity window and
 macOS source picker. Scanner unavailability introduces no extra approval or
 manual-review gate: import proceeds with scanner-error evidence and metadata
 defects. An optional installation link opens the application release page without
 installing software or starting a service. Startup errors likewise record evidence
 and continue. About displays scanner and definition availability, date, age and
 refresh status; explicit unscanned imports retain their warning in history.
-The Ingests window provides **Import Directory…**, bound to its own archive even
-when another archive is active. It opens the source picker directly, then
-uses the same owner-names setup, confirmation, and writer lease as File Import.
-The button is disabled during an import or while its dialogs are pending.
+The Activity window offers exactly two controls for its own archive: **Suspend**
+(labelled **Cancel** while a rebuild is running), enabled while an import or rebuild
+is running, and **Continue**, enabled when the latest activity was suspended,
+interrupted or failed. Imports start only from **File → Import Mail…**. Cancelling a
+rebuild stops it and keeps the current databases; Continue starts a cancelled rebuild
+again from the beginning, since a rebuild is all-or-nothing.
 Archive checkpoint progress reads **Verifying archived messages and saving
 checksums**, describing local preservation work without implying online publication.
-The same window offers **Suspend Import** for its own active archive and
-**Continue Import** for interrupted or failed work. Suspension is cooperative:
-show that current work is finishing until its checkpoints are saved and the
-writer lease is released. Do not quit or cancel saved jobs. Retain accepted
+For imports, **Suspend** and **Continue** checkpoint and resume work. Suspension is cooperative
+but prompt: show that current work is finishing until the current message and
+source checkpoints are saved and the writer lease is released. Suspend and Quit
+do not wait for the whole-archive checksum refresh, which rereads every
+archived message; a refresh already under way stops at the next message.
+Continue or the next completed import writes current manifests. Do not quit or cancel saved jobs. Retain accepted
 settings even if suspension precedes processing initialization, so reopening
 the archive can continue. Resume must preserve bytes and source idempotence.
 Network-interrupted IMAP runs display **paused** with a pause symbol and a
@@ -422,17 +440,34 @@ including senders from prior imports and applying exclusions. Detected addresses
 are derived evidence, never expanded into YAML or reused as implicit owner rules.
 Existing Sent/Archive classifications remain unchanged by rule edits or
 reindexing; correcting historical misclassification requires a fresh rebuild.
-CLI processing, Continue Processing and explicit reprocessing replay their saved
+The search window has **Search** and **Sources** tabs (real ARIA tabs; arrow keys
+move between them). Sources replaces the search view with every imported top-level
+directory or file and every IMAP account, each with a checkbox saying whether
+Rescan Imports… includes it; unavailable local sources are marked. IMAP rows have
+**Config…** for server, port, security, username and password; changing the
+endpoint requires the password, which is verified by logging in and stored only in
+the system keychain. Edits to config.yaml hold the archive writer lease. Buttons
+that open a window or dialog end in "…" (Names and addresses…, Institutions…,
+Continue Importing… / Rescan Imports…).
+CLI processing, Continue Importing… and explicit rebuilding replay their saved
 ingest policy without overwriting later owner defaults in `config.yaml`.
 Only an explicitly requested import saves its owner rules as document defaults.
 
-**File → Reprocess Saved Mail…** targets the selected archive. Before changing
-anything, confirm that rebuilding derived content, search and automatic identity
-evidence may take a very long time and leave search temporarily incomplete.
-Cancel preserves all work. Replay retains canonical messages and curator edits,
-uses the normal background processing/status/suspension path, does not download
-source mail, and preserves saved source-import settings. Active work must finish
-or suspend before replay starts.
+**File → Rebuild Databases…** targets the selected archive. Before changing
+anything, confirm that rebuilding catalog details, search, derived content and
+automatic identity evidence may take a long time. Cancel preserves all work.
+It first runs the same rebuild as `ect rebuild` in the background (byte
+progress in the search window's status line; search uses the current databases
+until the new ones are published; Quit discards the replacement), then, when a
+processing database exists, replays processors through the normal background
+processing/status/suspension path. Each rebuild appears in the Activity window
+as its own "Rebuild databases" run with its step, percent, bytes, ETA, message
+count and final state, whether started from the menu or `ect rebuild`. It also
+shows, refreshed about every 10 seconds, the mailbox being rebuilt (mailboxes go in
+year order), messages rebuilt per year, names learned (addresses with a display name
+in the new index), and each worker's last mailbox, messages and data read. Replay retains canonical messages, source
+provenance and curator edits, does not download source mail, and preserves saved
+source-import settings. Active work must finish or suspend before it starts.
 
 Only a saved document holding the matching cross-process writer lease may
 start ingest. The process-local document registry prevents duplicate UI jobs
@@ -442,14 +477,15 @@ identifies all attached search windows for refresh.
 The OS lease is a nonblocking exclusive lock on
 `status/archive-write.lock`; diagnostic JSON in that file records the operation,
 PID, host, start time, version, and archive identity, but file presence never
-determines ownership and a process crash releases the lock. CLI ingest and
-search-index rebuild use the same lease. During Import, closing its owning search window transfers the same operation
+determines ownership and a process crash releases the lock. CLI ingest, Rebuild
+Databases, Sources and Document Options edits and the other writers listed in
+[Writer lock](../implementation/ARCHIVE.md#writer-lock) use the same lease. During Import, closing its owning search window transfers the same operation
 to another search window on that archive, preserving stop/completion signals and
 the writer lease. Only its last search window refuses Close until import finishes
 or suspends; the close callback returns promptly and explains that Quit suspends
 import and exits the program, including the ⌘ Q shortcut on macOS.
 Other archives and child windows remain independently closeable. The Window menu
-lists the About, search, and Ingests windows and brings a selected window forward.
+lists the About, search, and Activity windows and brings a selected window forward.
 
 `ect-search` is a read-only command-line consumer of both databases.  It
 accepts ordinary full-text terms plus `any:ADDRESS`, `from:ADDRESS`,
@@ -573,8 +609,26 @@ visible rows; preview work is requested when a row is painted. Result rows
 disable native text selection. A single selected row opens its message; modifier
 clicks select multiple rows and replace the message with a selected-message count.
 Dragging a selected row or the message-file icon uses the same export path: one
-message becomes an `.eml`, and multiple messages become a ZIP whose entries
-preserve their RFC 5322 bytes. Dragging an unselected row exports that row alone.
+message becomes an `.eml`, and multiple messages become one mboxrd MBOX file
+(the default) or, per the **Preferences** drag setting, a ZIP of `.eml` files;
+both preserve each message's RFC 5322 bytes. **File → Export Selected
+Messages…** saves the selection through a save dialog as MBOX (the default),
+a ZIP of `.eml` files, or, for one message, an `.eml`, chosen by the file type.
+The File menu is grouped by separators: the archive file (New, Open…, Open
+Recent); mail in and out of it and its settings (Import Mail…, Export Selected
+Messages…, Document Options…); whole-archive maintenance (Rebuild Databases…,
+Revalidate Archive, and on Windows Show Archive in Explorer); then Close. Application settings are not in File: With no archive window in front, commands that need one (Import Mail…, Export
+Selected Messages…, Document Options…, Rebuild Databases…, Revalidate Archive, Close,
+Activity…, New Search Window) are disabled on macOS; selection commands also need a
+search window. **Default Lists…**
+follows **Preferences…** in the macOS application menu and the Windows Help menu.
+Validate with `tests/test_gui_service.py::test_native_menus_route_through_the_application_controller`.
+**File → Revalidate Archive** rereads every catalogued message and every file
+listed in the BagIt manifests without writing to the archive, then writes an
+HTML report to the system temporary directory and opens it in the default
+browser. The report lists every file in the archive with its size, manifest
+result, and, for each MBOX, its message count, how many validate against their
+recorded SHA-256, and how many are redacted (always zero until redaction exists). Dragging an unselected row exports that row alone.
 Message HTML links and recognized `http`, `https`, or `mailto` links in rendered
 plain-text parts are never opened directly. Hovering an allowed destination
 shows its complete destination in the bottom status bar. Clicking it presents
@@ -609,11 +663,14 @@ body text; for HTML it also copies the displayed message subject and headers.
 The bottom of the main GUI contains a clickable ingest-status line. During a
 run it shows live completion, message count, active/configured workers, and ETA;
 otherwise it summarizes the latest run. Clicking it opens a separate native
-Ingests window with its own close box. The **Window → Ingests** menu opens the
+Activity window with its own close box. The **Window → Activity…** menu opens the
 same window. That window browses every retained status file and shows the
 selected run's aggregate statistics, sources, failure detail, and all worker
-threads. If it is already visible, either action brings it to the front and
-selects the requested run instead of creating a duplicate window.
+threads. Runs in progress (running or paused) lead the list; a thin rule and a
+**Past Activity** label separate them from finished runs, and the label heads
+the list when nothing is in progress. If the window is already open, either
+action brings it to the front first and then selects the requested run, so a
+slow page reply cannot leave it hidden, instead of creating a duplicate window.
 
 The GUI lists every non-attachment `text/plain` and `text/html` MIME part and
 allows the user to select among them. When multiple HTML parts exist, it opens
@@ -662,7 +719,7 @@ same drag implementation, which creates that copy only when a drag starts, never
 while browsing, selecting, or hovering
 over a result. Because the pywebview bridge is asynchronous, the first drag
 prepares the disposable file and the next drag copies the actual `.eml` file to
-Finder, Explorer or the Desktop. Multiple messages transfer as an actual ZIP file. Neither
+Finder, Explorer or the Desktop. Multiple messages transfer as an actual MBOX or ZIP file. Neither
 operation may create a `.fileloc`/`.webloc` shortcut or expose link/text URL drag
 representations supplied by the application. The application explicitly writes
 only `public.file-url` on macOS or native `FileDrop` on Windows, the modern file-path transfer type; macOS may add its own
@@ -698,7 +755,8 @@ head on any non-main branch must run DMG/MSIX/signature validation regardless
 of that filter, without publishing. Signing must remove temporary private-key
 material even if writing the PFX fails partway through. Forked PRs currently
 need a separate CI policy. Ordinary checks and website jobs use macOS with
-checksum-verified Zola; candidate validation additionally runs Windows x64.
+checksum-verified Zola; a focused Windows lifecycle job verifies native callback
+registration and dispatch. Candidate validation additionally runs Windows x64.
 Release publication requires a version-matching `v*` tag on main.
 The required continuous-integration gate exercises the archive lifecycle and
 complete HTML interface in headless Chromium with disposable fixtures. Native
@@ -864,6 +922,23 @@ headers and Raw Source without exposing partial part IDs; Save Message retains
 the complete original. Raw boundary caches must share byte spans, not retain one
 whole subtree copy per depth.
 
+Canonical bytes that begin with a source envelope line (`From ` or mboxo-quoted
+`>From `, kept by older ingests) must still display their headers, body parts
+and attachments; the reader skips only that first line for parsing. Raw Source,
+Save Message, drag and hashes keep the exact stored bytes, and no archive
+database is rewritten to achieve this.
+
+**View Message Metadata** is reachable from the message toolbar's (i) button
+and from a control-click (context) menu on a result row or on the message pane.
+It opens a read-only report grouped as Message, Recipients, Hashes and storage,
+each Source observation, Duplicates (exact duplicate copies and catalog messages
+sharing semantic content or Message-ID), Metadata defects, MIME structure and
+attachments (count and decoded sizes), and Extraction (ingest runs and their
+times, search-index state, and per-message processor invocations when a
+processing database exists). Producing the report never writes to any archive
+database. Validate with `tests/test_message_metadata.py` and
+`e2e_tests/test_message_metadata_ui.py`.
+
 Standalone message windows receive the application menu at creation and remain
 in the shared native window snapshot and Window menu. Native Close remains
 available when a standalone viewer is focused, including on macOS. Native
@@ -871,7 +946,7 @@ acceptance checks actual File/Window/Help headings and Close enabled state.
 
 ## Status ordering and cleanup deadlines
 
-Slow status replies must not overlap and regress About, Ingests, document options
+Slow status replies must not overlap and regress About, Activity, document options
 or Windows Preferences. A refresh after an import/update command must read state
 after any older request finishes.
 HTML message layout follows actual animation frames, document/font/load events
@@ -882,9 +957,37 @@ existing recovery/checkpoint contract, rather than claiming completed cleanup.
 Native JavaScript replies must settle on completion, execution error, window Close
 or a failure deadline. A closed webview must not leave its caller blocked forever;
 synchronous native evaluations must not wait on their own UI thread.
+Python-to-page API replies must not wait synchronously for a redundant native
+acknowledgement. Activity status and Suspend/Resume requests have a 15-second
+reply deadline. A missing reply reports an unconfirmed outcome, releases refresh
+ownership and permits a fresh status read; it must not replay a command, classify
+the import as failed, or enable password editing while login validation is pending.
+On macOS and Windows, wake and network configuration changes refresh Activity without a focus
+change. A successful status refresh clears its own earlier error and preserves
+command errors.
+On macOS and Windows, an IMAP connection blocked by network availability or captive portal sign-in
+shows a waiting status while it retests every 150 seconds. Suspend remains available.
 Collection-only completion, including a drag export for an unselected row, must
 notify state observers even when it changes no visible DOM.
 Large search batches must append without depending on JavaScript's function
 argument limit. Suggestion/preview wait expiry returns a typed error with current
 pending state; it is not a successful polling tick, and explicit retries may read
 later actual completion.
+
+## IMAP run coverage
+
+Concurrent acquisition and saved-content work shall show separate worker groups,
+their actual operations and an explicit overlap explanation. Saved-work events must
+not erase source activity or change unknown-size acquisition ETA into finalizing.
+Do not show live overlap for a stale run. Coalesce saved-backlog queries during
+source activity while sampling the exact remaining count at shutdown.
+
+Unknown-byte source inventory reports ETA unavailable while partitions remain;
+finishing known byte input may still report finalizing before its checkpoint.
+Activity shows run-specific message count, earliest/latest IMAP INTERNALDATE values
+in UTC and year counts before the workers table. The Year and Messages columns
+size to their contents. The range uses source IMAP INTERNALDATE, not header dates or download times.
+Separate acquisition counters exclude attached-message extraction and saved processing.
+Count complete IMAP bodies when received, including bodies awaiting scanning or
+publication. Historical missing counts or dates show unavailable; no dated messages shows an explicit
+empty state. `make test-imap-progress` validates the estimator and actual browser.

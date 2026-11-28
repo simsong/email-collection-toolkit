@@ -4,7 +4,7 @@
 from typing import Any, Self
 from collections.abc import Mapping
 from Foundation import NSURL as NSURL
-from Foundation import NSRect
+from Foundation import NSNotificationCenter, NSRect
 
 type Point = tuple[float, float]
 type Rect = tuple[Point, Point]
@@ -13,6 +13,8 @@ NSPasteboardTypeString: str
 NSPasteboardTypeFileURL: str
 NSPasteboardTypeURL: str
 NSFilenamesPboardType: str
+NSWorkspaceWillSleepNotification: str
+NSWorkspaceDidWakeNotification: str
 
 class NSPasteboard:
     @classmethod
@@ -33,6 +35,7 @@ class NSWorkspace:
     def sharedWorkspace(cls) -> Self: ...
     def openURL_(self, url: NSURL) -> bool: ...
     def iconForFile_(self, path: str) -> NSImage: ...
+    def notificationCenter(self) -> NSNotificationCenter: ...
 
 class NSImage:
     @classmethod
@@ -167,6 +170,8 @@ NSTerminateLater: int
 NSModalPanelRunLoopMode: str
 NSDeviceRGBColorSpace: str
 NSTextAlignmentCenter: int
+NSTextAlignmentRight: int
+NSBoxSeparator: int
 NSFontAttributeName: str
 NSForegroundColorAttributeName: str
 NSParagraphStyleAttributeName: str
@@ -197,6 +202,10 @@ class NSView:
     def setIdentifier_(self, value: str) -> None: ...
     def identifier(self) -> str | None: ...
     def subviews(self) -> list[Any]: ...
+
+class NSBox(NSView):
+    def setBoxType_(self, value: int) -> None: ...
+    def setFrame_(self, frame: Rect) -> None: ...
 
 class NSTextField(NSView):
     @classmethod
@@ -308,6 +317,8 @@ class NSMutableParagraphStyle:
     def setAlignment_(self, alignment: int) -> None: ...
 
 class NSFont:
+    @classmethod
+    def smallSystemFontSize(cls) -> float: ...
     @classmethod
     def boldSystemFontOfSize_(cls, size: float) -> Self: ...
     @classmethod

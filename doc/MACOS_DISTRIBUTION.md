@@ -93,7 +93,7 @@ make check-release DMG="/absolute/path/to/Email-Collection-Toolkit-0.0.0-arm64.d
 ```
 
 The first target displays no windows. The second shows and closes the real
-About, search, Ingests, and source-picker windows automatically. Both test actual
+About, search, Activity, and source-picker windows automatically. Both test actual
 unscanned ingest, exact-byte retrieval, FTS search, independent preservation
 verification, and repeat-import idempotence. The GUI additionally checks native
 bridge calls, the missing-scanner banner and canceled source selection.

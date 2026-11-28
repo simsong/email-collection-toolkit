@@ -19,7 +19,7 @@ Within `ect processor`, `plugins` prints manifests; `status` and `run` print typ
 with persistent invocation counts and timings. A failed run exits 1.
 Ctrl-C stops CLI processing, retains unfinished jobs, prints statistics and exits 130.
 Use `ect processor ... run --retry` to retry failed jobs while retaining successful checkpoints.
-Code or manifest edits never trigger reprocessing. Use the harness `reprocess` command explicitly to
+Code or manifest edits never trigger rebuilding. Use the harness `rebuild` command explicitly to
 supersede unfinished jobs and queue originals in a fresh generation, even when
 the registry is unchanged. Manual identity/tag data and invocation history remain.
 Ordinary resume reuses completed invocations and accepts legacy registry hashes.
@@ -84,8 +84,8 @@ without needing source files; continuing an unfinished source traversal still
 requires repeating `ect import` with that source. `--max-jobs` bounds a content pass.
 Failed work is retried; successful invocations are reused. Registry, processor
 code, policy and effective settings changes never queue an automatic generation.
-`process --reprocess` or confirmed **File → Reprocess Saved Mail…** explicitly
-requests one. Reprocessing filed messages starts at
+`process --rebuild` or confirmed **File → Rebuild Databases…** explicitly
+requests one. Rebuilding filed messages starts at
 message processing, retaining their original antivirus provenance. It never
 unquarantines infected messages. Original source bytes, canonical MBOX files and
 manual decisions are retained. Working `objects/` files, including synthetic
@@ -279,7 +279,7 @@ Import** to resume both ingest and content processing, **Leave import suspended*
 to preserve the checkpoint without starting work, and **Stop import** to cancel
 remaining work while retaining archived mail. The desktop bridge
 uses the shared `IngestRequest` service, saved owner/scanner/plugin settings and
-writer lease. The **Names and addresses** and **Institutions** controls query the
+writer lease. The **Names and addresses…** and **Institutions…** controls query the
 processor database; manual name/address decisions commit immediately and survive
 replay. Institution membership is domain-based. About lists processor manifests
 by subscribed MIME type. Authoritative matching is not yet connected. No persistent
@@ -506,7 +506,7 @@ MIME depth (default 40, `plugins.mime.max_depth`), attached-message depth
 (default 20, `plugins.attached-message.max_depth`), and text size limits
 (`max_text_bytes` on each text plugin) leave failed, retryable jobs. The GUI
 offers continuation for these failures; increasing the configured limit and
-resuming reprocesses the retained source. Limits never mark truncated work complete.
+resuming rebuildes the retained source. Limits never mark truncated work complete.
 
 Persist job phase, message/part identity, plugin kind/version, manifest provenance,
 input digest, attempts, status and diagnostics.
@@ -515,7 +515,7 @@ records an interrupted invocation and leaves the job resumable; it is not a
 separate terminal job state.
 On restart, abandoned running jobs become retryable; successful work is skipped.
 Plugin/version/configuration changes do not invalidate completed work. Only an
-explicit reprocessing request rebuilds derived outputs, preserving canonical
+explicit rebuilding request rebuilds derived outputs, preserving canonical
 messages and manual decisions.
 Synthetic content can be regenerated from its producer and original reference.
 

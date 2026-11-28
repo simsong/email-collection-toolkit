@@ -20,11 +20,17 @@ does not establish that every platform or release gate has passed.
 ## Shared boundaries
 
 - IMAP credential checks authenticate without mailbox access or archive writes;
-  replacement passwords are tested before saving. Account acquisition uses
+  replacement passwords are tested before saving. The search window's IMAP
+  authentication error offers Update IMAP Credentials. Account acquisition uses
   a saved per-account limit (default 8, range 1–15) and cancellable capacity backoff while retaining the
-  full processing worker pool. Protocol failures and private diagnostics
+  full processing worker pool. Interrupted sessions retry with fresh TLS and
+  epoch checks, retaining delivered UID state. Desktop connectivity failures wait
+  for network sign-in and retest every 150 seconds until recovery or cancellation.
+  CLI recovery exhaustion pauses safely. Protocol failures and private diagnostics
   retain their distinct handling, including malformed greetings and full CLI login
-  diagnostics. Expected configuration problems use actionable warnings without
+  diagnostics. IMAP verifies the declared body literal length and treats
+  RFC822.SIZE disagreements as warnings.
+  Expected configuration problems use actionable warnings without
   validator dumps or tracebacks. Retry classification precedes redaction; CLI backoff remains visible,
   console cancellation wakes discovery, and pending password validation blocks Escape. See [acquisition](requirements/ACQUISITION.md).
 
@@ -33,12 +39,31 @@ does not establish that every platform or release gate has passed.
 - Standard MBOX and SHA-256 manifests are the canonical preservation record.
   Search indexes are rebuildable; manual decisions, configuration and history
   require backups of the whole archive.
-- Canonical writes use the writer lease and recoverable publication protocol.
+- Canonical writes use the [writer lease](implementation/ARCHIVE.md#writer-lock) and recoverable publication protocol.
   Interrupted work retains completed checkpoints; errors do not silently drop mail.
 - ClamAV runs in owned workers. Detections and scanner failures retain messages
   and evidence; no resident service or manual-review gate is introduced.
 - Jobs, windows and import progress follow actual work and change notifications.
+  Source acquisition and saved-message processing run concurrently after mandatory
+  ingest recovery, sharing one owner for database and canonical publication.
+  Verified working inputs stay in place while processors read them. Cleanup
+  preserves working objects whose bytes fail SHA-256 verification.
   Failure deadlines remain explicit; readiness must be observed.
+  Native API replies use one-way delivery; lost Activity replies display an unknown
+  outcome without retrying a command or marking the import failed.
+  Desktop wake refreshes Activity, and route changes wake pending IMAP reconnects.
+  Unfinished unknown-size acquisition reports ETA unavailable, including mixed
+  local and remote runs. Source counts and dates exclude promoted attachments.
+  IMAP run details show
+  complete source downloads, IMAP INTERNALDATE UTC bounds and per-year coverage.
+  Older IMAP history without download counts shows them as unavailable.
+  Run history shows the producing application's launch version in parentheses
+  after the timestamp, including failures. Older snapshots show it as unavailable.
+  The per-year coverage table is sized to its contents.
+  Worker activity updates keep four table columns fixed; task/source expands
+  into the remaining width. See [desktop](requirements/DESKTOP.md).
+- Pending GUI searches show progress without claiming no matches before
+  completion. See [search](requirements/SEARCH.md).
 - User commands are `ect`, `ect-create`, `ect-import` and `ect-search`. They invoke
   application code directly. Make is the developer build/test convenience layer.
 - Versions come from `pyproject.toml`; launch/build provenance discloses local

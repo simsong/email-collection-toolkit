@@ -20,7 +20,7 @@ pywebview delivers scalar and Promise results through its Promise-only callback.
 The real native run checks numeric, false, null and Promise results before reader
 operations, verifies pywebview's direct scalar return separately, and requires
 synchronous errors and rejected Promises to retain their diagnostics through a
-typed result envelope. Its direct background import opens Ingests explicitly before checking
+typed result envelope. Its direct background import opens Activity explicitly before checking
 that window's version and capturing its frame.
 Name-linkage fixtures use the canonical byte-preserving MBOX writer rather than
 the unadapted Windows stdlib writer, avoiding newline-induced hash mismatches.
@@ -271,7 +271,7 @@ message/MBOX preparation uses hard links when possible and copies otherwise;
 public-inbox Git blobs are streamed through one `git cat-file --batch` process.
 Individual-message files with Unix MBOX envelope lines are parsed into derived
 RFC 5322 files instead of being mistaken for multi-message mailboxes.
-Babyl-to-RFC conversion is a derived SF-LOVERS preprocessing step, with every
+Babyl-to-RFC conversion is a derived SF-LOVERS prebuilding step, with every
 downloaded source retained separately.
 
 `make validation-run` invokes the ordinary ingest CLI and its private on-demand
@@ -496,8 +496,8 @@ mailbox-only queries as well as text queries.
 
 Document identity, publication and closure follow the [desktop review requirements](../requirements/VALIDATION.md#pr-review-validation-follow-up).
 
-An Ingests child window retains document routing after all search windows close.
-New Search and Ingests use that document directly; Import creates a new search
+An Activity child window retains document routing after all search windows close.
+New Search and Activity use that document directly; Import creates a new search
 owner when needed.
 
 Integrity hash-standard versions must be JSON integers. The standalone verifier
@@ -524,7 +524,7 @@ and visible-window state when its bounded personal-list focus check fails.
 Its shared smoke fixture uses real ingestion and verifies canonical message bytes;
 catalog/search rows alone cannot support standalone viewing or export acceptance.
 This distinguishes an inactive/locked desktop from an assumed menu regression;
-non-interactive reprocessing and Quit checks remain separate evidence.
+non-interactive rebuilding and Quit checks remain separate evidence.
 
 The processing-history browser fixture uses a live-process typed snapshot while
 checking search/About footers; it requires no heartbeat producer. Full Make validation batches run serially to retain

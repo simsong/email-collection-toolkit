@@ -511,7 +511,7 @@ def desktop_check(output: Path) -> None:
                 labels = [str(item.Text) for heading in menus[0].Items
                           if isinstance(heading, forms.ToolStripMenuItem) for item in heading.DropDownItems]
                 if not {"New", "Import…", "Document Options…", "Check for Program Updates", "Preferences…",
-                        "Reprocess Saved Mail…"}.issubset(labels):
+                        "Rebuild Databases…"}.issubset(labels):
                     raise AssertionError("Native Windows creation/import actions are missing")
                 if labels[labels.index("Check for Program Updates") + 1] != "Check for Anti-Virus Updates":
                     raise AssertionError("Native Windows anti-virus command must follow program updates")

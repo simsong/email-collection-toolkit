@@ -82,7 +82,7 @@ ect imap --archive collection.mailarchive --source SOURCE_ID --set-password
 
 Checks need only the archive's existing `config.yaml` and may run while an import
 holds the writer lease. `--set-password` needs an interactive terminal and exactly
-one selected account. Ingests offers **Update IMAP Password…** while no import is
+one selected account. Activity offers **Update IMAP Password…** while no import is
 active. Rejected replacements retain the old password; saving never starts an
 import. Errors include a sanitized server reason; credential-only checks return 75 for
 temporary connection/rate limits. Imports stay running and retry after 1, 2, 4,
@@ -189,14 +189,18 @@ ect review --archive collection.mailarchive
 ect processors --archive collection.mailarchive
 ect processing-status --archive collection.mailarchive
 ect process --archive collection.mailarchive --phase content
-ect refresh-index --archive collection.mailarchive
+ect rebuild --archive collection.mailarchive
 ```
 
 `process` resumes saved work. `--phase` is `ingest`, `content` (default), or `all`;
-`--max-jobs N` bounds a run; `--reprocess` explicitly queues a fresh generation.
-`refresh-index` verifies stored messages and replaces only the rebuildable search
-index. Both accept `--workers N`; `refresh-index --index-attachments` includes
-supported text attachments. Source acquisition requires `ect import`.
+`--max-jobs N` bounds a run; `--rebuild` explicitly queues a fresh generation.
+`rebuild` re-reads every stored message and rebuilds the catalog's derived
+message fields (Message-ID, sender, recipients, subject, date, parse defects) and
+the search index into new files, keeping message numbers and source provenance;
+the previous databases are kept as `archive.sqlite3.old` and `search.sqlite3.old`.
+It then re-runs processors if the archive has a processing database
+(`--skip-processors` omits that). Both accept `--workers N`;
+`rebuild --index-attachments` indexes supported text attachments. Source acquisition requires `ect import`.
 
 ## Identities and Contacts
 

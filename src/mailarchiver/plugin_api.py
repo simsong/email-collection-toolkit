@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .mbox_framing import MboxNormalization, is_complete_envelope
 from .change_signal import ChangeEvent
 from .imap_preferences import DEFAULT_IMAP_CONNECTIONS, ImapConnectionLimit
+from .imap_transport import ImapTransport
 
 if TYPE_CHECKING:
     from .plugin_configuration import ConfigScope, ConfigValues, ReadScope
@@ -301,6 +302,7 @@ class PluginContext(FrozenModel):
     scan_policy: Literal["clamav", "not-scanned"] = "not-scanned"
     cancellation: ChangeEvent | None = Field(default=None, exclude=True)
     imap_connections: ImapConnectionLimit = DEFAULT_IMAP_CONNECTIONS
+    imap_transport: ImapTransport | None = Field(default=None, exclude=True)
 
     def get_my_config(self, *, scope: ReadScope = "effective") -> ConfigValues:
         from .plugin_configuration import read_plugin_configuration

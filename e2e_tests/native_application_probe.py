@@ -21,7 +21,7 @@ import webview
 
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
 from mailarchiver.clamav_definitions import UPDATE_ENV, UPDATER_ENV
-from mailarchiver.gui_app import APPLICATION_VERSION, GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events, macos_import_picker, macos_owner_rules
+from mailarchiver.gui_app import APPLICATION_VERSION, GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_desktop_events, macos_import_picker, macos_owner_rules
 from mailarchiver.desktop_platform import TITLEBAR_VERSION_ID
 from mailarchiver.loopback import LoopbackAssetServer
 from mailarchiver.identity import APPLICATION_NAME
@@ -137,7 +137,7 @@ def check_document_path(window: webview.Window, path: Path | None) -> None:
             assert label.stringValue() == f"({APPLICATION_VERSION})"
             bounds = label.convertRect_toView_(label.bounds(), None)
             assert bounds.origin.x > native.frame().size.width / 2, bounds
-            if " — Ingests — " in window.title:
+            if " — Activity — " in window.title:
                 frame = native.contentView().superview()
                 bitmap = frame.bitmapImageRepForCachingDisplayInRect_(frame.bounds())
                 frame.cacheDisplayInRect_toBitmapImageRep_(frame.bounds(), bitmap)
@@ -151,6 +151,48 @@ def check_document_path(window: webview.Window, path: Path | None) -> None:
 
     AppHelper.callAfter(inspect)
     assert finished.wait(5) and not errors, errors
+
+
+def check_ingest_wake_refresh(application: PyWebViewApplication, ingest: webview.Window) -> None:
+    """Desktop: a workspace wake reaches the open Activity bridge without focus."""
+    native = ingest.native
+    assert native is not None
+    hidden = Event()
+
+    def order_out() -> None:
+        native.orderOut_(None)
+        hidden.set()
+
+    AppHelper.callAfter(order_out)
+    assert hidden.wait(5), "Activity window did not order out"
+    assert evaluate_async(ingest, """(async () => {
+        await refreshHistory();
+        const original = pywebview.api.history;
+        let reads = 0;
+        pywebview.api.history = () => { reads++; return original(); };
+        window.wakeRefresh = new Promise(resolve => {
+            window.addEventListener("mailarchiver-status-changed", async () => {
+                await refreshHistory();
+                pywebview.api.history = original;
+                resolve(reads > 0 && document.getElementById("error").hidden && !document.hasFocus());
+            }, {once: true});
+        });
+        return !document.hasFocus();
+    })()""") is True
+    appkit = import_module("AppKit")
+    workspace = appkit.NSWorkspace.sharedWorkspace()
+    center = workspace.notificationCenter()
+    returned = Event()
+
+    def wake() -> None:
+        center.postNotificationName_object_(appkit.NSWorkspaceDidWakeNotification, workspace)
+        returned.set()
+
+    with application._lock:  # pylint: disable=protected-access
+        AppHelper.callAfter(wake)
+        assert returned.wait(3), "Workspace wake blocked Cocoa on the application lock"
+    assert evaluate_async(ingest, "window.wakeRefresh") is True
+    AppHelper.callAfter(native.orderFront_, None)
 
 
 def check_antivirus_menu(application: PyWebViewApplication, about: webview.Window) -> None:
@@ -198,7 +240,7 @@ def check_antivirus_menu(application: PyWebViewApplication, about: webview.Windo
                 os.environ[key] = value
 
 
-def check_reprocess_menu(application: PyWebViewApplication, api) -> None:
+def check_rebuild_menu(application: PyWebViewApplication, api) -> None:
     """Curator confirmation alone starts replay; Cancel preserves jobs and search data."""
     document = api.document
     assert document is not None and document.path is not None
@@ -224,15 +266,15 @@ def check_reprocess_menu(application: PyWebViewApplication, api) -> None:
                 return
             timer.invalidate()
             try:
-                assert modal.title() == "Reprocess saved mail?"
+                assert modal.title() == "Rebuild databases?"
                 views, texts = [modal.contentView()], []
                 while views:
                     view = views.pop()
                     views.extend(view.subviews())
                     if hasattr(view, "stringValue"):
                         texts.append(str(view.stringValue()))
-                assert "very long time" in "\n".join(texts)
-                assert "No mail will be downloaded" in "\n".join(texts)
+                assert "long time" in "\n".join(texts)
+                assert "No mail is downloaded" in "\n".join(texts)
             except Exception:  # pylint: disable=broad-exception-caught
                 errors.append(traceback.format_exc())
             finally:
@@ -245,8 +287,8 @@ def check_reprocess_menu(application: PyWebViewApplication, api) -> None:
                 native.activateIgnoringOtherApps_(True)
                 api.window.native.makeKeyAndOrderFront_(None)
                 ModalObserver(answer, errors)
-                item = native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Reprocess Saved Mail…")
-                assert item is not None and item.isEnabled(), "Reprocessing menu is missing"
+                item = native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Rebuild Databases…")
+                assert item is not None and item.isEnabled(), "Rebuilding menu is missing"
                 assert native.sendAction_to_from_(item.action(), item.target(), item)
             except Exception:  # pylint: disable=broad-exception-caught
                 errors.append(traceback.format_exc())
@@ -296,7 +338,7 @@ def main() -> None:
     server = LoopbackAssetServer(GUI_DIRECTORY)
     controller = ApplicationController(ApplicationPreferencesStore(Path(os.environ[PROBE_PREFERENCES_ENV])))
     application = PyWebViewApplication(controller, server)
-    install_macos_document_events(application)
+    install_desktop_events(application)
     application.create_about_window()
     about = webview.windows[0]
     failures: list[str] = []
@@ -322,12 +364,12 @@ def main() -> None:
     def probe() -> None:
         try:
             assert about.events.loaded.wait(10), "About bridge failed to load"
-            if "--reprocess-only" in sys.argv:
+            if "--rebuild-only" in sys.argv:
                 document = controller.open_document(archive)
                 api = application.create_search_window(controller.new_search_window(document))
-                assert api.window.events.loaded.wait(10), "Reprocess search failed to load"
-                check_reprocess_menu(application, api)
-                print("Curator reprocessing menu passed")
+                assert api.window.events.loaded.wait(10), "Rebuild search failed to load"
+                check_rebuild_menu(application, api)
+                print("Curator rebuilding menu passed")
                 return
             status = evaluate_async(about, "window.pywebview.api.status()")
             assert status["metadata"]["version"], status
@@ -377,6 +419,14 @@ def main() -> None:
                     assert not native_about.isVisible(), "Dock activation reopened About"
                     menu = native.mainMenu()
                     assert menu.itemWithTitle_("File").submenu().itemWithTitle_("Open…").isEnabled(), "File/Open is disabled"
+                    # With no archive window open, commands that need one are disabled.
+                    for heading, title in (("File", "Import Mail…"), ("File", "Export Selected Messages…"),
+                                           ("File", "Document Options…"), ("File", "Rebuild Databases…"),
+                                           ("File", "Revalidate Archive"), ("File", "Close"),
+                                           ("Window", "Activity…"), ("Window", "New Search Window")):
+                        entry = menu.itemWithTitle_(heading).submenu().itemWithTitle_(title)
+                        assert entry is not None and not entry.isEnabled(), f"{heading}/{title} is enabled with no archive window"
+                    assert menu.itemWithTitle_("File").submenu().itemWithTitle_("New").isEnabled(), "File/New is disabled"
                     item = menu.itemAtIndex_(0).submenu().itemAtIndex_(0)
                     assert native.sendAction_to_from_(item.action(), item.target(), item), f"About action failed: {item.action()!r}"
                 except Exception as error:  # pylint: disable=broad-exception-caught
@@ -622,7 +672,7 @@ def main() -> None:
             # A personal list editor is a standalone window: Command-W must be
             # enabled even though it is not registered as an archive child.
             assert application.open_default_lists(personal=True)
-            lists = next(window for window in webview.windows if window.title.endswith(" — Customizable Default Lists"))
+            lists = next(window for window in webview.windows if window.title.endswith(" — Default Lists"))
             assert lists.events.loaded.wait(10), "List editor bridge failed to load"
             evaluate_async(lists, "waitForDomState(() => !document.getElementById('save').disabled, 'list editor readiness').then(() => true)")
             assert lists.evaluate_js("document.getElementById('list').options.length") == 8
@@ -656,7 +706,7 @@ def main() -> None:
             assert application.close_active_window()
             assert lists.events.closed.wait(5)
             assert application.open_default_lists(api.document)
-            lists = next(window for window in webview.windows if " — Customizable Default Lists — " in window.title)
+            lists = next(window for window in webview.windows if " — Default Lists — " in window.title)
             assert lists.events.loaded.wait(10)
             evaluate_async(lists, "waitForDomState(() => !document.getElementById('save').disabled, 'list editor readiness').then(() => true)")
             lists.evaluate_js("document.getElementById('list').value = 'reply-addresses'; document.getElementById('scope').value = 'archive'")
@@ -692,12 +742,15 @@ def main() -> None:
             evaluate_async(options, "refreshOptions().then(() => true)")
             assert not options.evaluate_js("document.getElementById('changed').hidden")
             assert application.open_ingest_window(document)
-            ingest = next(window for window in webview.windows if " — Ingests — " in window.title)
+            ingest = next(window for window in webview.windows if " — Activity — " in window.title)
             assert ingest.events.loaded.wait(10), "Ingest bridge failed to load"
             check_document_path(ingest, document.display_path)
             evaluate_async(ingest, "refreshHistory().then(() => true)")
-            assert ingest.evaluate_js("document.getElementById('import-directory').textContent") == "Import Directory…"
-            assert not ingest.evaluate_js("document.getElementById('import-directory').disabled")
+            # Activity offers only Suspend and Continue; importing starts from File > Import Mail….
+            assert ingest.evaluate_js("document.getElementById('import-directory') === null")
+            assert ingest.evaluate_js("document.getElementById('suspend-import').textContent") == "Suspend"
+            assert ingest.evaluate_js("document.getElementById('resume-import').textContent") == "Continue"
+            check_ingest_wake_refresh(application, ingest)
             document_id = document.descriptor.document_id
             lease = WriterLease.acquire(document.path, document.descriptor.identity, "test", "button-test", "test")
             controller.begin_ingest(document_id, IngestJob(operation_id="button-test", owner_window_id=api.search_window.window_id), lease)
@@ -705,12 +758,12 @@ def main() -> None:
                 evaluate_async(options, "refreshOptions().then(() => true)")
                 assert options.evaluate_js("document.getElementById('save').disabled")
                 evaluate_async(ingest, "refreshHistory().then(() => true)")
-                assert ingest.evaluate_js("document.getElementById('import-directory').disabled")
-                assert not evaluate_async(ingest, "window.pywebview.api.import_directory()")
+                assert not ingest.evaluate_js("document.getElementById('suspend-import').disabled")
+                assert ingest.evaluate_js("document.getElementById('resume-import').disabled")
             finally:
                 controller.finish_ingest(document_id, "button-test", published=False)
             evaluate_async(ingest, "refreshHistory().then(() => true)")
-            assert not ingest.evaluate_js("document.getElementById('import-directory').disabled")
+            assert ingest.evaluate_js("document.getElementById('suspend-import').disabled")
             # Shared-document Close must never wait for an import or a Cocoa dialog.
             sibling = application.create_search_window(controller.new_search_window(document))
             assert sibling.window.events.loaded.wait(10), "Second search bridge failed to load"

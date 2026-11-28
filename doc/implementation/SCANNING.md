@@ -84,7 +84,7 @@ in the existing catalog transaction for each new message. Run status includes
 the policy (older files default to `unknown`), without changing the catalog
 schema or canonical bytes. Scanner errors and unscannable input retain their
 actual evidence and permit canonical filing; they never become clean verdicts.
-The native source picker and Ingests page show a missing-configuration banner;
+The native source picker and Activity page show a missing-configuration banner;
 the final native confirmation defaults to Cancel and gates the opt-out.
 Import confirmations use a 560-point-wide selectable AppKit accessory label,
 keeping archive/source/owner paths readable without changing default or Cancel
@@ -141,8 +141,10 @@ become stale after the recovery grace period; PID reuse remains a documented lim
 clean/EICAR scans and verifies status/cancellation without a successful delay.
 
 Updater command completion and validation forward the scanner status callback,
-retaining progress and cooperative Stop/Quit signals. Cancelled native startup reaps
-its candidate worker and temporary files before propagating cancellation. Explicit definition sets skip
+retaining progress and cooperative Stop/Quit signals. The native startup reader
+waits on both the scanner connection and an owned cancellation pipe. Cancelled
+startup wakes the reader and reaps the candidate worker and temporary files
+before propagating cancellation. Explicit definition sets skip
 the automatic path, preventing recursive updates while validating a candidate.
 `MAILARCHIVER_CLAMAV_DATABASE` also pins development/test definitions. Running
 engines keep their selected generation; automatic refresh happens once per session,

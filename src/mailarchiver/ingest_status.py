@@ -53,6 +53,25 @@ class YearProgress(BaseModel):
     messages: int = 0
 
 
+class ImapDownloadCoverage(BaseModel):
+    """Source-acquisition counts and INTERNALDATE bounds, independent of parsed MIME children."""
+    messages: int = 0
+    earliest_date: datetime | None = None
+    latest_date: datetime | None = None
+    years: list[YearProgress] = Field(default_factory=list)
+
+    def record(self, date: datetime) -> None:
+        date = date.astimezone(UTC)
+        self.messages += 1
+        self.earliest_date = date if self.earliest_date is None else min(date, self.earliest_date)
+        self.latest_date = date if self.latest_date is None else max(date, self.latest_date)
+        entry = next((item for item in self.years if item.year == date.year), None)
+        if entry is None:
+            entry = YearProgress(year=date.year)
+            self.years.append(entry)
+        entry.messages += 1
+
+
 class IngestCounts(BaseModel):
     archived: int = 0
     duplicates: int = 0
@@ -88,6 +107,7 @@ class IngestStatus(BaseModel):
     archive: str
     run_pk: int
     process_id: int
+    application_version: str | None = None
     source_roots: list[str]
     started_at: datetime
     updated_at: datetime
@@ -121,8 +141,18 @@ class IngestStatus(BaseModel):
     processing_jobs_completed: int = 0
     processing_job_id: int | None = None
     processing_processor: str | None = None
-    activity_kind: Literal["source", "processing"] | None = None
+    # "rebuild" runs (File > Rebuild Databases…, `ect rebuild`; written as "reprocess" by
+    # 1.0.0a107–a109) use run_pk 0: they rebuild derived databases, not a catalog ingest run.
+    activity_kind: Literal["source", "processing", "rebuild", "reprocess"] | None = None
     saved_messages_remaining: int | None = Field(default=None, ge=0)
+    download_coverage: ImapDownloadCoverage | None = None
+    saved_workers: list[IngestWorkerStatus] = Field(default_factory=list)
+    concurrent_processing: bool = False
+    # Rebuild databases only: the canonical MBOX being rebuilt, and the addresses (and
+    # those with a display name) in the search index built so far. None for other runs.
+    current_mailbox: str | None = None
+    names_learned: int | None = Field(default=None, ge=0)
+    addresses_known: int | None = Field(default=None, ge=0)
 
     @field_validator("started_at", "updated_at", "completed_at")
     @classmethod
@@ -144,7 +174,7 @@ class IngestStatus(BaseModel):
         """Present current and legacy IMAP timeouts quietly, retaining the saved diagnostics."""
         legacy_timeout = self.state == "failed" and legacy_imap_timeout(self.failure_detail or "")
         if legacy_timeout or (self.state == "paused" and "timed out" in self.phase):
-            return self.model_copy(update={"state": "paused", "phase": "Timeout. Choose Resume when connected.",
+            return self.model_copy(update={"state": "paused", "phase": "Timeout. Choose Continue when connected.",
                                            "failure_detail": None, "timed_out": True})
         return self
 

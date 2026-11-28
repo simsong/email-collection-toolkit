@@ -38,6 +38,7 @@ const state = new Proxy({
   fileDragSupported: false,
   nativeFileDrag: false,
   dragExports: new Map(),
+  multiMessageDragFormat: "mbox",
   dragPreparing: new Set(),
   dragEpoch: 0,
   previewUrl: null,
@@ -90,7 +91,7 @@ window.addEventListener("resize", () => {
 window.addEventListener("focus", () => { void window.pywebview?.api?.activate?.(); });
 window.addEventListener("pywebviewready", initialize);
 window.mailArchiverNotice = notice => typeof notice === "string"
-  ? showError(notice) : showError(notice.message, notice.severity, notice.notice_id);
+  ? showError(notice) : showError(notice.message, notice.severity, notice.notice_id, notice.imap_source_id);
 window.archiveDidChange = async () => {
   const status = await call(() => window.pywebview.api.status());
   if (!status) return;
@@ -116,7 +117,9 @@ async function initialize() {
     "sort-by", "sort-direction", "search-attachments", "show-original-folders", "mailbox-browser", "mailbox-tree", "show-source-volumes", "filter-set", "manage-filter-sets",
     "save-filter-dialog", "save-filter-form", "filter-set-name", "cancel-save-filter", "manage-filter-dialog", "filter-set-list", "close-filter-manager",
     "message-pane", "message-content", "message-well", "computed-date-banner", "message-selection-summary", "message-file-well", "message-file-name", "message-subject", "message-headers", "part-select", "message-find", "message-find-query", "message-find-status", "message-find-previous", "message-find-next", "message-find-close", "remote-content",
-    "copy-message-text", "save-message", "print-message", "body-view", "attachment-section", "attachment-list", "attachment-preview", "provenance-section", "message-locations", "archive-status-banner", "archive-status-messages", "ingest-status-line", "link-dialog", "link-destination", "link-ignore", "link-copy", "link-open", "error"]) {
+    "copy-message-text", "save-message", "print-message", "body-view", "attachment-section", "attachment-list", "attachment-preview", "provenance-section", "message-locations", "archive-status-banner", "archive-status-messages", "ingest-status-line", "link-dialog", "link-destination", "link-ignore", "link-copy", "link-open", "error",
+    "message-info", "metadata-dialog", "metadata-subject", "metadata-sections", "metadata-copy", "metadata-close",
+    "message-context-menu", "context-copy", "context-view-metadata"]) {
     elements[id] = byId(id);
   }
   await initializeResultTable();
@@ -161,6 +164,7 @@ async function initialize() {
   elements["link-open"].addEventListener("click", () => void openExternalLink());
   installDrag(elements["message-file-well"], selectedDragMessagePks);
   document.addEventListener("keydown", handleCommandShortcut);
+  installMessageMetadata();
 
   if (parameters.get("standalone") === "1") document.body.classList.add("standalone");
   const status = await call(() => window.pywebview.api.status());
@@ -248,6 +252,14 @@ function waitForFrameLayout() {
 function installFrameFindShortcuts(frame) {
   const frameDocument = frame.contentDocument;
   if (!frameDocument) return false;
+  frameDocument.addEventListener("contextmenu", event => {
+    if (state.selected === null) return;
+    event.preventDefault();
+    const bounds = frame.getBoundingClientRect();
+    openMessageContextMenu(state.selected, bounds.left + event.clientX, bounds.top + event.clientY,
+      frameDocument.getSelection()?.toString() || "");
+  });
+  frameDocument.addEventListener("mousedown", closeMessageContextMenu);
   frameDocument.addEventListener("keydown", event => {
     if (!(event.metaKey || event.ctrlKey) || event.altKey || !state.view) return;
     if (event.key.toLowerCase() === "f") {
@@ -467,6 +479,7 @@ function resetArchiveView() {
 function applyStatus(status) {
   state.fileDragSupported = Boolean(status.file_drag_supported);
   state.nativeFileDrag = Boolean(status.native_file_drag);
+  state.multiMessageDragFormat = status.multi_message_drag_format === "zip" ? "zip" : "mbox";
   elements["message-file-well"].hidden = !state.fileDragSupported;
   elements["message-file-well"].draggable = state.fileDragSupported;
   state.highlightBackground = status.configuration.search_highlight_background;
@@ -479,7 +492,7 @@ function applyStatus(status) {
   elements["archive-status-banner"].hidden = !status.ready;
   renderArchiveStatus(status.ready ? status.archive_status_messages || [] : []);
   for (const notice of status.notices || []) {
-    if (notice.severity !== "information") showError(notice.message, notice.severity, notice.notice_id);
+    if (notice.severity !== "information") window.mailArchiverNotice(notice);
   }
   if (status.ready) elements.search.focus();
 }
@@ -505,12 +518,28 @@ async function refreshIngestOverview() {
   line.hidden = elements.search.disabled;
   line.className = `ingest-status-line no-print${status ? ` ${status.state}` : ""}`;
   line.dataset.statusId = status?.status_id || "";
+  const rebuild = overview.rebuild;
+  if (rebuild) {
+    line.className = "ingest-status-line no-print running";
+    setIngestStatusText(rebuild.total_bytes
+      ? `${rebuild.phase} · ${Number(rebuild.percent).toFixed(1)}% · ${formatBytes(rebuild.completed_bytes)} of ${formatBytes(rebuild.total_bytes)} · ETA ${rebuild.eta}`
+      : rebuild.phase);
+    return;
+  }
   if (!status) {
-    setIngestStatusText("No ingest history · Click to open Ingests");
+    setIngestStatusText("No ingest history · Click to open Activity");
     return;
   }
   const messages = Number(status.processed_messages).toLocaleString();
   const percent = Number(status.percent).toFixed(1);
+  if (["rebuild", "reprocess"].includes(status.activity_kind)) {
+    setIngestStatusText(status.state === "running"
+      ? `${status.phase} · ${percent}% · ${formatBytes(status.bytes_processed)} of ${formatBytes(status.bytes_total)} · ETA ${status.eta}`
+      : status.state === "completed"
+        ? `Last rebuild completed · ${messages} messages · ${formatElapsed(status.elapsed_seconds)} · Click for history`
+        : `Last rebuild ${status.state}: ${status.phase} · Click for details`);
+    return;
+  }
   const phase = status.phase === "recovering archived content" ? "Processing saved mail" : status.phase;
   if (status.state === "running" && (status.processing_active || status.activity_kind === "processing")) {
     const jobs = Number(status.processing_jobs_completed).toLocaleString();
@@ -522,6 +551,15 @@ async function refreshIngestOverview() {
   } else {
     setIngestStatusText(`Last ingest ${status.state}: ${status.phase} · ${messages} messages · Click for details`);
   }
+}
+
+function formatBytes(value) {
+  let amount = Number(value);
+  for (const unit of ["B", "KiB", "MiB", "GiB", "TiB"]) {
+    if (amount < 1024 || unit === "TiB") return unit === "B" ? `${Math.trunc(amount)} B` : `${amount.toFixed(1)} ${unit}`;
+    amount /= 1024;
+  }
+  return `${value} B`;
 }
 
 function setIngestStatusText(text) {
@@ -1140,7 +1178,6 @@ function initializeResultTable() {
     renderVertical: "virtual",
     selectableRows: true,
     selectableRowsRangeMode: "click",
-    placeholder: "No messages.",
     columns: [{
       field: "subject",
       formatter: resultCardFormatter,
@@ -1157,6 +1194,10 @@ function initializeResultTable() {
     }
   });
   state.resultTable.on("rowClick", selectResultRow);
+  state.resultTable.on("rowContext", (event, row) => {
+    event.preventDefault();
+    openMessageContextMenu(row.getData().message_pk, event.clientX, event.clientY, window.getSelection()?.toString() || "");
+  });
   state.resultTable.on("rowDblClick", openResultWindow);
   state.resultTable.on("rowSelectionChanged", selected => {
     state.resultSelection = new Set(selected.map(result => result.message_pk));
@@ -1459,6 +1500,93 @@ function renderLocations(view) {
   });
   elements["provenance-section"].hidden = nodes.length === 0;
   elements["message-locations"].replaceChildren(...nodes);
+}
+
+// View Message Metadata: the (i) button and a control-click (context) menu open a
+// read-only report of catalog, source, duplicate, MIME and extraction facts.
+const contextMenu = {messagePk: null, selectedText: ""};
+
+function installMessageMetadata() {
+  elements["message-info"].addEventListener("click", () => {
+    if (state.selected !== null) void showMessageMetadata(state.selected);
+  });
+  elements["metadata-close"].addEventListener("click", () => elements["metadata-dialog"].close());
+  elements["metadata-copy"].addEventListener("click", () => {
+    const text = metadataText();
+    if (text) void call(() => window.pywebview.api.copy_visible_text(text));
+  });
+  elements["message-well"].addEventListener("contextmenu", event => {
+    if (state.selected === null) return;
+    event.preventDefault();
+    openMessageContextMenu(state.selected, event.clientX, event.clientY, window.getSelection()?.toString() || "");
+  });
+  elements["context-view-metadata"].addEventListener("click", () => {
+    const messagePk = contextMenu.messagePk;
+    closeMessageContextMenu();
+    if (messagePk !== null) void showMessageMetadata(messagePk);
+  });
+  elements["context-copy"].addEventListener("click", () => {
+    const text = contextMenu.selectedText;
+    closeMessageContextMenu();
+    if (text) void call(() => window.pywebview.api.copy_visible_text(text));
+  });
+  const menu = elements["message-context-menu"];
+  document.addEventListener("mousedown", event => { if (!menu.contains(event.target)) closeMessageContextMenu(); });
+  document.addEventListener("keydown", event => { if (event.key === "Escape") closeMessageContextMenu(); });
+  window.addEventListener("blur", closeMessageContextMenu);
+  document.addEventListener("scroll", closeMessageContextMenu, true);
+}
+
+function openMessageContextMenu(messagePk, x, y, selectedText) {
+  const menu = elements["message-context-menu"];
+  contextMenu.messagePk = messagePk;
+  contextMenu.selectedText = selectedText;
+  elements["context-copy"].hidden = !selectedText;
+  menu.hidden = false;
+  const {width, height} = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(0, Math.min(x, window.innerWidth - width - 4))}px`;
+  menu.style.top = `${Math.max(0, Math.min(y, window.innerHeight - height - 4))}px`;
+  elements["context-view-metadata"].focus();
+}
+
+function closeMessageContextMenu() {
+  const menu = elements["message-context-menu"];
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  contextMenu.messagePk = null;
+  contextMenu.selectedText = "";
+}
+
+async function showMessageMetadata(messagePk) {
+  const report = await call(() => window.pywebview.api.message_metadata(messagePk));
+  if (!report) return;
+  elements["metadata-subject"].textContent = `${report.subject} (message #${report.message_pk})`;
+  elements["metadata-sections"].replaceChildren(...report.sections.map(section => {
+    const node = document.createElement("section");
+    const title = document.createElement("h3"); title.textContent = section.title;
+    const list = document.createElement("dl");
+    for (const row of section.rows) {
+      const term = document.createElement("dt"); term.textContent = row.label;
+      const detail = document.createElement("dd"); detail.textContent = row.value;
+      if (row.monospace) detail.classList.add("mono");
+      list.append(term, detail);
+    }
+    node.append(title, list);
+    return node;
+  }));
+  const dialog = elements["metadata-dialog"];
+  if (!dialog.open) dialog.showModal();
+  dialog.scrollTop = 0;
+}
+
+function metadataText() {
+  const lines = [elements["metadata-subject"].textContent];
+  for (const section of elements["metadata-sections"].querySelectorAll("section")) {
+    lines.push("", section.querySelector("h3").textContent);
+    const terms = section.querySelectorAll("dt");
+    section.querySelectorAll("dd").forEach((detail, index) => lines.push(`  ${terms[index].textContent}: ${detail.textContent}`));
+  }
+  return lines.join("\n").trim();
 }
 
 async function copySourcePath(sourceLocationIndex) {
@@ -2089,7 +2217,7 @@ function showMultipleMessageSelection() {
   title.textContent = `${count} messages selected.`;
   const detail = document.createElement("p");
   detail.textContent = state.fileDragSupported
-    ? `Drag the selected messages or the file icon to ${state.nativeFileDrag ? "Explorer" : "Finder"} to export a ZIP archive.`
+    ? `Drag the selected messages or the file icon to ${state.nativeFileDrag ? "Explorer" : "Finder"} to export ${multiMessageLabel()}, or use File → Export Selected Messages….`
     : "Select a single message to use Save Message.";
   elements["message-selection-summary"].replaceChildren(title, detail, elements["message-file-well"]);
   elements["message-selection-summary"].hidden = false;
@@ -2118,7 +2246,13 @@ function invalidateDragExports() {
 window.addEventListener("mailarchiver-exports-invalidated", invalidateDragExports);
 
 function dragExportKey(messagePks) {
-  return [...new Set(messagePks)].sort((left, right) => left - right).join(",");
+  // Several messages are packaged per the drag preference, so a changed preference prepares a new file.
+  const unique = [...new Set(messagePks)].sort((left, right) => left - right);
+  return `${unique.length > 1 ? state.multiMessageDragFormat : "eml"}:${unique.join(",")}`;
+}
+
+function multiMessageLabel() {
+  return state.multiMessageDragFormat === "zip" ? "a ZIP of messages" : "an MBOX file";
 }
 
 function updateMessageFileWell() {
@@ -2126,9 +2260,10 @@ function updateMessageFileWell() {
   if (!messagePks.length) return;
   const info = state.dragExports.get(dragExportKey(messagePks));
   const multiple = messagePks.length > 1;
-  elements["message-file-name"].textContent = info?.filename || (multiple ? `${messagePks.length} Messages.zip` : "Message.eml");
+  elements["message-file-name"].textContent = info?.filename
+    || (multiple ? `${messagePks.length} Messages.${state.multiMessageDragFormat}` : "Message.eml");
   const destination = state.nativeFileDrag ? "Explorer" : "Finder";
-  const action = multiple ? `Drag selected messages to ${destination} as a ZIP archive` : `Drag this message to ${destination}`;
+  const action = multiple ? `Drag selected messages to ${destination} as ${multiMessageLabel()}` : `Drag this message to ${destination}`;
   elements["message-file-well"].title = `${action}; the first drag prepares its temporary file`;
   elements["message-file-well"].setAttribute("aria-label", action);
 }
@@ -2178,14 +2313,14 @@ async function call(operation) {
   catch (error) { showError(String(error?.message || error)); return null; }
 }
 
-function showError(message, severity = "error", noticeId = null) {
+function showError(message, severity = "error", noticeId = null, imapSourceId = null) {
   const panel = byId("error");
   const pill = byId("notice-pill");
   if (!showError.messages) showError.messages = [];
   if (!showError.seen) showError.seen = new Set();
   if (noticeId ? showError.seen.has(noticeId) : showError.messages.at(-1)?.message === message) return;
   if (noticeId) showError.seen.add(noticeId);
-  showError.messages.push({message, severity});
+  showError.messages.push({message, severity, imapSourceId});
   const warningOnly = showError.messages.every(item => item.severity === "warning");
   panel.classList.toggle("warning", warningOnly);
   pill.classList.toggle("warning", warningOnly);
@@ -2215,7 +2350,20 @@ function showError(message, severity = "error", noticeId = null) {
     pill.hidden = true;
     elements.search.focus();
   });
-  panel.append(history, collapse, dismiss);
+  const actions = document.createElement("div");
+  actions.className = "notice-actions";
+  actions.append(collapse, dismiss);
+  const authenticationNotice = showError.messages.findLast(notice => notice.imapSourceId);
+  if (authenticationNotice) {
+    const update = document.createElement("button");
+    update.type = "button";
+    update.textContent = "Update IMAP Credentials";
+    update.addEventListener("click", () => {
+      void call(() => window.pywebview.api.open_ingest_window(null, authenticationNotice.imapSourceId));
+    });
+    actions.append(update);
+  }
+  panel.append(history, actions);
   panel.hidden = false;
   pill.hidden = true;
   pill.textContent = `Messages (${showError.messages.length})`;
@@ -2240,5 +2388,10 @@ function byteSize(value) {
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
+window.setMultiMessageDragFormat = format => {
+  state.multiMessageDragFormat = format === "zip" ? "zip" : "mbox";
+  updateMessageFileWell();
+  if (state.resultSelection.size > 1) showMultipleMessageSelection();
+};
 window.addEventListener("mailarchiver-status-changed", () => { if (initialized) void refreshIngestOverview(); });
 if (window.pywebview?.api?.status) initialize();

@@ -54,6 +54,7 @@ Run any CLI command from the checkout with `uv run --locked ect COMMAND`. Set
 | `make gui ARGS='...'` | Run the desktop from the checkout |
 | `make check` | Ruff and Pylint, then ty and Pyright, then Rust, license and website checks, then both test suites |
 | `make check-static`, `make check-tests` | The static half and the test half; CI runs them as parallel jobs |
+| `make check-quick`, `make check-quick-tests`, `make test-quick` | The same without tests marked `slow` (real ClamAV/IMAP/PST runs and whole-import end-to-end, recovery and quit modules, and the Rust corpus import). Ordinary CI pushes run `check-quick-tests`; `[full-ci]` or `[release-ci]` in the commit message, or a manual "Run workflow" with full selected, runs `check-tests` |
 | `make ruff`, `make lint`, `make types` | Individual static checks. Ruff must pass with zero diagnostics |
 | `make test`, `make test-e2e` | Unit suite and end-to-end suite |
 | `make benchmark-import` | Time a synthetic import; see [below](#performance-benchmark) |
@@ -97,9 +98,36 @@ opt-in. They do not run in CI.
 | `test-native-gui` | | Hidden Cocoa/WKWebView bridge |
 | `test-native-html-find` | | WKWebView find highlighting and scrolling |
 | `test-native-quit` | `MAILARCHIVER_NATIVE_GUI_E2E=1` | Quit during status delivery |
-| `test-native-reprocessing` | `MAILARCHIVER_NATIVE_APPLICATION_E2E=1` | Reprocess menu confirmation and Cancel |
+| `test-native-rebuild` | `MAILARCHIVER_NATIVE_APPLICATION_E2E=1` | Rebuild menu confirmation and Cancel |
 | `test-native-worker-preferences` | `MAILARCHIVER_NATIVE_APPLICATION_E2E=1` | Preferences window, Close, saved edits |
 | `test-quit` | | Process exit, message-boundary stops, recovery |
+
+`make test-native-replies PYTEST_ARGS='--browser-channel chrome'` runs a disposable
+Cocoa reply probe and Activity browser regressions, including lost status and
+Suspend/Resume replies. It uses synthetic state only and requires an unlocked
+macOS desktop; Windows WebView2 acceptance remains separate.
+
+`make test-desktop-lifecycle` checks common power and network event transport,
+cancellation and shutdown behavior, plus native Cocoa subscriptions on macOS.
+`make test-windows-lifecycle` requires Windows and checks native power registration,
+.NET network subscriptions and registered callback dispatch without suspending the
+computer or changing its network. Branch CI runs that focused Windows gate;
+installed-package and real sleep/network-change acceptance remain separate checks.
+`make test-frozen-lifecycle` requires macOS and builds a disposable PyInstaller
+executable with the production Python collection flags. It verifies native
+lifecycle adapter discovery, synthetic Workspace sleep/wake and subscription
+cleanup without an installed source checkout. Signed DMG acceptance is separate.
+
+Developer scratch IMAP acceptance uses `make imap-acceptance` with
+`IMAP_ACCEPTANCE_ARGS="--source-archive SOURCE --scratch-archive SCRATCH --seconds 600"`.
+This Make argument selects disjoint archives and a cancellation deadline (default
+ten minutes, plus two minutes for cleanup and a separate two-minute verification
+budget); it contains no password. The tool reuses one configured account through
+its existing vault reference and one extra connection, retains the scratch archive
+for subsequent runs, and prints status and canonical-integrity results. A forced
+stop is a failed evaluation. A scratch evaluation succeeds only after downloading
+at least one source message; a completed metadata-only refresh is explicitly not
+a successful download test.
 
 Other focused targets include `test-ingest-progress`, `test-ingest-recovery`,
 and `test-definition-refresh`. The test architecture and its coverage limits
@@ -136,6 +164,14 @@ appends a row with per-phase timings to `benchmarks/import/results.jsonl`.
 Use `BENCH_MB=5` for a quick run. Compare rows only from the same machine. See
 [the benchmark README](../benchmarks/import/README.md) for the corpus mix
 and recorded results.
+
+`make benchmark-search BENCH_ARCHIVE=<archive>` times desktop text search end to
+end on an existing archive, opened read-only. Each query (`BENCH_QUERIES`,
+default `gandalf`) runs in a fresh process: first page, count, then both warm.
+Rows go to
+`benchmarks/search/results.jsonl`; the target fails when a first page takes 1 s
+or a first page plus count takes 5 s. See
+[the search benchmark README](../benchmarks/search/README.md).
 
 ## Outlook PST and OST
 
@@ -244,6 +280,7 @@ environment variables. Legacy `MAILARCHIVER_CLAMD*` variables are unused.
 
 | Variable / Make parameter | Purpose |
 | --- | --- |
+| `CONCURRENT_IMAP_TESTS` | Optional Python test selection for `make test-concurrent-imap`; browser checks still run |
 | `CARGO`, `RUST_TARGET_DIR`, `CARGO_TARGET_DIR` | Cargo executable and build output; Make uses `RUST_TARGET_DIR`, direct Cargo uses `CARGO_TARGET_DIR` |
 | `RUSTUP_TOOLCHAIN` | Override the compiler selected by `rust-toolchain.toml` |
 | `CARGO_BUILD_JOBS` | Limit native Rust compilation parallelism |
@@ -297,7 +334,7 @@ environment variables. Legacy `MAILARCHIVER_CLAMD*` variables are unused.
 | `ruff`, `pylint`, `ty`, `pyright`, `lint`, `types`, `syntax-check` | Individual static checks |
 | `rust-check`, `rust-fmt`, `rust-lock`, `rust-toolchain` | Rust workspace checks, formatting, and dependencies |
 | `runtime-license-check`, `runtime-license-bundle`, `copyright-check`, `distribution-check` | License and distribution audits |
-| `benchmark-import`, `benchmark-name-resolution` | Benchmarks |
+| `benchmark-import`, `benchmark-name-resolution`, `benchmark-search` | Benchmarks |
 
 The remaining `test-*`, `fixture-*`, smoke, and golden-update targets are
 described in [End-to-end testing](END_TO_END_TESTING.md),

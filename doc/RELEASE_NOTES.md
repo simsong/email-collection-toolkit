@@ -6,6 +6,385 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a118 — clearer rebuild progress by year
+
+- In the Activity window's **Progress by year** table, the year a rebuild is
+  working on is shown in bold with dots that cycle (".", "..", "...") instead of
+  the confusing "(now)" label.
+
+## 1.0.0a117 — Search and Sources tabs, Rescan Imports
+
+- The search window has **Search** and **Sources** tabs. **Sources** lists every
+  directory or file you have imported and every IMAP account, each with a
+  checkbox. IMAP accounts have **Config…** to change the server, port, security,
+  username or password.
+- The import button reads **Continue Importing…** while an import is unfinished
+  and **Rescan Imports…** otherwise. Rescan imports every checked source again:
+  files whose size and modification time have not changed since their last import
+  are skipped without being reread, changed files are reread, mail servers are
+  checked for new messages, and duplicates are recognized as always.
+- Imports now remember their directories and files in `config.yaml`
+  (`local_sources`, config version 4); directories from earlier imports are found
+  in the Activity history.
+- Buttons that open a window end in "…": **Names and addresses…**,
+  **Institutions…**.
+
+## 1.0.0a115 — menus follow the open window
+
+- With no archive window open, File and Window commands that need one are
+  disabled: Import Mail…, Export Selected Messages…, Document Options…, Rebuild
+  Databases…, Revalidate Archive, Close, Activity… and New Search Window. New,
+  Open…, Open Recent and Help stay available. Export Selected Messages… and New
+  Search Window also need a search window in front. Before, macOS menu
+  auto-enabling left every command enabled.
+
+## 1.0.0a113 — Cancel a rebuild; warn before quitting one
+
+- While a rebuild is running, the Activity window's stop button reads **Cancel**
+  instead of **Suspend**, since a rebuild cannot resume part-way. Imports still
+  show **Suspend**.
+- Quitting during a rebuild now asks first: **Abort rebuild and quit?** explains
+  that the rebuild is aborted and the current databases are kept. **Keep
+  Rebuilding** leaves it running.
+
+## 1.0.0a112 — rebuild detail in Activity
+
+- A running **Rebuild databases** shows the mailbox it is on (mailboxes are
+  rebuilt in year order), names learned so far, messages rebuilt per year, and
+  each worker's last mailbox, messages and data read. These refresh about every
+  10 seconds; the progress bar still updates every second.
+
+## 1.0.0a111 — Activity window: Suspend and Continue only
+
+- The Activity window no longer has **Import Directory…**; start imports with
+  **File → Import Mail…**. Its only buttons are **Suspend**, enabled while an
+  import or a rebuild is running, and **Continue**, enabled when the latest
+  activity was suspended, interrupted or failed. "Resume" is now "Continue".
+- **Suspend** stops a running rebuild and keeps the current databases.
+  **Continue** starts an interrupted rebuild again from the beginning, since a
+  rebuild only replaces the databases when it finishes.
+
+## 1.0.0a110 — "Rebuild" everywhere
+
+- **File → Reprocess Saved Mail…** is now **File → Rebuild Databases…**, and
+  `ect reprocess` is now `ect rebuild`. The Activity window, the status bar,
+  progress lines and messages all say "rebuild". `ect process --rebuild` replaces
+  `--reprocess`, which still works. Activity entries from earlier versions still
+  display.
+
+## 1.0.0a109 — quiet Ctrl-C during reprocessing
+
+- Pressing Ctrl-C in the terminal while Reprocess Saved Mail runs no longer
+  prints a traceback from every worker process. Workers ignore it; the
+  application stops the run itself, keeps the current databases, and exits
+  cleanly.
+
+## 1.0.0a108 — quicker start for Reprocess Saved Mail
+
+- Reprocessing no longer rereads every mailbox file just to count its messages
+  before it starts. A mailbox untouched since the last checkpoint, with the size
+  and message count that checkpoint recorded, is taken as unchanged; only other
+  mailboxes are counted. **File → Revalidate Archive** remains the full recheck.
+  The step is now labelled "Checking mailboxes for changes".
+
+## 1.0.0a107 — reprocessing in the Activity window
+
+- **Reprocess Saved Mail** now appears in the Activity window as its own run,
+  "Reprocess saved mail", with its current step, percent, bytes done of the
+  total, time remaining, messages reprocessed and elapsed time. Finished,
+  stopped and failed runs stay in the history like imports do.
+- After a reprocess, the bar at the bottom of the search window reports
+  "Last reprocess completed" instead of describing it as an import.
+- Reprocessing now uses all its workers. Parsing ran in threads that shared one
+  CPU core; it now runs in separate worker processes. On a 20,000-message sample
+  of a real archive it went from about one core to roughly 39 MB/s with 16
+  workers.
+- Working copies of excluded autosave drafts are deleted once they are no longer
+  needed. Before, they were never removed and accumulated in the archive's
+  `objects/` folder; the next import or processing run clears existing ones.
+- The repository pins Python 3.12 (`.python-version`), the version CI and
+  releases use.
+
+## 1.0.0a106 — faster CI
+
+- Ordinary pushes now run a quick test tier (`make check-quick-tests`) that
+  leaves out tests marked `slow`; the full suite runs for commits containing
+  `[full-ci]` or `[release-ci]` and for a manual full workflow run.
+- Ordinary CI reuses a cached ClamAV/OpenSSL build; release workflows still
+  build it from source.
+
+## 1.0.0a105 — one Reprocess Saved Mail command
+
+- **File → Reprocess Saved Mail…** and the new `ect reprocess` replace both the
+  old Reprocess Saved Mail and Rebuild Search Index / `ect rebuild-index`. It
+  re-reads every saved message and rebuilds its catalog details (Message-ID,
+  sender, recipients, subject, date) and the search index, then re-runs
+  processors when the archive has a processing database
+  (`ect reprocess --skip-processors` omits that step).
+- The new catalog and search index are built as `*.sqlite3.new.*` files while
+  search keeps using the current ones. When both are complete the current files
+  become `archive.sqlite3.old` and `search.sqlite3.old` and the new ones take
+  their place. Stopping early deletes the new files and changes nothing.
+- Where each message came from, duplicate sightings, import runs and antivirus
+  results are kept; so are dates that came from the import's context because
+  the message itself has none.
+- Messages stored with a leading `>From ` line get their real Message-ID,
+  date, recipients and previews.
+- Progress is shown in bytes in the window's status bar and in the terminal.
+
+## 1.0.0a104 — File menu and Preferences tidy-up
+
+- The File menu is grouped with dividers: New, Open…, Open Recent; then
+  **Import Mail…** (was Import…), Export Selected Messages…, Document Options…;
+  then Reprocess Saved Mail…, Rebuild Search Index, Revalidate Archive; then Close.
+- **Customizable Default Lists…** is now **Default Lists…**, an application
+  setting next to **Preferences…** (application menu on macOS, Help menu on
+  Windows).
+- The macOS Preferences window is about half as tall: labels on the left,
+  controls on the right, and short notes in small type under each control.
+
+## 1.0.0a103 — Rebuild Search Index
+
+- **File → Rebuild Search Index** rebuilds the search index from the archive's
+  mailbox files without reimporting. Progress appears in the search window's
+  bottom status line as percent, bytes done of the total, and time remaining.
+  Search keeps using the old index until the new one is complete; quitting
+  stops the rebuild and keeps the old index.
+- The command-line `ect refresh-index` is renamed `ect rebuild-index`. Its
+  progress is now measured in bytes rather than messages, so large and small
+  messages count for what they cost.
+- Rebuilding now indexes messages whose stored copy begins with a `>From `
+  envelope line from their real headers and body, which fixes their previews
+  and searchable text.
+
+## 1.0.0a102 — readable enveloped messages, View Message Metadata
+
+- Messages whose stored copy begins with a `>From ` envelope line (about
+  15,000 older Eudora-era messages in a typical archive) now show their
+  headers, plain-text and HTML bodies, and attachments. They used to show the
+  whole raw message, MIME boundaries and all, as "Plain Text — part 0". The
+  archive is not changed; Raw Source and Save Message still show the exact
+  stored bytes.
+- New **View Message Metadata** report, from the ⓘ button above a message or
+  by control-clicking a message in the results or the message pane. It shows
+  the message's catalog identity, hashes, every source it was found in,
+  duplicates, metadata defects, MIME structure with attachment count and
+  sizes, and which ingest runs and processors extracted it and when.
+
+## 1.0.0a101 — faster checkpoints, Revalidate Archive, MBOX export
+
+- Finishing an import, or recovering one that was interrupted, now rechecks
+  only the MBOX files modified since the last checkpoint. It used to reread
+  every message in the archive each time, which took a long time on a large
+  archive.
+- **File → Revalidate Archive** rereads every message and file on request and
+  opens an HTML report in the browser. The report lists every file in the
+  archive with its message count, how many validate, and how many are
+  redacted (none until redaction exists).
+- **File → Export Selected Messages…** saves the selection as an MBOX file
+  (default) or a ZIP of `.eml` files.
+- Dragging several messages out of a search window now produces one MBOX file
+  by default. **Preferences** can switch it back to a ZIP of `.eml` files.
+
+## 1.0.0a100 — Activity window
+
+- Clicking the activity bar at the bottom of a search window opens the
+  Activity window again. When it was already open, the window waited for its
+  page to answer before coming forward, and could stay hidden.
+- Window → Ingests is now **Window → Activity…**, and the window is titled
+  Activity.
+- Suspend Import takes effect right away. Suspending used to wait for a
+  checksum refresh of the whole archive, which rereads every message and takes
+  a long time on a large archive. Checksums are now refreshed by Continue
+  Import or the next import that finishes, and `verify_mail_archive.py` reports
+  them as out of date until then.
+- In the Activity window, runs in progress are separated from finished runs
+  by a thin rule and a **Past Activity** label.
+
+## 1.0.0a99 — reopening an open archive brings it to the front
+
+- File → Open, Open Recent, and opening an archive from Finder now bring the
+  archive's existing window to the front when it is already open, instead of
+  opening a second copy. Window → New Search Window still opens another view.
+
+## 1.0.0a98 — fast single-word search on legacy indexes
+
+- The scan of the full-text vocabulary for words whose spelling changes under
+  folding is stored in the user cache folder, keyed by the index, and warmed
+  in the background when a desktop window opens an archive. It used to run in
+  every process and took 11–30 s on large archives.
+- Words split by combining accents are matched with adjacent fragment pairs
+  instead of single-token prefixes, which leaves far fewer candidates to check.
+- Frequent words page through the date index instead of sorting every hit.
+- Add `make benchmark-search`, an end-to-end, read-only search benchmark.
+
+## 1.0.0a97 — fewer ingest commits, full macOS durability
+
+- Combine the batched ingest commits, macOS durability and end-to-end benchmark
+  work (formerly #226) with the IMAP recovery and concurrent processing of
+  1.0.0a75–a96. While saved-message processing runs concurrently, each newly
+  ingested message still commits its catalog rows before its processing commit.
+- Ingest makes about 3 commits per message instead of about 9. Catalog rows
+  that processors write share one commit, and per-source checkpoints are
+  committed along with message commits (within one second if sources stall).
+  After a crash, the affected sources are rescanned, and their messages are
+  recognized as already archived.
+- On macOS, every point the archive relies on for crash recovery now uses
+  `F_FULLFSYNC`. Plain `fsync` there does not make the drive flush its cache,
+  so a sleep, unplug or power loss could lose writes that the archive treated
+  as saved. SQLite connections use `fullfsync` too. Expect imports on macOS to
+  be slower than before, especially on USB drives. Fewer commits offset part
+  of the cost.
+- `make benchmark-import` now checks the result end to end. It checks every
+  generated message's bytes, MBOX pointer, Subject, sender, recipients, date,
+  Message-ID and attachments, and that unique tokens and sampled words are
+  searchable. The corpus (version 2) adds two real documents each of .txt,
+  .pdf, .docx, .doc, .xls, .xlsx, .ppt, .pptx and .jpeg, each with a unique
+  search identifier. Identifiers in types without a text extractor yet are
+  reported as gaps rather than failures. The crash-recovery tests run the same
+  check. The check holds only digests and metadata in memory, never the corpus
+  itself.
+
+## 1.0.0a96 — integrate import speedups with IMAP recovery
+
+- Combine the faster import and processing work of 1.0.0a73–a74 with the IMAP
+  recovery, desktop lifecycle and concurrent processing work of 1.0.0a75–a95.
+  Concurrent saved-message processing keeps batched commits and working-copy
+  reuse; each newly ingested message is still committed before acquisition continues.
+- Use the 1.0.0a74 ClamAV teardown, which wakes the startup reader when the
+  worker exits, in place of a separate cancellation pipe.
+- Renumber the IMAP recovery entries below by two to follow 1.0.0a74.
+
+## 1.0.0a95 — share desktop power and network recovery
+
+- Route Windows and macOS sleep, wake and network events through common handlers.
+  Native adapters supply only OS subscriptions, path queries and cleanup.
+- Keep Windows imports waiting through outages and captive portal sign-in with
+  the same 150-second retries and immediate event-triggered retests as macOS.
+  Explicit Suspend and Quit remain authoritative.
+
+## 1.0.0a94 — wait for IMAP connectivity and captive portal sign-in
+
+- Keep active macOS imports waiting through DNS failures and blocked connections.
+  Retest every 150 seconds and resume the existing UID plan when connectivity returns.
+- Show a network sign-in hint. Wake, network changes, Suspend and Quit can interrupt
+  the reconnect wait.
+
+## 1.0.0a93 — recover after macOS sleep and network changes
+
+- Refresh Ingests after wake or a network configuration change. Clear recovered
+  status errors after a successful read.
+- Replace IMAP sessions that span sleep and wake pending reconnects when the
+  network configuration changes. Keep explicit Suspend and Resume controls.
+- Wake the ClamAV startup reply reader when startup is cancelled.
+
+## 1.0.0a92 — open IMAP credential recovery from the error
+
+- Add **Update IMAP Credentials** alongside **Collapse messages** and
+  **Dismiss messages** in the IMAP authentication error popup.
+- Open the Ingests password dialog with the rejected account selected.
+
+## 1.0.0a91 — accept complete IMAP literals with inaccurate size metadata
+
+- Continue importing when RFC822.SIZE disagrees with a complete BODY[] literal.
+  Log the discrepancy and verify the literal's UID and declared byte count.
+
+## 1.0.0a90 — diagnose IMAP body-size failures
+
+- Report the failing UID, RFC822.SIZE, declared literal length and received byte
+  count in ingest failures when RFC822.SIZE is missing or disagrees with the
+  received byte count.
+
+## 1.0.0a89 — compact Ingests history and year coverage
+
+- Show the producing version in parentheses after the run timestamp.
+- Size the Year and Messages columns to their contents.
+
+## 1.0.0a88 — count completed IMAP transfers before scanning
+
+- Include received IMAP bodies in the run's download coverage even when scanning
+  or archiving is still pending. Show the source count as unavailable for older
+  IMAP runs without recorded download coverage.
+
+## 1.0.0a87 — separate source counts from saved attachment processing
+
+- Count promoted attached emails as archival work. Source message totals and
+  dates describe the messages acquired from the selected sources in this run.
+
+## 1.0.0a86 — preserve damaged working objects and correct mixed-source status
+
+- Retain corrupt working files for diagnosis, including after a failed import.
+- Refresh the saved-message count at the last source checkpoint and show ETA
+  unavailable while a source of unknown size remains unfinished.
+
+## 1.0.0a85 — reuse active inputs and coalesce saved-work status queries
+
+- Verify and reuse a duplicate's existing input file while another worker reads it.
+- Coalesce backlog counts during combined work, retain the exact final count, and
+  suppress live overlap messages for stale runs.
+
+## 1.0.0a84 — preserve recovery and stop boundaries during overlap
+
+- Complete previously filed ingest roots, keep duplicate metadata jobs in the
+  shared scheduler, and stop new downloads immediately on an explicit processor stop.
+- Retain returned processor results through cancellation and show overlap only
+  while both groups have active work.
+
+## 1.0.0a83 — overlap downloads and saved-message processing
+
+- Download new mail while processing saved messages through separate worker groups.
+  Canonical writes still have one owner, and suspension retains resumable checkpoints.
+  Unpublished ingest recovery and explicit deferred/limited processing keep their safeguards.
+
+## 1.0.0a82 — deliver GUI replies without redundant native waits
+
+- Deliver API replies asynchronously to Cocoa/WebView2 instead of waiting for a
+  second native acknowledgement. Ingests reports a lost status/control reply
+  without repeating Suspend/Resume or marking the import failed.
+
+## 1.0.0a81 — bind scratch evidence to its import
+
+- Require fresh status evidence returned by the current import worker. A missing
+  status write cannot reuse a previous successful run in the evaluation summary.
+
+## 1.0.0a80 — require acquisition progress in scratch evaluation
+
+- Report metadata-only completion as an unsuccessful download evaluation.
+- Verify recovery after a successful body without fetching that body twice.
+
+## 1.0.0a79 — safe transport recovery
+
+- Reconnect interrupted IMAP sessions with bounded, cancellable backoff and
+  epoch validation. Retain delivered UID state and pause safely if recovery fails.
+- Count actual downloaded source messages separately from extracted attachments
+  and saved processing, using IMAP INTERNALDATE for date/year coverage.
+- Contain scratch workers on owner death and bound integrity verification.
+
+## 1.0.0a78 — IMAP run coverage
+
+- Show run-specific message dates and yearly counts. Unknown-size downloads
+  report ETA unavailable instead of claiming finalization. Keep narrow worker
+  tables scrollable within their section.
+
+## 1.0.0a77 — accurate search progress
+
+- Leave the cleared results pane blank while the status line says **Searching…**.
+  Remove the premature **No messages.** placeholder; completed empty searches
+  still report **0 messages** in the status line.
+
+## 1.0.0a76 — stable worker columns
+
+- Keep Thread, Operation, Download / import progress and Processing tasks finished
+  at fixed widths while worker activity changes. Current task / source uses the
+  remaining width and expands with the window; long source names wrap.
+
+## 1.0.0a75 — record the version behind each import result
+
+- Save the producer's launch application version with every ingest snapshot and
+  display it in the history entry and run details, including failures.
+- Keep saved versions stable after an application update. Older history without
+  recorded version evidence displays **Version unavailable** and remains unchanged.
+
 ## 1.0.0a74 — faster body and attachment processing
 
 - Body/attachment processing commits once per batch of up to 64 messages (or
@@ -49,6 +428,7 @@ Rust delivery plans and historical package checks are not current acceptance.
   records the result in `benchmarks/import/results.jsonl`.
 - Ctrl-C is acknowledged at once on macOS even when the signal lands on a worker
   thread; previously the main thread could sleep until that worker finished.
+
 
 ## 1.0.0a72 — dependency security updates
 

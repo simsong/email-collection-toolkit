@@ -6,9 +6,24 @@
 # No service is started and no release or tag is created by this action.
 name: Prepare pinned ClamAV and OpenSSL
 description: Build ClamAV 1.5.4 against OpenSSL 3.6.4 in the checkout
+inputs:
+  cache:
+    description: >-
+      Reuse a previously built runtime keyed on the build script and runner image.
+      Ordinary CI only; release workflows leave this false and build from source.
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
+    - name: Restore cached antivirus runtime
+      if: ${{ inputs.cache == 'true' }}
+      uses: actions/cache@v6.1.0
+      with:
+        path: |
+          .tmp/ci-clamav/openssl-*
+          .tmp/ci-clamav/clamav-*
+        key: ci-clamav-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('scripts/ci_clamav.sh') }}
     - name: Install native build prerequisites
       shell: bash
       run: |

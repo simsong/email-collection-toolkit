@@ -114,7 +114,7 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
     import webview  # pylint: disable=import-outside-toplevel
     from webview.menu import MenuAction  # pylint: disable=import-outside-toplevel
     from .application import ApplicationController, ApplicationPreferencesStore  # pylint: disable=import-outside-toplevel
-    from .gui_app import AboutStatus, GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events  # pylint: disable=import-outside-toplevel
+    from .gui_app import AboutStatus, GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_desktop_events  # pylint: disable=import-outside-toplevel
     from .loopback import LoopbackAssetServer  # pylint: disable=import-outside-toplevel
 
     # Sparkle also has native preferences. Keep packaged GUI checks in a unique
@@ -128,7 +128,7 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
     controller = ApplicationController(ApplicationPreferencesStore(directory / "preferences.json"))
     controller.configure_updates("preview", False)
     application = PyWebViewApplication(controller, LoopbackAssetServer(GUI_DIRECTORY))
-    install_macos_document_events(application)
+    install_desktop_events(application)
     application.create_about_window()
     api = application.open_document(archive)
     assert api.document is not None
@@ -155,7 +155,7 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
             result = SearchPage.model_validate(evaluate(api.window, "window.pywebview.api.search('selftestneedle')"))
             if len(result.results) != 1:
                 raise AssertionError("GUI search failed")
-            ingest = next(window for window in windows if "— Ingests —" in window.title)
+            ingest = next(window for window in windows if "— Activity —" in window.title)
             evaluate(ingest, "refreshHistory().then(() => true)")
             if ingest.evaluate_js("document.getElementById('antivirus-warning').hidden"):
                 raise AssertionError("missing-scanner import banner is hidden")
@@ -169,7 +169,7 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
             if startup_errors:
                 raise AssertionError(f"Unexpected startup errors: {startup_errors}")
             report.checks.append("startup has no spurious document-open errors")
-            report.checks.extend(["visible About, search, and Ingests windows", "native search bridge", "missing-ClamAV banner and history warning"])
+            report.checks.extend(["visible About, search, and Activity windows", "native search bridge", "missing-ClamAV banner and history warning"])
             # Requirement: Help opens the complete offline license and reuses its window.
             help_menu = next(menu for menu in application.menu() if menu.title == "Help")
             license_action = next(item for item in help_menu.items if getattr(item, "title", None) == "License")

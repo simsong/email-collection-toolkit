@@ -21,7 +21,6 @@ from typing import Protocol, cast
 import errno
 import hashlib
 import mailbox
-import os
 import shutil
 import sqlite3
 from collections.abc import Callable, Generator
@@ -36,7 +35,7 @@ from .message import ParsedMessage, parse_date, raw_header_values
 from .mboxrd import quote, unquote
 from .search import delete_indexed_message
 from .standalone_verify import IntegrityMessage, PreservingMbox as PreservingMbox, write_integrity_file
-from .storage_sync import replace_file, sync_directory
+from .storage_sync import durable_sync, replace_file, sync_directory
 
 
 class DiskFullError(RuntimeError):
@@ -73,7 +72,7 @@ def journal_publication(archive: Path, publication: PendingPublication) -> None:
     with temporary.open("w", encoding="utf-8") as output:
         output.write(publication.model_dump_json())
         output.flush()
-        os.fsync(output.fileno())
+        durable_sync(output.fileno())
     replace_file(temporary, target)
 
 
@@ -118,7 +117,7 @@ def recover_publication(archive: Path, catalog: sqlite3.Connection, search: sqli
         with path.open("r+b") as output:
             output.truncate(publication.prior_size)
             output.flush()
-            os.fsync(output.fileno())
+            durable_sync(output.fileno())
     else:
         path.unlink()
     delete_indexed_message(search, publication.sha256)
@@ -209,7 +208,7 @@ def add_message(
         key = box.add(framed)
         box.flush()
         with path.open("r+b") as persisted:
-            os.fsync(persisted.fileno())
+            durable_sync(persisted.fileno())
         start, stop = message_offsets(box, key)
         return MboxLocation(byte_offset=start, byte_length=stop - start)
     except OSError as error:
@@ -283,8 +282,13 @@ def write_integrity_files(
     archive: Path,
     catalog: sqlite3.Connection,
     message_visitor: Callable[[str, int, IntegrityMessage], None] | None = None,
+    reuse: Callable[[Path, int], str | None] | None = None,
 ) -> dict[str, str]:
-    """Regenerate every MBOX integrity tag from catalog-verified bytes."""
+    """Regenerate MBOX integrity tags from catalog-verified bytes.
+
+    ``reuse(path, message_count)`` may return the MBOX's previously verified
+    SHA-256 to skip rereading a file unchanged since the last checkpoint.
+    """
     digests: dict[str, str] = {}
     for path in sorted(mbox_directory(archive).glob("*.mbox")):
         rows = catalog.execute(
@@ -300,6 +304,10 @@ def write_integrity_files(
         ).fetchone()
         assert count_row is not None
         message_count = int(count_row[0])
+        reused = reuse(path, message_count) if reuse is not None else None
+        if reused is not None:
+            digests[path.name] = reused
+            continue
 
         def messages(rows=rows, path=path):
             for ordinal, (message_id, raw_sha256, offset, length) in enumerate(rows, 1):

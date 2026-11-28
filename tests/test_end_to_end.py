@@ -22,7 +22,8 @@ from tests.process_output import CapturedCommand, python_module
 
 from e2e_tests.eicar_fixture import write_eicar_emlx
 from mailarchiver.__main__ import (
-    REFRESH_INDEX_DEFAULT_WORKERS,
+    REBUILD_INDEX_DEFAULT_WORKERS,
+    formatted_bytes,
     nonnegative_integer,
     positive_integer,
     report_years,
@@ -35,6 +36,9 @@ from mailarchiver.mailsearch import read_message_bytes
 from mailarchiver.mbox import MboxLocation, add_message, read_verified_location
 from mailarchiver.source_volume import METADATA_CURRENT_MOUNT_PATH
 from mailarchiver.standalone_verify import semantic_bytes
+
+# Real services, subprocesses or whole imports: run in the full CI tier only (make check-tests).
+pytestmark = pytest.mark.slow
 
 TEST_DATA = Path(__file__).parent / "data"
 LIBRARY_ENV = "MAILARCHIVER_CLAMAV_LIBRARY"
@@ -292,7 +296,7 @@ def test_ingest_routes_preserves_and_indexes_messages(
         rebuilt.close()
 
     refreshed = subprocess.run(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index", "--workers", str(REFRESH_INDEX_DEFAULT_WORKERS)],
+        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "rebuild", "--workers", str(REBUILD_INDEX_DEFAULT_WORKERS)],
         check=False,
         capture_output=True,
         text=True,
@@ -321,7 +325,7 @@ def test_ingest_routes_preserves_and_indexes_messages(
     assert "Archive integrity verified." in verified.stdout
 
 
-def test_refresh_index_excludes_quarantine_mailboxes(tmp_path: Path) -> None:
+def test_rebuild_excludes_quarantine_mailboxes_from_search(tmp_path: Path) -> None:
     """Requirement: FTS rebuild excludes infected and malformed quarantine mail."""
     archive = tmp_path / "archive"
     archive.mkdir()
@@ -367,14 +371,14 @@ def test_refresh_index_excludes_quarantine_mailboxes(tmp_path: Path) -> None:
         catalog.close()
 
     refreshed = subprocess.run(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index", "--workers", "1"],
+        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "rebuild", "--workers", "1"],
         check=False,
         capture_output=True,
         text=True,
     )
 
     assert_success(refreshed)
-    assert "Refreshing search index (1 workers)" in refreshed.stderr
+    assert "Rebuilding databases (1 workers)" in refreshed.stderr
     search = sqlite3.connect(archive / "search.sqlite3")
     try:
         assert search.execute("SELECT sha256 FROM message_fts").fetchall() == [
@@ -384,14 +388,15 @@ def test_refresh_index_excludes_quarantine_mailboxes(tmp_path: Path) -> None:
         search.close()
     catalog = sqlite3.connect(archive / "archive.sqlite3")
     try:
-        assert catalog.execute("SELECT subject FROM messages WHERE message_id_normalized = ?", ("2024-Archive1.mbox",)).fetchone() == (
+        # Rebuilding re-derives the catalog Message-ID from the stored bytes.
+        assert catalog.execute("SELECT subject FROM messages WHERE message_id_normalized = ?", ("normal@example",)).fetchone() == (
             "이렇게 하면 부자가 됩니다",
         )
     finally:
         catalog.close()
 
 
-def test_refresh_index_preserves_prior_index_when_mbox_and_catalog_disagree(tmp_path: Path) -> None:
+def test_rebuild_preserves_prior_databases_when_mbox_and_catalog_disagree(tmp_path: Path) -> None:
     """Requirement: FTS replacement fails closed unless every normal MBOX row is catalogued."""
     archive = tmp_path / "archive"
     mbox_directory(archive).mkdir(parents=True)
@@ -410,7 +415,7 @@ def test_refresh_index_preserves_prior_index_when_mbox_and_catalog_disagree(tmp_
     old_search.close()
 
     refreshed = subprocess.run(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index"],
+        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "rebuild"],
         check=False,
         capture_output=True,
         text=True,
@@ -424,8 +429,8 @@ def test_refresh_index_preserves_prior_index_when_mbox_and_catalog_disagree(tmp_
         search.close()
 
 
-def test_refresh_index_interrupt_retains_prior_search_index(tmp_path: Path) -> None:
-    """Requirement: Ctrl-C discards an uncommitted refresh-index replacement."""
+def test_rebuild_interrupt_retains_prior_databases(tmp_path: Path) -> None:
+    """Requirement: Ctrl-C discards uncommitted rebuild replacements and keeps the live databases."""
     archive = tmp_path / "archive"
     path = mbox_directory(archive) / "2024-Archive1.mbox"
     path.parent.mkdir(parents=True)
@@ -471,20 +476,20 @@ def test_refresh_index_interrupt_retains_prior_search_index(tmp_path: Path) -> N
     finally:
         old_search.close()
 
-    with CapturedCommand(python_module("mailarchiver", ["--archive", str(archive), "refresh-index"])) as command:
+    with CapturedCommand(python_module("mailarchiver", ["--archive", str(archive), "rebuild"])) as command:
         safety_notice = command.stderr.get(timeout=20).decode()
-        assert "Ctrl-C discards the incomplete replacement" in safety_notice
+        assert "Ctrl-C discards the new databases" in safety_notice
         progress = command.stderr.get(timeout=20).decode()
-        assert progress.startswith("Checking canonical mailboxes:")
-        assert "0/10 messages" in progress
+        assert progress.startswith("Copying catalog:")
+        assert f"0 B of {formatted_bytes((archive / 'archive.sqlite3').stat().st_size)}" in progress  # bytes, not messages
         assert "ETA calculating" in progress
         command.interrupt()
         result = command.finish(timeout=20)
     stdout, stderr = result.stdout.decode(), result.stderr.decode()
     assert result.returncode == 130, stdout + stderr
-    assert "discarded incomplete replacement; the existing search index is unchanged" in stderr
+    assert "discarded the incomplete replacement; the existing databases are unchanged" in stderr
     assert "Traceback" not in stderr
-    assert not (archive / "search.sqlite3.tmp").exists()
+    assert not list(archive.glob("*.sqlite3.new.*"))
     search = sqlite3.connect(archive / "search.sqlite3")
     try:
         assert search.execute("SELECT value FROM preserved").fetchone() == ("old index",)

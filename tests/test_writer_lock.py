@@ -151,8 +151,8 @@ def test_update_reservation_waits_for_external_writer_and_blocks_external_creati
         assert blocked.is_dir()
 
 
-def test_cli_refresh_index_uses_the_same_writer_lease(tmp_path: Path) -> None:
-    """Requirement: a command-line search-index writer fails clearly instead of waiting."""
+def test_cli_rebuild_uses_the_same_writer_lease(tmp_path: Path) -> None:
+    """Requirement: command-line rebuilding fails clearly instead of waiting for the writer lease."""
     archive = tmp_path / "archive"
     archive.mkdir()
     create_catalog(archive / "archive.sqlite3").close()
@@ -160,7 +160,7 @@ def test_cli_refresh_index_uses_the_same_writer_lease(tmp_path: Path) -> None:
     lease = acquire(archive, "gui-import")
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index"],
+            [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "rebuild"],
             check=False,
             capture_output=True,
             text=True,

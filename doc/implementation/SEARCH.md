@@ -9,8 +9,8 @@ live in [plans](../plans/README.md); historical evidence does not validate this 
 
 Header parsing decodes and unfolds RFC 2047 Subject values before catalog and
 FTS insertion. `ect-search` displays that catalog value directly. The verified
-MBOX traversal in `refresh-index` rederives that catalog field while rebuilding
-FTS, so existing archives acquire newly supported legacy-header decoding without
+MBOX traversal in `rebuild` rederives that catalog field (and the other
+byte-derived message fields) while rebuilding FTS, so existing archives acquire newly supported legacy-header decoding without
 rewriting canonical mail.
 Its result formatter determines number width from the returned `message_pk`
 values and emits ANSI bold only for a terminal subject field.
@@ -79,16 +79,18 @@ source-preserving recovery path.
 
 ## Search schema and indexed projections
 
-`refresh-index` rebuilds from verified canonical MBOX locations without constructing
-a production processor pipeline or resuming its saved queue. It atomically replaces
-the disposable index and excludes quarantine mail, including when ingestion is failed.
+`rebuild` rebuilds from verified canonical MBOX locations without constructing
+a production processor pipeline or resuming its saved queue (its optional final
+processor replay is separate and skippable). It replaces the catalog and index
+only after both are complete and excludes quarantine mail from search, including
+when ingestion is failed.
 `make test-ingest-recovery` checks that processing state and MBOX bytes stay unchanged.
 
 `search.sqlite3` has its own packaged, versioned `sql/V1__search.sql` schema and
 does not use cross-database foreign keys. `create_search()` rejects unversioned
 or incompatible layouts. Ingest catches that specific condition, completes any
 pending publication recovery against a temporary current-layout index, and
-uses the same validated, atomic rebuild as `refresh-index` before starting
+uses the validated, atomic `rebuild_search_index` (search only) before starting
 workers. Its main FTS5 table includes an unindexed `sha256` column plus
 searchable headers and selected body text: `text/plain` first, otherwise rendered
 `text/html`, otherwise a safe single-part fallback. A second FTS5 table stores
@@ -110,13 +112,32 @@ attachment extraction is planned with per-format extractors and OCR in
 sandboxed workers, without Apache Tika or Java (#159, #163). Rebuild the
 index in a temporary database,
 validate row identities against `archive.sqlite3`, then atomically replace the
-old search database. Live indexing and `refresh-index` both exclude
+old search database. Live indexing and `rebuild` both exclude
 `INFECTED` and the reserved `MALFORMED` quarantine category; rebuild recognizes
 numbered quarantine MBOX filenames.
-`refresh-index` first renders terminal progress for the finite canonical-MBOX
-validation phase weighted by catalogued message counts, then renders
-message-count progress and an elapsed-rate ETA
-while building the replacement database. After committing, it closes the staging
+`rebuild` (CLI) and File → Rebuild Databases… (GUI) share
+`rebuild.rebuild_archive`. Under the writer lease it removes stale
+`*.sqlite3.new.*` files, checks free space, copies the live catalog with the
+SQLite backup API to `archive.sqlite3.new.<id>`, recounts MBOX records only for
+mailboxes modified after the `Bagging-Timestamp` checkpoint (less the checkpoint
+margin) or whose size or count differs from `mbox_generations`, then streams `(message, location)` rows from the unchanged
+live catalog to a bounded worker pool. Workers verify each record's SHA-256,
+parse `display_entity(raw)` with `parse_message` (the stored-bytes hash stays the
+identity; a date the bytes lack keeps its recorded import-context value) and
+prepare search content. The sole writer updates `messages` (an ID that would
+collide keeps its old value with a `rebuild` defect), replaces `recipients`
+and parse-derived `metadata_defects` (other fields such as `antivirus` are kept),
+and writes `search.sqlite3.new.<id>`. Message numbers, locations, observations,
+sources and runs are untouched. `publish` renames each live file to `.old`
+(replacing an earlier one) and moves the new file in, catalog first; search rows
+are keyed by hash, so either order is consistent. Progress is measured in bytes
+known before reading (catalog size, MBOX sizes, record lengths); the terminal
+bar or the GUI observer receives each tenth of a percent. A `should_stop` poll
+or Ctrl-C before publication deletes the `.new` files. Workers are spawned processes whose initializer ignores SIGINT, so a terminal Ctrl-C (sent to the whole process group) reaches only the parent, which cancels queued work and shuts the pool down. Index attachment
+indexing defaults to the replaced index's setting. `rebuild_search_index`
+remains only for an import's obsolete-search-schema recovery. Indexing parses each message after
+`display_entity` drops a leading `>*From ` envelope line, so rebuilt previews,
+subjects and FTS text are correct for older ingests that stored one. After committing, it closes the staging
 SQLite connection before atomic replacement so Windows can rename the file.
 CLI permission errors retain macOS Full Disk Access guidance only on macOS;
 other hosts advise checking permissions and competing open-file handles.
@@ -125,7 +146,7 @@ as the live index; a `KeyboardInterrupt` rolls back catalog subject updates,
 removes the incomplete replacement, and reports that the existing index is
 unchanged. A bounded, ordered worker pool verifies source hashes and parses
 MIME content in parallel (all detected CPU cores by default, or two if the
-count is unavailable, configurable with `refresh-index --workers`); a sole main-thread SQLite writer retains stable
+count is unavailable, configurable with `rebuild --workers`); a sole main-thread SQLite writer retains stable
 catalog/update order and never shares a SQLite connection across threads.
 Ordinary `ect-search` listings and reports select only `Sent` and `Archive`;
 the authoritative catalog still retains every quarantine record.
@@ -182,30 +203,40 @@ substring searches have a separate linear-work budget because an ordinary
 B-tree cannot seek a leading-wildcard pattern. Tests check plan properties rather
 than snapshotting SQLite's entire version-dependent explanation.
 
+## Search progress display
+
+`gui/app.js` leaves Tabulator's empty-table placeholder disabled. The existing
+search status line reports **Searching…** while the bridge reply is pending,
+then the completed count, including **0 messages**. `make test-search-placeholder`
+delays delivery of real search replies and verifies pending, empty and matching
+results without replacing the search service.
+
 ## Natural search matching
 
 Natural search shares `search_text.search_fold`: Unicode case folding expands
-sharp s to `ss`, then NFD decomposition removes combining accents. New body
-and attachment FTS writes normalize only search content; previews and canonical
-mail retain their original text. The existing V1 index needs no rebuild.
-For legacy content, connection-local `fts5vocab` tables supply exceptional
-spellings whose normalization differs from their native token. Query compilation
-expands those words into FTS phrases; more than 64 phrase combinations use
-ANDed word alternatives followed by a normalized token-adjacency check.
-Indexed vocabulary lookups assemble native fragment phrases for legacy words
-split by combining accents. Ordinary queries do not scan isolated one-letter
-prefixes; exceptionally ambiguous fragmentations retain a bounded-expression
-prefix fallback. Native matches whose content contains combining marks and all extra
-candidates pass the normalized token-adjacency check, including Latin words.
-This also rejects legacy fragments that become interior parts of a normalized word.
-A bounded process cache follows the index's path, inode, size and nanosecond
-timestamps, sampled across attachment/read-lock acquisition. WAL indexes bypass
-that cache. This keeps vocabulary changes and atomic replacements visible.
+sharp s to `ss`, then NFD decomposition removes combining accents. Body and
+attachment FTS writes fold search content; previews and canonical mail retain
+their original text. `create_search` marks a new index with
+`PRAGMA user_version = 1` (`SEARCH_CONTENT_FOLDED`); opening an existing
+unmarked index for writing raises `UnsupportedSearchSchemaError`, so import
+rebuilds it, and searching one raises `SearchIndexRebuildRequired`. The desktop
+window then shows the File > Rebuild Databases… confirmation with the reason.
+A query word is folded and matched as one FTS phrase, so no vocabulary scan,
+accent-split matching or per-message content check is needed for plain words.
 POSIX quote intent survives parsing for symbol-containing text; `search_literal`
 checks the normalized literal and its own word boundaries in each matching FTS table before counts, sorts
 or limits. Symbols-only quotes scan indexed text. Selectors and suggestions use
 the same registered normalization function. CLI `--query` preserves search-box
 quotation through shell parsing. Case sensitivity and stemming are not options.
+
+## Frequent-word pages
+
+A plain text search sorted newest first counts broad FTS hits up to
+sqrt((offset + limit) × indexed rows). Above that, it walks
+`messages_date_message` and probes a materialized hit set, running content
+checks only on hits, until the page fills; below it, it sorts every hit as
+before. Both give the same page. `information` (265,000 hits) fell from 15 s to
+under 1 s.
 
 ## Live grouped names
 
@@ -234,7 +265,7 @@ when the list is limited. No archive schema or content-index rebuild is needed.
 IDs. Viewer body selection, `preferred_body_text`, attachment text and inventory
 use that boundary; the streaming processor inventory also excludes descendants
 of an already inventoried attachment. `mailsearch._search_session` shares the
-read-only attached-database transaction and vocabulary stamp between page and count.
+read-only attached-database transaction and folded-index check for page and count.
 Transform-codec `LookupError` is handled by the ordinary text decoding fallback.
 ID-bearing reader walks receive `OriginalMimeParts` and parse decoded RFC child
 trees, matching production's preflight numbering. Failed encoded children remain

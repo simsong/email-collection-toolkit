@@ -113,7 +113,7 @@ def main(browser_channel: str | None = None) -> None:
                         page.screenshot(path=str(previews / f"{name}.png"))
                     page.close()
                     page = browser.new_page(viewport={WIDTH: 1440, HEIGHT: 960}, device_scale_factor=1)
-                    bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+                    bridge(page, IngestWindowApi(archive), ("history", "antivirus"))
                     page.goto((ROOT / "gui/ingests.html").as_uri())
                     page.locator(".state-badge").filter(has_text="completed").wait_for()
                     page.screenshot(path=str(OUTPUT / "importing-interface.png"))

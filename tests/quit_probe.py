@@ -22,7 +22,7 @@ import webview
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
 from mailarchiver.gui_app import (
-    GUI_DIRECTORY, GuiApi, PyWebViewApplication, SetupApi, configure_macos_application, install_macos_document_events,
+    GUI_DIRECTORY, GuiApi, PyWebViewApplication, SetupApi, configure_macos_application, install_desktop_events,
 )
 from mailarchiver.document_options import DocumentOptions, OwnerRulesState
 from mailarchiver.layout import mbox_directory
@@ -229,7 +229,7 @@ def main() -> None:
     if mode in {"native", "native-overlay"}:
         configure_macos_application()
         app.asset_server = LoopbackAssetServer(GUI_DIRECTORY)
-        install_macos_document_events(app)
+        install_desktop_events(app)
         app.create_about_window(hidden=True)
         if mode == "native-overlay":
             document = controller.create_document(root / "overlay-archive")
@@ -246,7 +246,7 @@ def main() -> None:
                     results.append(value)
                     done.set()
 
-                expression = "refreshHistory().then(() => true)" if " — Ingests — " in native_window.title else "refresh().then(() => true)"
+                expression = "refreshHistory().then(() => true)" if " — Activity — " in native_window.title else "refresh().then(() => true)"
                 native_window.evaluate_js(expression, callback=received)
                 assert done.wait(10) and results == [True], "Native status read did not finish"
             if mode == "native-overlay":

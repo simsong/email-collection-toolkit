@@ -20,11 +20,17 @@ than a second change log. Platform acceptance is stated alongside its evidence.
 ## Shared boundaries
 
 - IMAP credential checks authenticate without mailbox access or archive writes;
-  replacement passwords are tested before saving. Account acquisition uses
+  the search notice opens the Activity password dialog for the rejected account.
+  Replacement passwords are tested before saving. Account acquisition uses
   a saved per-account limit (default 8, range 1–15) and cancellable capacity backoff while retaining the
-  full processing worker pool. Protocol failures and private diagnostics
+  full processing worker pool. Interrupted sessions retry with fresh TLS and
+  epoch checks, retaining delivered UID state. Desktop transport recovery waits
+  150 seconds between connection attempts, waking early for route changes or
+  cancellation. CLI recovery exhaustion pauses safely. Protocol failures and private diagnostics
   retain their distinct handling, including malformed greetings and full CLI login
-  diagnostics. Expected configuration problems use actionable warnings without
+  diagnostics. IMAP checks the received byte count against the literal declaration
+  and logs RFC822.SIZE discrepancies without interrupting acquisition.
+  Expected configuration problems use actionable warnings without
   validator dumps or tracebacks. Retry classification precedes redaction; CLI backoff remains visible,
   console cancellation wakes discovery, and pending password validation blocks Escape. See [acquisition](implementation/ACQUISITION.md).
 
@@ -33,12 +39,33 @@ than a second change log. Platform acceptance is stated alongside its evidence.
 - Standard MBOX and SHA-256 manifests are the canonical preservation record.
   Search indexes are rebuildable; manual decisions, configuration and history
   require backups of the whole archive.
-- Canonical writes use the writer lease and recoverable publication protocol.
+- Canonical writes use the [writer lease](implementation/ARCHIVE.md#writer-lock) and recoverable publication protocol.
   Interrupted work retains completed checkpoints; errors do not silently drop mail.
 - ClamAV runs in owned workers. Detections and scanner failures retain messages
   and evidence; no resident service or manual-review gate is introduced.
 - Jobs, windows and import progress follow actual work and change notifications.
+  Source workers and cooperative saved-processing dispatch share an event-driven
+  owner loop; invocations run in a separate bounded pool and commits stay serialized.
+  Immutable working objects are reused and cleanup checks their digest before
+  unlinking. Combined status coalesces saved-queue reads and refreshes the count
+  when the last source finishes.
   Failure deadlines remain explicit; readiness must be observed.
+  The pinned SDK's API replies are posted to the native view without a second
+  synchronous acknowledgement; Activity bounds its own reply waits.
+  A shared lifecycle controller handles macOS and Windows sleep/wake and network
+  events, feeding desktop status and active IMAP recovery without starting a new import.
+  The estimator tracks unfinished unknown-size containers separately from known
+  source bytes. Promoted attachments increment archival counts without affecting
+  source totals or dates. IMAP run details show
+  complete source downloads, IMAP INTERNALDATE UTC bounds and per-year coverage.
+  The acquisition worker records complete bodies before scanning and publication.
+  Ingest snapshots record the shared immutable launch version. History and run
+  details append it to the timestamp in parentheses, with an unavailable fallback
+  for older files. The coverage table uses its intrinsic column widths.
+  The worker table uses fixed column widths, with task/source taking the remaining
+  space. See [desktop](implementation/DESKTOP.md).
+- The GUI omits the empty-table placeholder while its status line reports search
+  progress and final counts. See [search](implementation/SEARCH.md).
 - User commands are `ect`, `ect-create`, `ect-import` and `ect-search`. They invoke
   application code directly. Make is the developer build/test convenience layer.
 - Versions come from `pyproject.toml`; launch/build provenance discloses local

@@ -245,17 +245,18 @@
     const selectionSummary = document.getElementById("message-selection-summary");
     assert(!selectionSummary.hidden && selectionSummary.textContent.includes("3 messages selected.") &&
       document.getElementById("message-file-well").parentElement === selectionSummary,
-    "multiple selected rows replace the stale message with a selected-message summary and ZIP drag icon");
-    await assertSharedFileDrag(rows()[0], "multi-message ZIP");
+    "multiple selected rows replace the stale message with a selected-message summary and file drag icon");
+    await assertSharedFileDrag(rows()[0], "multi-message export");
     if (state.fileDragSupported && !state.nativeFileDrag) {
       const otherPk = Number(rows()[3].dataset.messagePk);
       startFileDrag(rows()[3]);
-      await waitFor(() => state.dragExports.has(String(otherPk)),
+      // Export keys carry the package format (eml for one message), not the bare message number.
+      await waitFor(() => state.dragExports.has(dragExportKey([otherPk])),
         "dragging an unselected row prepares only that message");
       const other = rows().find(row => Number(row.dataset.messagePk) === otherPk);
       const {transfer} = startFileDrag(other);
       assertFileTransfer(transfer);
-      assert(transfer.values["text/plain"] === state.dragExports.get(String(otherPk)).token &&
+      assert(transfer.values["text/plain"] === state.dragExports.get(dragExportKey([otherPk])).token &&
         state.resultSelection.size === 3 && !state.resultSelection.has(otherPk),
       "an unselected row exports its own file without changing the existing selection");
     }

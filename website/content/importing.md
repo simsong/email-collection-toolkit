@@ -25,7 +25,7 @@ Files the program does not recognize are listed and skipped.
 ## Import with the application
 
 1. Open or create an archive. **File → New** creates one in an empty folder.
-2. Choose **File → Import…** and select files or folders. A folder includes
+2. Choose **File → Import Mail…** and select files or folders. A folder includes
    everything below it.
 3. Review your owner addresses (below), then confirm the sources and
    destination.
@@ -63,9 +63,20 @@ original sources.
 
 ## Watching progress
 
-The **Ingests** window lists every import with its sources, counts, workers,
-and any failures. Open it from **Window → Ingests** or by clicking the status
-line. **Import Directory…** in that window starts another import.
+The **Activity** window lists every import with its sources, counts, workers,
+and any failures. Open it from **Window → Activity…** or by clicking the status
+line. Its **Suspend** and **Continue** buttons pause and resume the current work.
+Start a new import with **File → Import Mail…**.
+
+Downloads and saved-message processing can run at the same time after unfinished
+ingest recovery. Activity shows their worker groups separately, so a saved-mail
+backlog does not have to finish before new downloads begin.
+
+The download details show the number of messages downloaded in this run, their
+earliest and latest server-reported dates in UTC, and counts by year. Emails
+extracted from attachments are counted separately from downloads. If the amount
+remaining is unknown, the display says **ETA unavailable** rather than claiming
+that downloading is finalizing.
 
 ![The import history window showing a completed synthetic collection import](../images/importing-interface.png)
 
@@ -84,16 +95,29 @@ Yellow notices, such as **Extra file detected** for an unrelated file in the
 archive folder, are warnings only. Importing continues. Choose **Dismiss
 messages** to clear them.
 
+## Sources and rescanning
+
+The **Sources** tab of the search window lists every directory or file you have
+imported and every IMAP account. Uncheck a source to leave it out of rescans.
+Choose **Config…** next to an IMAP account to change its server, port, security,
+username or password. **Rescan Imports…** imports every checked source again:
+files unchanged since their last import are skipped, mail servers are checked for
+new messages, and messages already in the archive are recognized as duplicates.
+While an import is unfinished the same button reads **Continue Importing…**.
+
 ## Stopping and continuing
 
-Choose **Suspend Import** to pause safely, or quit the application. Choose
-**Continue Import** later, even after reopening the archive, and the import
+Choose **Suspend** in the Activity window to pause safely, or quit the
+application. Choose **Continue** later, even after reopening the archive, and the import
 picks up where it stopped. When you open an archive with unfinished work, you
 can also **Leave import suspended** or **Stop import**. Stopping keeps
 everything already archived.
 
-If an IMAP connection times out, for example after the laptop sleeps, Ingests
-shows **Timeout** and keeps its progress. Reconnect, then click **Resume**.
+IMAP imports on macOS and Windows wait through sleep, connectivity loss and
+captive portal sign-in, retesting the server every 2½ minutes using a fresh
+session. Activity shows the waiting status while saved progress is retained.
+Complete the network sign-in when needed. **Suspend** remains available
+during the wait. Messages already saved are not downloaded again.
 
 ## Importing again
 

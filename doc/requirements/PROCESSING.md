@@ -4,6 +4,19 @@
 
 ## Working-object lifetime
 
+With unlimited content processing enabled during acquisition, saved message/content
+jobs shall not form a barrier before source downloads. Independent invocations and
+source reads run concurrently under their own configured bounds. One archive owner
+alone claims jobs and commits results, MBOX and indexes; processor workers never use
+its SQLite connections. Complete unfinished ingest roots, even if already filed;
+unpublished roots retain the prior healthy archived-content recovery pass before retry.
+Explicit deferred/limited-content modes retain their budgets. Suspension stops new
+acquisition and claims, checkpoints returned results, and retains resumable work.
+An explicit processor stop closes source admission immediately while active results
+settle. A real TLS regression must hold saved processing open while fresh bodies are
+downloaded and canonically published, then verify bytes, exactly-once delivery and
+cancel/resume integrity (`make test-concurrent-imap`).
+
 Deferred message/content processing shall use the configured worker count to
 execute independent messages concurrently. Workers drain one shared durable
 queue, claim each job once, and preserve per-message rank/parent ordering and
@@ -11,8 +24,9 @@ abort semantics. A content-job limit applies to the whole pool. Cancellation
 and explicit import failure stop new claims and leave unfinished work resumable.
 An explicit `fail-import` also stops remaining subscribers in the current rank.
 Keep inputs of running jobs resident; publication and object collection must not
-race active processors. Progress shall show each active worker and remain active
-until all workers finish. Validate with `make test-processors`,
+race active processors. Reuse SHA-256 verified existing objects rather than replacing
+an active input; report and preserve an invalid existing object. Progress shall show
+each active worker and remain active until all workers finish. Validate with `make test-processors`,
 `make test-ingest-recovery`, `make test-progress` and `make test-processing-cleanup`.
 
 Recovery shall expose the current processor/job and finished-job count while
@@ -32,7 +46,7 @@ verified. Standalone processor harnesses shall keep their original snapshots
 because they have no canonical MBOX fallback. Collection holds the writer lease.
 
 Completed and aborted job records are audit history: their content hashes/paths
-need not name resident working files. Reprocessing shall reconstruct missing raw
+need not name resident working files. Rebuilding shall reconstruct missing raw
 inputs from SHA-256-verified canonical MBOX records and regenerate derived parts;
 it shall preserve manual decisions and antivirus provenance. Never collect through
 symlinks or delete unknown files. Cleanup shall not modify source mail or canonical
@@ -53,12 +67,14 @@ or require manual review. Fresh source-worker scan evidence is scoped to the
 current scanner session so a timeout is not immediately repeated inside filing;
 old unsuccessful evidence still gets a new attempt when a scan session is available.
 Producer scan headers and explicit unscanned-import policy remain authoritative.
-When both ingestion and unbounded content processing are enabled, recover eligible
-archived message/content jobs before pending ingestion or source traversal. A
-failed pending ingest must not starve the existing archive's search reconstruction.
+When both ingestion and unbounded content processing are enabled, complete
+unfinished ingest roots before source traversal, including roots already filed.
+Before retrying unpublished roots, recover eligible archived content so a failed
+pending ingest does not starve the existing archive's search reconstruction.
+Otherwise, saved jobs and source workers share the owner without a queue drain barrier.
 Explicit deferred-content and content-job limits retain their existing behavior.
-Failed archived extraction remains durable and reportable, but the preliminary
-recovery pass must not prevent unrelated new mail from reaching canonical storage.
+Failed archived extraction remains durable and reportable without preventing
+unrelated new mail from reaching canonical storage.
 Saved metadata replay must preserve that isolation when content is deferred or
 bounded; failure records remain visible and unpublished ingest errors still stop.
 Independent healthy archived jobs must continue after a failed job. Descendants
@@ -84,7 +100,9 @@ job, so a message does not pay for dozens of rollback-journal commits. A crash
 may lose only that uncommitted group, which replays from the previous commit;
 object cleanup shall commit the group first. Body/attachment processing may
 group the commits of up to 64 finished messages or one second of work, even
-while no further message arrives, and a
+while no further message arrives. During ingest, a message's processor catalog
+rows shall share one commit, and source checkpoints may ride along with message
+commits, committing within one second while sources stall. A
 derived search write shall commit before the processing commit that marks its
 job completed. A SIGKILL during ingest or during
 body/attachment processing followed by a restart shall yield the same catalog
@@ -95,7 +113,7 @@ and bound blocking I/O; timed-out results must not be committed. The Rust PST
 importer is the external plugin executable.
 Input content hashes shall be verified before dispatch. Source-code files shall
 not be fingerprinted for checkpoint invalidation. Code, manifest, policy and
-settings changes must not automatically reprocess saved mail or clear its index.
+settings changes must not automatically rebuild saved mail or clear its index.
 Ordinary resume retains completed invocations, including legacy registry metadata.
 Only an explicit curator replay creates a fresh generation, retaining manual
 identity decisions, original scan provenance, canonical bytes and audit history.
@@ -217,7 +235,12 @@ its existing graceful checkpoint behavior without the GUI's forced-exit deadline
 
 Matcher matrix cells use two-point vertical padding, black text and column
 headings, and dark supporting text. Live pickers have no Archive identities badge.
-The main-window resume action is labeled **Continue Processing**.
+The main-window import action is labeled **Continue Importing…** while an import is
+unfinished (it opens the incomplete-work dialog) and **Rescan Imports…** otherwise:
+after confirmation it imports every checked source on the Sources tab again. Local
+files whose size and modification time match their last checkpoint are skipped
+without rereading; changed files are reread; IMAP accounts are rechecked; dedup
+applies as in any import.
 It shall be disabled while a resume request is pending or archive processing is
 active, including startup before the first status snapshot and work started in
 another window. Completion or a rejected resume shall restore the action.

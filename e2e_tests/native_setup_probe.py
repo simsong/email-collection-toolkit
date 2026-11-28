@@ -339,7 +339,7 @@ def main() -> None:
             assert native_setup is not None and not native_setup.isVisible()
             assert setup.evaluate_js("document.getElementById('source-path').value") == ""
             assert setup.evaluate_js("document.getElementById('destination-path').value") == ""
-            ingest = next(window for window in webview.windows if " — Ingests — " in window.title)
+            ingest = next(window for window in webview.windows if " — Activity — " in window.title)
             assert ingest.events.loaded.wait(10)
             wait_for_path_state([destination / "status"], lambda: (
                 bool(read_ingest_history(destination).statuses) and

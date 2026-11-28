@@ -1,5 +1,5 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Verify IMAP pause and resume through the shipped Ingests browser interface.
+# Verify IMAP pause and resume through the shipped Activity browser interface.
 # A real TLS proxy stalls or disconnects traffic to a disposable pymap server.
 # Synthetic mail traverses production acquisition, checkpoints and search indexing.
 # Restart the application before clicking Resume to exercise durable recovery.
@@ -7,18 +7,23 @@
 # These checks establish local behavior, not live Gmail or native-window acceptance.
 """Requirements: expected IMAP interruptions pause with a working Resume action."""
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import socket
 import sqlite3
 
 import pytest
 from playwright.sync_api import Page, expect
 
 from e2e_tests.browser_notifications import notify_status
-from mailarchiver.__main__ import IngestRequest
+from mailarchiver.__main__ import IngestRequest, run_ingest
+from mailarchiver.archive_config import load_archive_config, save_archive_config
 from mailarchiver.file_events import wait_for_path_state
-from mailarchiver.gui_app import GUI_DIRECTORY, INGEST_BRIDGE_METHODS, IngestWindowApi, WindowBridge
+from mailarchiver.gui_app import GUI_DIRECTORY, INGEST_BRIDGE_METHODS, SEARCH_BRIDGE_METHODS, IngestWindowApi, WindowBridge
 from mailarchiver.gui_processing import unfinished_work
+from mailarchiver.imap_models import ImapAccount
 from mailarchiver.imap_source import imap_locator
+from mailarchiver.imap_transport import ImapTransport
 from mailarchiver.imap_cli import parser, synchronize
 from mailarchiver.imap_credentials import password_for, save_password
 from mailarchiver.imap_state import totals
@@ -33,11 +38,54 @@ from tests.test_imap import imap_archive as imap_archive, imap_inbox as imap_inb
 from tests.test_imap import imap_server as imap_server, imap_server_identity as imap_server_identity
 
 
+def test_captive_portal_waiting_status_recovers_through_real_import(imap_archive: Path,
+        imap_inbox: DisposableImap, monkeypatch: pytest.MonkeyPatch, page: Page, tmp_path: Path) -> None:
+    """DESKTOP: portal DNS failures display waiting, then fresh TLS resumes the same running import."""
+    assert imap_inbox.account is not None
+    resolve = socket.getaddrinfo
+
+    def unavailable(*args, **kwargs):
+        raise socket.gaierror(socket.EAI_NONAME, "nodename nor servname provided, or not known")
+
+    transport = ImapTransport()
+    request = IngestRequest(archive=imap_archive, roots=[imap_locator(imap_archive, imap_inbox.account, 1)],
+                            workers=1, scan_policy="not-scanned")
+    monkeypatch.setattr(socket, "getaddrinfo", unavailable)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        completed = pool.submit(run_ingest, request, terminal=False, imap_transport=transport)
+        try:
+            def waiting() -> bool:
+                statuses = read_ingest_history(imap_archive).statuses
+                return bool(statuses and "Waiting for IMAP connectivity" in statuses[0].phase)
+
+            wait_for_path_state([imap_archive / "status"], waiting, timeout=10)
+            bridge(page, IngestWindowApi(imap_archive), ("history", "antivirus"))
+            page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
+            expect(page.locator(".state-badge")).to_have_text("running")
+            expect(page.locator(".progress-caption")).to_contain_text("retrying in 150s")
+            expect(page.locator(".progress-caption")).to_contain_text("Network sign-in")
+            expect(page.get_by_role("heading", name="Failure", exact=True)).to_have_count(0)
+            expect(page.locator("#error")).to_be_hidden()
+            page.screenshot(path=str(tmp_path / "captive-portal-waiting.png"))
+        finally:
+            monkeypatch.setattr(socket, "getaddrinfo", resolve)
+            transport.network_changed(True)
+        completed.result(timeout=15)
+    page.evaluate("refreshHistory()")
+    expect(page.locator(".state-badge")).to_have_text("completed")
+    assert len(read_ingest_history(imap_archive).statuses) == 1
+    assert totals(imap_archive).archived == 3 and not verify_archive(imap_archive)
+
+
 def test_password_replacement_form_checks_real_login_before_saving(imap_archive: Path,
         imap_inbox: DisposableImap, page: Page, tmp_path: Path) -> None:
-    """ACQUISITION: the shipped password form reports rejection and saves only a validated replacement."""
+    """ACQUISITION: recovery selects the rejected account and saves only a validated replacement."""
     account = imap_inbox.account
     assert account is not None
+    other = ImapAccount(server=account.server, port=account.port, username="another-user")
+    config = load_archive_config(imap_archive)
+    config.imap_sources.insert(0, other)
+    save_archive_config(imap_archive, config)
     save_password(account, "old-password")
     app, api = open_headless(imap_archive, tmp_path / "preferences.json")
     try:
@@ -45,16 +93,41 @@ def test_password_replacement_form_checks_real_login_before_saving(imap_archive:
                                 workers=1, scan_policy="not-scanned", index_attachments=True)
         assert app.start_import(api, [], processing_request=request)
         wait_for_import(api)
+        for future in tuple(app._tasks):
+            future.result(timeout=10)
         status = read_ingest_history(imap_archive).statuses[0]
         assert status.state == "failed" and status.failure_detail and "authentication failed" in status.failure_detail
         assert "Traceback" not in status.failure_detail and "Message prefix" not in status.failure_detail
+        search = page.context.new_page()
+        try:
+            bridge(search, api, SEARCH_BRIDGE_METHODS)
+            search.add_init_script("""window.addEventListener('DOMContentLoaded', () => {
+              window.pywebview.api.open_ingest_window = (...args) => {
+                window.openedIngests = args;
+                return Promise.resolve(true);
+              };
+            });""")
+            search.goto((GUI_DIRECTORY / "index.html").as_uri())
+            search.get_by_role("button", name="Leave import suspended", exact=True).click()
+            expect(search.locator("#error button")).to_have_text(
+                ["Collapse messages", "Dismiss messages", "Update IMAP Credentials"])
+            search.get_by_role("button", name="Update IMAP Credentials").click()
+            assert search.evaluate("window.openedIngests") == [None, account.id]
+        finally:
+            search.close()
         app.shutdown()
         api.close()
         app, api = open_headless(imap_archive, tmp_path / "preferences.json")
         controls = IngestWindowApi(imap_archive, application=app, document=api.document)
         bridge(page, WindowBridge(controls, INGEST_BRIDGE_METHODS), INGEST_BRIDGE_METHODS)
-        page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
-        page.get_by_role("button", name="Update IMAP Password…").click()
+        page.goto((GUI_DIRECTORY / "ingests.html").as_uri() + f"?imap_password={account.id}")
+        expect(page.locator("#imap-password-dialog")).to_be_visible()
+        expect(page.locator("#imap-account")).to_have_value(account.id)
+        page.locator("#imap-account").select_option(other.id)
+        page.get_by_label("New password or app password").fill("another-accounts-password")
+        page.evaluate("(sourceId) => window.requestImapPassword(sourceId)", account.id)
+        expect(page.locator("#imap-account")).to_have_value(account.id)
+        expect(page.locator("#imap-password")).to_have_value("")
         page.get_by_label("New password or app password").fill("incorrect")
         page.get_by_role("button", name="Test and Save").click()
         expect(page.locator("#imap-password-status")).to_contain_text("authentication failed")
@@ -90,7 +163,12 @@ def test_password_replacement_form_checks_real_login_before_saving(imap_archive:
         expect(page.get_by_role("button", name="Cancel", exact=True)).to_be_enabled()
         page.keyboard.press("Escape")
         expect(page.locator("#imap-password-dialog")).not_to_be_visible()
-        page.get_by_role("button", name="Continue Import", exact=True).click()
+        page.evaluate("(sourceId) => window.requestImapPassword(sourceId)", account.id)
+        expect(page.locator("#imap-password-dialog")).to_be_visible()
+        expect(page.locator("#imap-account")).to_have_value(account.id)
+        page.keyboard.press("Escape")
+        expect(page.locator("#imap-password-dialog")).not_to_be_visible()
+        page.get_by_role("button", name="Continue", exact=True).click()
         wait_for_import(api)
         notify_status(page)
         expect(page.locator(".state-badge")).to_have_text("completed")
@@ -105,7 +183,7 @@ def test_password_replacement_form_checks_real_login_before_saving(imap_archive:
 @pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
 def test_connection_backoff_stays_running_and_suspend_cancels_wait(imap_archive: Path,
         imap_inbox: DisposableImap, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, page: Page) -> None:
-    """ACQUISITION: quota backoff is live progress; Suspend wakes it and Continue Import retains settings."""
+    """ACQUISITION: quota backoff is live progress; Suspend wakes it and Continue retains settings."""
     server = imap_inbox
     assert isinstance(server, InterruptibleImap) and server.account is not None
     monkeypatch.setattr("mailarchiver.imap_source.IMAP_RETRY_INITIAL", 60.0)
@@ -124,11 +202,11 @@ def test_connection_backoff_stays_running_and_suspend_cancels_wait(imap_archive:
         expect(page.locator("#ingest-detail")).to_contain_text("retrying in 60s")
         status = read_ingest_history(imap_archive).statuses[0]
         assert status.state == "running" and status.failure_detail is None
-        page.get_by_role("button", name="Suspend Import", exact=True).click()
+        page.get_by_role("button", name="Suspend", exact=True).click()
         wait_for_import(api)  # Must complete without waiting for the 60-second retry deadline.
         notify_status(page)
         assert read_ingest_history(imap_archive).statuses[0].state == "interrupted"
-        page.get_by_role("button", name="Continue Import", exact=True).click()
+        page.get_by_role("button", name="Continue", exact=True).click()
         wait_for_import(api)
         notify_status(page)
         expect(page.locator(".state-badge")).to_have_text("completed")
@@ -179,7 +257,7 @@ def test_network_pause_and_resume_through_real_ingest_window(imap_archive: Path,
             wait_for_import(api)
         status = read_ingest_history(imap_archive).statuses[0]
         assert status.state == "paused" and status.failure_detail is None
-        assert "IMAP connection" in status.phase and "Resume" in status.phase
+        assert "IMAP connection" in status.phase and "Continue" in status.phase
         assert controls.history()["can_resume"] and not controls.history()["active"]
         assert not any(notice.severity == "error" for notice in app.notices()), app.notices()
         with sqlite3.connect(imap_archive / "archive.sqlite3") as database:
@@ -197,14 +275,14 @@ def test_network_pause_and_resume_through_real_ingest_window(imap_archive: Path,
         # Persist the pause and accepted request across a complete application restart.
         app, api = open_headless(imap_archive, tmp_path / "preferences.json", workers_override=workers)
         controls = IngestWindowApi(imap_archive, application=app, document=api.document)
-        bridge(page, controls, ("history", "antivirus", "can_import_directory", "suspend_import", "resume_import"))
+        bridge(page, controls, ("history", "antivirus", "suspend_import", "resume_import"))
         page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
         expect(page.locator(".state-badge")).to_have_text("Timeout" if fault.mode in {"timeout", "partial"} else "paused")
         expect(page.locator(".history-row.selected .state-dot")).to_have_text("−")
         assert page.locator(".history-row.selected .state-dot").evaluate("el => getComputedStyle(el).backgroundColor") == "rgb(244, 197, 66)"
         expect(page.get_by_role("heading", name="Failure", exact=True)).to_have_count(0)
         expect(page.locator("#import-control-status")).to_contain_text("Download paused")
-        resume = page.get_by_role("button", name="Resume", exact=True)
+        resume = page.get_by_role("button", name="Continue", exact=True)
         expect(resume).to_be_enabled()
         page.screenshot(path=str(tmp_path / "imap-paused.png"))
         server.fault = None

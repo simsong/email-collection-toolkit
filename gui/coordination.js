@@ -4,7 +4,7 @@
 // Post-command reads wait for an older operation before requesting fresh state.
 // Promise settlement releases ownership on both success and failure.
 // This helper owns no timer and never treats elapsed time as successful work.
-// About, Ingests and options retain their own rendering and error policies.
+// About, Activity and options retain their own rendering and error policies.
 "use strict";
 
 class RefreshTask {

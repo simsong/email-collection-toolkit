@@ -31,7 +31,8 @@ launch or build commit and discloses local changes.
 
 1. Merge the release changes to `main` through review.
 2. Opt a branch into signed installer checks with `[release-ci]` in the commit
-   message. `make release-candidate-base APPCAST=...` authenticates the
+   message. That commit also runs the full test suite (`make check-tests`,
+   including tests marked `slow`); ordinary pushes run only the quick tier. `make release-candidate-base APPCAST=...` authenticates the
    published feed, and `make release-candidate-feed APPCAST=...` signs and
    verifies a candidate feed without creating a release or tag.
 3. Run the [Windows installer checklist](#windows-installer-checklist) on the
@@ -309,7 +310,7 @@ A successful build does not establish these manual checks.
 - Install and launch without Python or a checkout. Confirm About shows the new
   version and commit, the application icon/name, and the registered processors.
   Open the processor graph and inspect MIME extraction's possible output types.
-- Check the launch version in parentheses at the top right of Search, Ingests,
+- Check the launch version in parentheses at the top right of Search, Activity,
   About and Preferences. Reopening must not duplicate the label. Use File > Show
   Archive in Explorer to locate the active saved archive folder.
 - Drag one message and multiple messages to Explorer. The first gesture prepares
@@ -332,7 +333,7 @@ A successful build does not establish these manual checks.
   Repeating the same import must not add duplicate archived messages.
 - Suspend a larger import; keep the app open and search the saved messages.
   Continue and verify progress resumes past saved UIDs without downloading them
-  again. Suspend, Quit, relaunch, and choose Continue Import; then repeat using
+  again. Suspend, Quit, relaunch, and choose Continue in Activity; then repeat using
   Leave import suspended. The incomplete-work prompt appears once per opened
   search window, not whenever a window regains focus.
 - During saved-mail work, check Messages requiring processing, completed tasks,
@@ -351,8 +352,8 @@ A successful build does not establish these manual checks.
   import/search remain responsive. Closing the last importing search window must
   explain that Quit suspends import. Quit must dim windows with Shutting down,
   retain resumable work, and exit without a beach ball or hung process.
-- Choose File > Reprocess Saved Mail: cancel the long-duration confirmation and
-  verify nothing starts. On a disposable archive, confirm a deliberate reprocess
+- Choose File > Rebuild Databases: cancel the long-duration confirmation and
+  verify nothing starts. On a disposable archive, confirm a deliberate rebuild
   works. Ordinary app upgrades must not automatically replay completed work.
 
 Windows uses Ctrl shortcuts and its own title-bar controls. macOS Command-Tab

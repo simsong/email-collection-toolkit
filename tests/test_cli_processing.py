@@ -34,6 +34,9 @@ from mailarchiver.writer_lock import WriterLease
 from tests.test_end_to_end import mailbox_message_bytes
 
 
+# Real services, subprocesses or whole imports: run in the full CI tier only (make check-tests).
+pytestmark = pytest.mark.slow
+
 def test_pst_activity_counter_renews_without_growing_output() -> None:
     """ACQUISITION: fixed-size progress changes renew liveness; repeated counters do not."""
     activity = ImportActivity(deadline=60)

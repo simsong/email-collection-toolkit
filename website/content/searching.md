@@ -73,6 +73,16 @@ name agree.
 The bottom of each message lists where it is stored in the archive and every
 source where it was found. **Save Message…** saves an exact `.eml` copy.
 
+For everything the archive knows about a message, click **ⓘ** above it, or
+Control-click the message in the results or the message pane and choose **View
+Message Metadata…**. The report lists its hashes, every source copy, duplicates,
+recorded defects, MIME parts with attachment sizes, and when it was extracted.
+
+To export several messages, select them and choose **File → Export Selected
+Messages…**. Save as an MBOX file (the default) or a ZIP of `.eml` files. You
+can also drag selected messages to Finder or Explorer; they arrive as one MBOX
+file unless you choose a ZIP under **Preferences**.
+
 ## Attachment text
 
 Turn on **Search attachments** to include plain-text, HTML, and RTF
@@ -80,7 +90,7 @@ attachments. The archive
 must be indexed with attachment support first:
 
 ```sh
-ect refresh-index --archive collection.mailarchive --index-attachments
+ect rebuild --archive collection.mailarchive --index-attachments
 ```
 
 Text from PDF, Word, Excel, and PowerPoint attachments, and text in scanned
@@ -100,7 +110,7 @@ Filter sets are saved on this computer, not in the archive.
 
 ## Names and contacts
 
-The **Names and addresses** button opens the Name matcher, which groups the
+The **Names and addresses…** button opens the Name matcher, which groups the
 addresses that belong to one person. Drag one entry onto
 another to merge them, or use **Make separate** to split an address off. Your
 changes are saved in the archive right away. Double-click a name to search all

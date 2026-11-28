@@ -144,10 +144,10 @@ def test_cli_preferences_and_explicit_overrides_drive_actual_pool(tmp_path: Path
         assert result.returncode == 0, result.stdout + result.stderr
         assert read_ingest_history(archive).statuses[0].configured_workers == count
     # Windows must close the rebuilt SQLite handle before replacing the live index.
-    refreshed = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index"],
+    refreshed = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "rebuild", "--skip-processors"],
                                env=environment, capture_output=True, text=True, check=False, timeout=30)
     assert refreshed.returncode == 0, refreshed.stdout + refreshed.stderr
-    assert "Refreshing search index (1 workers)" in refreshed.stderr
+    assert "Rebuilding databases (1 workers)" in refreshed.stderr
     # An import's obsolete-index repair must also honor the explicit override.
     (archive / "search.sqlite3").unlink()
     # A transaction context commits; it does not close the Windows file handle.
@@ -157,7 +157,7 @@ def test_cli_preferences_and_explicit_overrides_drive_actual_pool(tmp_path: Path
                               env=environment, capture_output=True, text=True, check=False, timeout=30)
     assert repaired.returncode == 0, repaired.stdout + repaired.stderr
     assert "rebuilding obsolete search index:" in repaired.stderr
-    assert "Refreshing search index (2 workers)" in repaired.stderr
+    assert "Rebuilding search index (2 workers)" in repaired.stderr
     subprocess.run([sys.executable, "-c", "from mailarchiver.application import ApplicationPreferencesStore; "
                     "assert ApplicationPreferencesStore().read().workers.custom_count == 1"],
                    env=environment, check=True, capture_output=True, text=True, timeout=15)

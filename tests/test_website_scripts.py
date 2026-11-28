@@ -132,7 +132,11 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
 
 
 def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
-    """Requirement: CI reports on documentation-only pushes and skips its expensive jobs."""
+    """Requirement: CI reports on documentation-only pushes, skips expensive jobs, and tiers its tests.
+
+    Ordinary pushes run the quick tier; [full-ci], [release-ci] and a manual full
+    dispatch run the complete suite. Ordinary CI may reuse a cached ClamAV build.
+    """
     workflow = Path(__file__).parents[1] / ".github/workflows/continuous-integration.yml"
     text = workflow.read_text(encoding="utf-8")
 
@@ -145,10 +149,13 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     assert triggers == {
         "push": {
             "branches": ["**", "!main"],
-        }
+        },
+        "workflow_dispatch": {"inputs": {"full": {
+            "description": "Run the full test suite, including slow tests", "type": "boolean", "default": True,
+        }}},
     }
     jobs = configuration[JOBS]
-    assert set(jobs) == {"ci-gate", "static-rust", "python-browser", "release-candidate"}
+    assert set(jobs) == {"ci-gate", "static-rust", "python-browser", "windows-lifecycle", "release-candidate"}
     # Release validation must work on any branch, including notes-only candidates.
     assert jobs["release-candidate"]["if"] == "contains(github.event.head_commit.message, '[release-ci]')"
     assert jobs["release-candidate"]["uses"] == "./.github/workflows/release-candidate.yml"
@@ -164,12 +171,12 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
         "BASE_SHA": "${{ github.event.before }}",
         "HEAD_SHA": "${{ github.sha }}",
     }
-    assert '[[ "$BASE_SHA" =~ ^0+$ ]]' in gate_script
+    assert '[[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]' in gate_script
     assert "git diff --quiet" in gate_script
     assert ":(exclude)README.md" in gate_script
     assert ":(exclude)doc/RELEASE_NOTES.md" in gate_script
     assert ":(exclude)doc/**" not in gate_script
-    ordinary_jobs = [jobs["static-rust"], jobs["python-browser"]]
+    ordinary_jobs = [jobs["static-rust"], jobs["python-browser"], jobs["windows-lifecycle"]]
     assert all(job[NEEDS] == "ci-gate" for job in ordinary_jobs)
     assert all(
         job["if"] == "${{ needs.ci-gate.outputs.run_checks == 'true' }}"
@@ -178,7 +185,17 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     static_runs = [step.get(RUN, "") for step in jobs["static-rust"][STEPS]]
     test_runs = [step.get(RUN, "") for step in jobs["python-browser"][STEPS]]
     assert any("make check-static" in run for run in static_runs)
-    assert any("make check-tests" in run for run in test_runs)
+    tier = next(step for step in jobs["python-browser"][STEPS] if step.get("name") == "Python and Chromium GUI tests")
+    assert "make check-tests" in tier[RUN] and "make check-quick-tests" in tier[RUN]
+    for condition in ("inputs.full", "'[full-ci]'", "'[release-ci]'"):
+        assert condition in tier["env"]["FULL_TESTS"]
+    clamav = [step for job in ("static-rust", "python-browser") for step in jobs[job][STEPS]
+              if step.get("uses") == "./.github/actions/prepare-clamav"]
+    assert [step["with"] for step in clamav] == [{"cache": "true"}] * 2
+    assert "make test-frozen-lifecycle" in test_runs
+    windows = jobs["windows-lifecycle"]
+    assert windows[RUNS_ON] == "windows-latest"
+    assert any("test-windows-lifecycle" in step.get(RUN, "") for step in windows[STEPS])
     assert all("make check-tests" not in run for run in static_runs)
     assert all("make check-static" not in run for run in test_runs)
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
@@ -187,8 +204,11 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
         if definition.name == "windows-msix.yml":
             continue  # Its explicit multi-platform build matrix is checked below.
         configuration = safe_load(definition.read_text())
-        for job in configuration[JOBS].values():
-            assert job.get(RUNS_ON) == "macos-15" or "uses" in job, definition
+        for name, job in configuration[JOBS].items():
+            if definition.name == "continuous-integration.yml" and name == "windows-lifecycle":
+                assert job[RUNS_ON] == "windows-latest"
+            else:
+                assert job.get(RUNS_ON) == "macos-15" or "uses" in job, definition
 
 
 @pytest.mark.parametrize(("changed_file", "expected"), [

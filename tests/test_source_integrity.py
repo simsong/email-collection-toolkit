@@ -154,7 +154,9 @@ def test_completion_returns_typed_final_evidence_and_checkpoint(tmp_path: Path) 
     checkpoint = control.complete_checkpoint(source)
 
     assert any(isinstance(event, ProgressEvent) for event in events)
-    assert len(evidence) == 1
+    # The digest plus the size and modification time a later rescan compares before rereading.
+    assert [item.evidence_kind for item in evidence] == ["cryptographic-digest", "metadata"]
+    assert evidence[1].value == f"mtime_ns:{source.modified_at_ns}" and evidence[1].byte_length == len(raw)
     assert evidence[0].evidence_kind == "cryptographic-digest"
     assert evidence[0].algorithm == "sha256"
     assert evidence[0].value == hashlib.sha256(raw).hexdigest()

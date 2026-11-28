@@ -9,9 +9,13 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 import sys
-from threading import Barrier, Event
+import time
+from threading import Thread, Barrier, Event
 from time import monotonic
 from datetime import UTC, datetime, timedelta
+
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from pydantic import BaseModel, Field
@@ -66,6 +70,258 @@ def wait_for_import(api: GuiApi) -> None:
         assert job.finished.wait(30), "GUI background processing did not finish"
     # A quick successful job may already have released its document reservation.
     # Callers still assert durable completion, output and application notices.
+
+
+def test_revalidate_menu_writes_report_and_opens_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """DESKTOP: File > Revalidate Archive validates in the background and opens its HTML report."""
+    import mailarchiver.gui_app as gui_app
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    opened: list[Path] = []
+    done = Event()
+
+    def fake_open(path: Path) -> None:
+        # Platform "open" boundary only; validation and the report are real.
+        opened.append(path)
+        done.set()
+
+    monkeypatch.setattr(gui_app, "open_export", fake_open)
+    try:
+        assert app.revalidate_active_archive()
+        assert done.wait(30), "the validation report was not opened"
+        assert opened[0].suffix == ".html" and opened[0].is_file()
+        assert "Archive validation report" in opened[0].read_text(encoding="utf-8")
+        assert any("Validation of" in notice.message for notice in app.window_notices(None))
+    finally:
+        api.close()
+        app.shutdown()
+
+
+def test_rebuild_databases_swaps_databases_with_byte_progress(tmp_path: Path) -> None:
+    """SEARCH: File > Rebuild Databases rebuilds catalog and index into new files, keeps .old, shows bytes."""
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    assert api.document is not None
+    before = {name: (archive / name).stat().st_ino for name in ("archive.sqlite3", "search.sqlite3")}
+    seen: list[dict[str, object]] = []
+    # The confirmation dialog is native UI; the background work after it is real.
+    worker = Thread(target=app._rebuild_archive, args=(api, api.document, archive))  # pylint: disable=protected-access
+    try:
+        worker.start()
+        while worker.is_alive():
+            rebuild = api.ingest_overview()["rebuild"]
+            if rebuild is not None:
+                seen.append(rebuild)
+            time.sleep(0.005)
+        worker.join()
+        wait_for_import(api)
+        assert any("Rebuilt the databases" in notice.message for notice in app.window_notices(None)), \
+            [notice.message for notice in app.window_notices(None)]
+        assert api.ingest_overview()["rebuild"] is None
+        for name, inode in before.items():
+            assert (archive / f"{name}.old").stat().st_ino == inode
+            assert (archive / name).stat().st_ino != inode
+        assert not list(archive.glob("*.sqlite3.new.*"))
+        assert all(isinstance(item["total_bytes"], int) for item in seen)
+    finally:
+        api.close()
+        app.shutdown()
+
+
+def test_activity_suspend_and_continue_control_a_rebuild(tmp_path: Path) -> None:
+    """DESKTOP: Activity's Suspend stops a running rebuild (databases unchanged); Continue starts it again."""
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    assert api.document is not None
+    activity = IngestWindowApi(archive, application=app, document=api.document)
+    before = (archive / "archive.sqlite3").read_bytes()
+    worker = Thread(target=app._rebuild_archive, args=(api, api.document, archive))  # pylint: disable=protected-access
+    try:
+        worker.start()
+        deadline = time.monotonic() + 30
+        while not app.rebuild_running(api.document):
+            assert worker.is_alive() and time.monotonic() < deadline, "rebuild did not start"
+            time.sleep(0.001)
+        running = GuiIngestHistory.model_validate(activity.history())
+        assert running.active and running.stop_label == "Cancel"  # A rebuild cannot resume part-way.
+        assert activity.suspend_import()
+        worker.join(60)
+        assert not app.rebuild_running(api.document)
+        assert (archive / "archive.sqlite3").read_bytes() == before
+        stopped = GuiIngestHistory.model_validate(activity.history())
+        assert stopped.statuses[0].activity_kind == "rebuild" and stopped.statuses[0].state == "interrupted"
+        assert stopped.can_resume and not stopped.active
+        assert stopped.stop_label == "Suspend"
+
+        assert activity.resume_import()
+        deadline = time.monotonic() + 60
+        while True:
+            history = GuiIngestHistory.model_validate(activity.history())
+            if not history.active and history.statuses[0].state == "completed":
+                break
+            assert time.monotonic() < deadline, history.statuses[0].state
+            time.sleep(0.05)
+        wait_for_import(api)
+        assert (archive / "archive.sqlite3.old").read_bytes() == before
+        assert not GuiIngestHistory.model_validate(activity.history()).can_resume
+    finally:
+        api.close()
+        app.shutdown()
+
+
+@pytest.mark.parametrize("confirm", [False, True])
+def test_quit_during_rebuild_warns_that_it_aborts_the_rebuild(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                              confirm: bool) -> None:
+    """DESKTOP: Quit during a rebuild asks first, saying the rebuild will be aborted; declining keeps it running."""
+    import mailarchiver.gui_app as gui_app
+    archive = build_deferred_archive(tmp_path)
+    exited = Event()
+    app, api = open_headless(archive, tmp_path / "preferences.json", exit_process=lambda _code: exited.set())
+    assert api.document is not None
+    before = (archive / "archive.sqlite3").read_bytes()
+    asked: list[tuple[str, str, tuple[str, ...]]] = []
+
+    def alert(title: str, message: str, buttons: tuple[str, ...], **_options: object) -> int:
+        asked.append((title, message, buttons))
+        return 1 if confirm else 0
+
+    monkeypatch.setattr(gui_app, "macos_alert", alert)
+    anchor = SimpleNamespace(create_confirmation_dialog=lambda title, message: asked.append((title, message, ())) or confirm)
+    app._about_window = anchor  # pylint: disable=protected-access
+    monkeypatch.setattr(gui_app.webview, "active_window", lambda: None)
+    hold, release = Event(), Event()
+    real_rebuild = gui_app.rebuild_archive
+
+    def held_rebuild(archive: Path, **options: Any) -> Any:
+        hold.set()
+        assert release.wait(30), "test did not release the rebuild"
+        return real_rebuild(archive, **options)
+
+    monkeypatch.setattr(gui_app, "rebuild_archive", held_rebuild)
+    worker = Thread(target=app._rebuild_archive, args=(api, api.document, archive))  # pylint: disable=protected-access
+    try:
+        worker.start()
+        assert hold.wait(30) and app.has_active_rebuild()
+        app.request_quit()
+        (title, message, buttons), = asked
+        assert title == "Abort rebuild and quit?" and "aborts the database rebuild" in message
+        assert buttons in ((), ("Keep Rebuilding", "Abort Rebuild and Quit"))
+        assert app._quitting is confirm  # pylint: disable=protected-access
+    finally:
+        if not confirm:
+            app.suspend_import(api.document)
+        release.set()
+        worker.join(60)
+        api.close()
+        app.shutdown()
+    assert not worker.is_alive()
+    assert (archive / "archive.sqlite3").read_bytes() == before  # Aborted or cancelled: databases unchanged.
+    assert not list(archive.glob("*.sqlite3.new.*"))
+
+
+def test_sources_tab_checkbox_and_imap_config_use_the_writer_lease(tmp_path: Path) -> None:
+    """DESKTOP: Sources edits persist through the bridge; a changed IMAP endpoint needs a password."""
+    from mailarchiver.imap_models import ImapAccount  # pylint: disable=import-outside-toplevel
+    archive = build_deferred_archive(tmp_path)
+    account = ImapAccount(server="imap.example.test", username="owner@example.test")
+    config = load_archive_config(archive)
+    config.imap_sources = [account]
+    save_archive_config(archive, config)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    try:
+        rows = {row["id"]: row for row in api.sources()}
+        assert rows[account.id]["kind"] == "imap" and rows[account.id]["enabled"]
+        assert api.set_source_enabled(account.id, False)
+        assert not {row["id"]: row for row in api.sources()}[account.id]["enabled"]
+        with pytest.raises(ValueError, match="Enter the password"):
+            api.save_imap_source(account.id, "mail.example.test", 993, "owner@example.test", "implicit", "")
+        assert api.save_imap_source(account.id, "imap.example.test", 993, "renamed@example.test", "implicit", "")
+        saved = load_archive_config(archive).imap_sources[0]
+        assert (saved.id, saved.username, saved.server, saved.enabled) == (
+            account.id, "renamed@example.test", "imap.example.test", False)
+        with pytest.raises(ValueError, match="TLS"):
+            api.save_imap_source(account.id, "imap.example.test", 993, "x", "plaintext", "")
+    finally:
+        api.close()
+        app.shutdown()
+
+
+def test_opening_an_open_archive_raises_its_native_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """DESKTOP: File Open, Open Recent and Finder opens raise the archive's window rather than adding a copy."""
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+
+    class NativeWindow:
+        # Native-window protocol boundary only; the controller and application routing are real.
+        uid = "open-archive-fixture"
+
+        def __init__(self) -> None:
+            self.raised = 0
+
+        def restore(self) -> None:
+            pass
+
+        def show(self) -> None:
+            self.raised += 1
+
+    native = NativeWindow()
+    assert api.search_window is not None
+    api.window = native
+    app._apis[api.search_window.window_id] = api
+    monkeypatch.setattr(app, "create_search_window",
+                        lambda *_args, **_kwargs: pytest.fail("an open archive must not get a second window"))
+    try:
+        assert app.open_document(archive) is api
+        assert app.open_recent_document(archive)
+        assert app.handle_open_documents((archive,)) == []
+        assert native.raised == 3
+        assert api.document is not None and api.document.window_ids == (api.search_window.window_id,)
+    finally:
+        app._apis.clear()
+        api.window = None
+        api.close()
+        app.shutdown()
+
+
+def test_status_line_click_raises_activity_window_even_when_its_page_is_slow(tmp_path: Path) -> None:
+    """DESKTOP: clicking the activity bar raises an open Activity window before selecting its run."""
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    blocked, release = Event(), Event()
+
+    class ActivityWindow:
+        # Native-window protocol boundary only: run_js blocks like WebKit awaiting a busy page.
+        uid = "activity-fixture"
+        raised = 0
+        raised_before_script = -1
+
+        def restore(self) -> None:
+            pass
+
+        def show(self) -> None:
+            self.raised += 1
+
+        def run_js(self, script: str) -> None:
+            assert "selectIngest" in script
+            self.raised_before_script = self.raised
+            blocked.set()
+            release.wait(10)
+
+    native = ActivityWindow()
+    assert api.document is not None
+    activity = IngestWindowApi(archive, application=app, document=api.document)
+    activity.set_window(native)
+    app._ingest_apis[api.document.descriptor.document_id] = activity
+    try:
+        assert app.open_ingest_window(api.document, "some-status")
+        assert blocked.wait(5), "the selection was not delivered"
+        assert native.raised == native.raised_before_script == 1
+    finally:
+        release.set()
+        app._ingest_apis.clear()
+        activity.close()
+        api.close()
+        app.shutdown()
 
 
 @pytest.mark.parametrize("child", [False, True])

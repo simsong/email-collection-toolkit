@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self'; object-src 'none'; connect-src 'self'">
-    <title>Email Collection Toolkit — Ingests</title>
+    <title>Email Collection Toolkit — Activity</title>
     <link rel="stylesheet" href="ingests.css">
   </head>
   <body>
@@ -13,10 +13,9 @@
     <div id="configuration-warning" role="status" hidden></div>
     <main class="ingest-browser">
       <aside class="ingest-history">
-        <header><h1>Ingests</h1><span id="history-count"></span></header>
-        <div class="ingest-actions"><button id="import-directory" type="button" disabled>Import Directory…</button>
-          <button id="suspend-import" type="button" disabled>Suspend Import</button>
-          <button id="resume-import" type="button" disabled>Continue Import</button>
+        <header><h1>Activity</h1><span id="history-count"></span></header>
+        <div class="ingest-actions"><button id="suspend-import" type="button" disabled>Suspend</button>
+          <button id="resume-import" type="button" disabled>Continue</button>
           <button id="update-imap-password" type="button" hidden>Update IMAP Password…</button>
           <p id="import-control-status" role="status" hidden></p></div>
         <div id="starting-import" role="status" hidden><span class="state-dot running" aria-hidden="true">✓</span><span>Starting — preparing archive…</span></div>

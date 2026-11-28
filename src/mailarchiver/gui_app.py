@@ -33,7 +33,6 @@ from contextlib import contextmanager, nullcontext
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from importlib import import_module
-from importlib.metadata import version
 from pathlib import Path
 from queue import Empty, SimpleQueue
 from threading import Event, Lock, RLock, Thread
@@ -48,12 +47,13 @@ from webview.menu import Menu, MenuAction, MenuSeparator
 
 from .file_drag import FILE_DRAGS, install_file_drag
 from .desktop_platform import copy_windows_text, drag_windows_file, open_export, open_external_url, refresh_windows_menu, set_macos_document_path, set_macos_titlebar_version, startup_error, windows_webview
-from .identity import APPLICATION_NAME
+from .identity import APPLICATION_NAME, APPLICATION_VERSION
 from .build_info import BUILD_INFO, BuildInfo
 from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argument
 from .imap_protocol import ImapAuthenticationError, ImapPaused, ImapSession
 from .imap_credentials import save_password
 from .imap_models import ImapAccount
+from .desktop_lifecycle import DesktopLifecycle
 from .search_completion import SearchSuggestions
 from .processor_graph import ProcessorGraphStatus, processor_graph
 from .updates import UpdateChannel, UpdateService, UpdateStatus, default_channel
@@ -62,17 +62,24 @@ from .sparkle import SparkleBackend, start_installed_updater
 from .macos_preferences import MacOSPreferences
 from .winsparkle import WinSparkleBackend
 from .__main__ import IngestInterrupted, IngestOutcome, IngestRequest, run_ingest
+from .rebuild import RebuildInterrupted, RebuildProgress, rebuild_archive
+from .archive_validation import ValidationStopped, validate_archive
+from .archive_validation import write_report as write_validation_report
 from .application import (
     ApplicationController,
     ArchiveDocument,
     IngestJob,
+    MultiMessageFormat,
     SearchWindow,
     SetupSelection,
+    configured_workers,
     validate_ingest_paths,
 )
 from .scanner import CLAMAV_DOWNLOAD_URL, UNSCANNED_WARNING, ScannerAvailability, scanner_availability
 from .configuration import GuiConfiguration, application_configuration
 from .gui_default_lists import DefaultListsApi
+from .gui_metadata import message_metadata
+from .gui_sources import archive_sources, rescan_roots, set_source_enabled, update_imap_account
 from .document_options import DocumentOptions, OwnerRulesState
 from .owner_rules import OwnerRules
 from .configuration_diagnostics import ConfigurationError
@@ -104,6 +111,7 @@ from .gui_service import (
     searchable_message_count,
     write_attachment,
     write_message,
+    write_messages_mbox,
     write_messages_zip,
 )
 from .ingest_status import (
@@ -123,7 +131,6 @@ GUI_DIRECTORY = (Path(getattr(sys, "_MEIPASS")) if getattr(sys, "frozen", False)
 E2E_DRIVER = Path(__file__).parents[2] / "e2e_tests" / "gui_driver.js"
 DEFAULT_PAGE_SIZE = 100
 APPLICATION_ICON = GUI_DIRECTORY / "icons" / "rainbow-post-192.png"
-APPLICATION_VERSION = version("mailarchiver")
 EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 INTERNET_CHECK_URL = "https://www.example.com/"
 QUIT_TIMEOUT_SECONDS = 5.0
@@ -186,6 +193,7 @@ class ApplicationNotice(BaseModel):
     severity: Literal["information", "warning", "error"]
     message: str
     window_id: str | None = None
+    imap_source_id: str | None = None
 
 
 class ApplicationTask(BaseModel):
@@ -204,6 +212,7 @@ class GuiStatus(BaseModel):
     file_drag_supported: bool = sys.platform in {"darwin", "win32"}
     native_file_drag: bool = sys.platform == "win32"
     write_available: bool = True
+    multi_message_drag_format: MultiMessageFormat = "mbox"
     configuration: GuiConfiguration
     notices: list[ApplicationNotice] = Field(default_factory=list)
     archive_status_messages: list[str] = Field(default_factory=list)
@@ -215,9 +224,20 @@ class PreviewRequest(BaseModel):
     message_pks: list[int]
 
 
+class RebuildStatus(BaseModel):
+    """Byte progress of a running File > Rebuild Databases…, for the status line."""
+
+    phase: str
+    percent: float
+    completed_bytes: int
+    total_bytes: int
+    eta: str
+
+
 class GuiIngestOverview(BaseModel):
     status: IngestStatus | None = None
     active: bool = False
+    rebuild: RebuildStatus | None = None
 
 
 class GuiIngestStatus(IngestStatus):
@@ -232,6 +252,8 @@ class GuiIngestHistory(BaseModel):
     active: bool = False
     suspending: bool = False
     can_resume: bool = False
+    # A rebuild cannot resume part-way, so the Activity stop button cancels it.
+    stop_label: Literal["Suspend", "Cancel"] = "Suspend"
     imap_accounts: list[ImapAccount] = Field(default_factory=list)
 
 
@@ -466,9 +488,18 @@ def application_icon_path() -> Path:
 IMPORT_CONFIRMATION_WIDTH = 560
 QUIT_IMPORT_MESSAGE = (
     "Quitting will suspend active ingest and content processing. Reopen the archive and use "
-    "Continue Processing to resume. Messages already archived will not be imported twice.\n\n"
+    "Continue Importing… to resume. Messages already archived will not be imported twice.\n\n"
     "Each import will pause after its current message. The application will quit within five seconds; "
     "unfinished work will be recovered when you resume."
+)
+
+QUIT_REBUILD_TITLE = "Abort rebuild and quit?"
+QUIT_REBUILD_BUTTONS = ("Keep Rebuilding", "Abort Rebuild and Quit")
+QUIT_REBUILD_MESSAGE = (
+    "Quitting aborts the database rebuild. The rebuild cannot resume part-way: the partly rebuilt "
+    "databases are discarded and the current databases stay in use, unchanged.\n\n"
+    "To rebuild later, reopen the archive and choose Continue in the Activity window; "
+    "the rebuild then starts again from the beginning."
 )
 
 
@@ -634,6 +665,36 @@ def macos_owner_rules(destination: Path, defaults: OwnerRules) -> OwnerRules | N
     return result.result()
 
 
+def _raise_activity_window(window: Any, status_id: str | None, imap_source_id: str | None) -> None:
+    """Raise an existing Activity window, then deliver its selection off this thread.
+
+    On macOS run_js waits for WebKit's completion handler, which a background or
+    busy page may never deliver; running it before show() left the window hidden.
+    """
+    window.restore()
+    window.show()
+    scripts = [script for value, script in (
+        (status_id, f"window.selectIngest?.({json.dumps(status_id)});"),
+        (imap_source_id, f"window.requestImapPassword?.({json.dumps(imap_source_id)});"),
+    ) if value is not None]
+    if not scripts:
+        return
+
+    def deliver() -> None:
+        for script in scripts:
+            try:
+                window.run_js(script)
+            except Exception:  # pylint: disable=broad-exception-caught
+                logging.getLogger(__name__).debug("Activity window script failed", exc_info=True)
+
+    Thread(target=deliver, name="activity-select", daemon=True).start()
+
+
+def _ingest_window_parameters(status_id: str | None, imap_source_id: str | None) -> list[tuple[str, str]]:
+    return [(key, value) for key, value in (("status", status_id), ("imap_password", imap_source_id))
+            if value is not None]
+
+
 class IngestWindowApi:
     """History and explicit import actions bound to one archive."""
 
@@ -674,11 +735,20 @@ class IngestWindowApi:
             self._configuration_warning = warning
         if warning and changed:
             logging.getLogger(__name__).warning("%s", warning)
+        application, document = self._application, self._document
+        rebuilding = application is not None and document is not None and application.rebuild_running(document)
+        rebuild_stopping = application is not None and document is not None and application.rebuild_stopping(document)
+        # Continue restarts an interrupted rebuild (a rebuild is all-or-nothing) or resumes an import.
+        rebuild_stopped = bool(statuses and statuses[0].activity_kind in ("rebuild", "reprocess")
+                               and statuses[0].state in ("interrupted", "failed", "stale"))
         return GuiIngestHistory(statuses=statuses, errors=history.errors, starting=starting,
                                 warnings=[warning] if warning else [],
-                                active=job is not None, suspending=bool(job and job.stop.is_set()),
+                                active=job is not None or rebuilding,
+                                suspending=bool(job and job.stop.is_set()) or (rebuilding and rebuild_stopping),
                                 imap_accounts=accounts,
-                                can_resume=job is None and resumable and self._application is not None).model_dump(mode="json")
+                                can_resume=self._application is not None and job is None and not rebuilding
+                                and (rebuild_stopped or resumable),
+                                stop_label="Cancel" if rebuilding else "Suspend").model_dump(mode="json")
 
     def update_imap_password(self, source_id: str, password: str) -> bool:
         """Validate a user-entered replacement before updating only its native-vault item."""
@@ -716,18 +786,6 @@ class IngestWindowApi:
 
     def close(self, *_args: object) -> None:
         self.window = None
-
-    def can_import_directory(self) -> bool:
-        return bool(
-            self._application and self._document and self._document.path
-            and self._document.ingest_job is None and self.window is not None
-        )
-
-    def import_directory(self) -> bool:
-        if not self.can_import_directory():
-            return False
-        assert self._application is not None and self._document is not None
-        return self._application.import_directory(self._document, self.window)
 
 
 class IdentityPickerApi:
@@ -874,13 +932,14 @@ SEARCH_BRIDGE_METHODS = (
     "processing_work", "resume_processing", "abort_processing", "open_picker",
     "status", "activate", "search", "suggestions", "suggestions_start", "suggestions_status", "suggestions_cancel", "ingest_overview", "open_ingest_window",
     "mailbox_tree", "saved_filter_sets", "save_filter_set", "rename_filter_set", "delete_filter_set",
-    "open_message_window", "request_previews", "take_previews", "message", "part", "attachment",
+    "open_message_window", "request_previews", "take_previews", "message", "message_metadata", "part", "attachment",
     "copy_source_path", "copy_visible_text", "copy_link", "open_link", "open_attachment",
     "save_message", "save_attachment", "prepare_drag", "start_drag",
+    "sources", "set_source_enabled", "save_imap_source", "rescan_imports",
 )
 
 INGEST_BRIDGE_METHODS = (
-    "history", "can_import_directory", "import_directory", "antivirus", "install_antivirus",
+    "history", "antivirus", "install_antivirus",
     "suspend_import", "resume_import", "update_imap_password",
 )
 
@@ -977,6 +1036,7 @@ class GuiApi:
             untitled=self.document.descriptor.untitled if self.document else self.archive is None,
             generation=self.document.generation if self.document else 0,
             opened_in_new_window=opened_in_new_window,
+            multi_message_drag_format=self._multi_message_format(),
             configuration=application_configuration().gui,
             notices=self.application.window_notices(self.search_window.window_id if self.search_window else None)
                 if self.application else [],
@@ -988,6 +1048,64 @@ class GuiApi:
         if self.application is not None and self.search_window is not None:
             self.application.activate_window(self.search_window.window_id)
         return True
+
+    def sources(self) -> list[dict[str, Any]]:
+        """The Sources tab: every imported directory or file and every IMAP account."""
+        if self.archive is None:
+            return []
+        return [entry.model_dump(mode="json") for entry in archive_sources(self._archive())]
+
+    def _config_write(self) -> Any:
+        """Hold the archive writer lease (and the application's writer guard) for a config.yaml edit."""
+        document = self.document
+        if document is not None and document.ingest_job is not None:
+            raise ValueError("Suspend the import before changing sources.")
+        identity = (document.descriptor.identity if document is not None
+                    else os.path.normcase(str(self._archive().resolve())))
+
+        @contextmanager
+        def held() -> Iterator[None]:
+            with self.application.writer_activity() if self.application else nullcontext():
+                with WriterLease.acquire(self._archive(), identity, "Sources", uuid4().hex,
+                                         application_metadata().version):
+                    yield
+        return held()
+
+    def set_source_enabled(self, source_id: str, enabled: bool) -> bool:
+        with self._config_write():
+            set_source_enabled(self._archive(), source_id, bool(enabled))
+        return True
+
+    def save_imap_source(self, source_id: str, server: str, port: int, username: str, tls: str,
+                         password: str = "") -> bool:
+        """Config…: change an IMAP account; a new password (or a new endpoint) is verified by logging in."""
+        if tls not in ("implicit", "starttls"):
+            raise ValueError("Choose implicit TLS or STARTTLS.")
+        try:
+            with self._config_write():
+                previous = next((account for account in load_archive_config(self._archive()).imap_sources
+                                 if account.id == source_id), None)
+                if previous is None:
+                    raise ValueError("The selected IMAP account is unavailable")
+                candidate = ImapAccount(id=previous.id, server=server.strip(), port=int(port), username=username.strip(),
+                                        tls=tls, enabled=previous.enabled)
+                if candidate.credential_ref != previous.credential_ref and not password:
+                    raise ValueError("Enter the password for the changed server, port or TLS setting.")
+                if password:
+                    with ImapSession(candidate, password, authentication_only=True):
+                        pass
+                    save_password(candidate, password)
+                update_imap_account(self._archive(), source_id, candidate.server, candidate.port,
+                                    candidate.username, candidate.tls)
+        finally:
+            password = ""
+        return True
+
+    def rescan_imports(self) -> bool:
+        """Rescan Imports…: confirm, then import every checked source again."""
+        if self.application is None:
+            raise ValueError("Rescanning requires an open archive document.")
+        return self.application.rescan_imports(self)
 
     def processing_work(self) -> dict[str, Any]:
         if self.archive is None:
@@ -1020,27 +1138,27 @@ class GuiApi:
         status = latest_ingest_status(self._archive()) if self.archive and _is_archive(self.archive) else None
         status = status.for_display() if status is not None else None
         active = bool(self.document and self.document.ingest_job) or bool(status and status.state == "running")
-        return GuiIngestOverview(status=status, active=active).model_dump(mode="json")
+        rebuild = (self.application.rebuild_status(self.document)
+                     if self.application is not None and self.document is not None else None)
+        return GuiIngestOverview(status=status, active=active, rebuild=rebuild).model_dump(mode="json")
 
-    def open_ingest_window(self, status_id: str | None = None) -> bool:
+    def open_ingest_window(self, status_id: str | None = None, imap_source_id: str | None = None) -> bool:
         """Open or focus the ingest browser shared by this archive document."""
         if self.e2e_directory is not None:
             return True
         if self.application is not None and self.document is not None:
-            return self.application.open_ingest_window(self.document, status_id)
+            return self.application.open_ingest_window(self.document, status_id, imap_source_id)
         with self._ingest_window_lock:
             api = self._ingest_window_api
             if api is not None and api.window is not None:
                 api.archive = self.archive
-                if status_id is not None:
-                    api.window.run_js(f"window.selectIngest({json.dumps(status_id)});")
-                api.window.restore()
-                api.window.show()
+                _raise_activity_window(api.window, status_id, imap_source_id)
                 return True
             api = IngestWindowApi(self.archive)
-            selected = "" if status_id is None else f"?status={status_id}"
+            parameters = _ingest_window_parameters(status_id, imap_source_id)
+            selected = f"?{urlencode(parameters)}" if parameters else ""
             window = webview.create_window(
-                "Email Collection Toolkit — Ingests",
+                "Email Collection Toolkit — Activity",
                 str(GUI_DIRECTORY / f"ingests.html{selected}"),
                 js_api=WindowBridge(api, INGEST_BRIDGE_METHODS),
                 width=1050,
@@ -1107,6 +1225,10 @@ class GuiApi:
             search_attachments, mailbox_selections,
             IdentityMessages.model_validate(identity_messages) if identity_messages is not None else None,
         )
+        if page.rebuild_required and self.application is not None:
+            self.application.offer_rebuild(
+                self, "This archive's search index was built by an older version, so search cannot use it. "
+                "Search works again once the databases are rebuilt.")
         if page.error is not None:
             return page.model_dump(mode="json")
         if self.search_window is not None:
@@ -1283,6 +1405,10 @@ class GuiApi:
             self.search_window.selected_message = message_pk
         return message.model_dump(mode="json")
 
+    def message_metadata(self, message_pk: int) -> dict[str, Any]:
+        """Return the read-only grouped metadata report for View Message Metadata."""
+        return message_metadata(self._archive(), message_pk).model_dump(mode="json")
+
     def copy_source_path(self, message_pk: int, source_location_index: int) -> str:
         """Copy one local source pathname as text and a macOS file URL."""
         _archive_path, locations = message_locations(self._archive(), message_pk)
@@ -1421,6 +1547,46 @@ class GuiApi:
             write_attachment(self._archive(), message_pk, part_id, destination)
         return str(destination)
 
+    def _multi_message_format(self) -> MultiMessageFormat:
+        if self.application is None:
+            return "mbox"
+        return self.application.controller.preferences.multi_message_drag_format
+
+    def export_messages(self, message_pks: list[int]) -> str | None:
+        """File > Export Selected Messages: save as MBOX (default), a ZIP of .eml files, or one .eml."""
+        unique = list(dict.fromkeys(message_pks))
+        if not unique:
+            raise ValueError("Select one or more messages to export.")
+        archive = self._archive()
+        if len(unique) == 1:
+            stem = export_filename(describe_message(archive, unique[0])).removesuffix(".eml")
+        else:
+            stem = f"Email Collection Toolkit Messages ({len(unique)})"
+        types = ["MBOX mailbox (*.mbox)", "ZIP of messages (*.zip)"]
+        if len(unique) == 1:
+            types.append("Email message (*.eml)")
+        if self.e2e_directory is not None:
+            destination = self.e2e_directory / f"exported-{stem}.mbox"
+        else:
+            selected = self.window.create_file_dialog(
+                webview.FileDialog.SAVE, directory=str(Path.home() / "Desktop"),
+                save_filename=f"{stem}.mbox", file_types=tuple(types))
+            if not selected:
+                return None
+            destination = dialog_paths(selected)[0]
+        suffix = destination.suffix.casefold()
+        if suffix not in {".mbox", ".zip", ".eml"} or (suffix == ".eml" and len(unique) > 1):
+            destination = destination.with_name(destination.name + ".mbox")
+            suffix = ".mbox"
+        with self.application.writer_activity() if self.application else nullcontext():
+            if suffix == ".eml":
+                write_message(archive, unique[0], destination)
+            elif suffix == ".zip":
+                write_messages_zip(archive, unique, destination, minimum=1)
+            else:
+                write_messages_mbox(archive, unique, destination)
+        return str(destination)
+
     def prepare_drag(self, message_pks: list[int]) -> dict[str, str]:
         """Prepare one explicit native file drag without proactively exporting mail."""
         with self._drag_lock:
@@ -1435,9 +1601,12 @@ class GuiApi:
                 view = describe_message(archive, unique[0])
                 destination = directory / export_filename(view)
                 write_message(archive, unique[0], destination)
-            else:
+            elif self._multi_message_format() == "zip":
                 destination = directory / f"Email Collection Toolkit Messages ({len(unique)}).zip"
                 write_messages_zip(archive, unique, destination)
+            else:
+                destination = directory / f"Email Collection Toolkit Messages ({len(unique)}).mbox"
+                write_messages_mbox(archive, unique, destination)
             token = FILE_DRAGS.register(destination)
             self._drag_tokens.add(token)
             return DragExport(filename=destination.name, token=token).model_dump()
@@ -1764,6 +1933,7 @@ class PyWebViewApplication:
         self._notices: list[ApplicationNotice] = []
         self._pending_notices: SimpleQueue[ApplicationNotice] = SimpleQueue()
         self._connectivity: ConnectivityMonitor | None = None
+        self._lifecycle: DesktopLifecycle | None = None
         self._status_observers: dict[str, PathObserver] = {}
         self._menu_observer: Any = None
         self._lock = RLock()
@@ -1775,6 +1945,8 @@ class PyWebViewApplication:
         self._tasks: dict[Future[None], ApplicationTask] = {}
         self._import_futures: set[Future[None]] = set()
         self._writers: set[Event] = set()
+        self._rebuilding: dict[str, RebuildProgress] = {}
+        self._rebuild_stops: set[str] = set()
         self._updates_started = False
         self._updating = False
         self._definition_updates = 0
@@ -1911,7 +2083,8 @@ class PyWebViewApplication:
                 window = show_windows_update_preferences(self.updates,
                     lambda channel, automatic: self.controller.configure_updates(channel, automatic, strict=True),
                     self.worker_settings, self.save_preferences, lambda: self._quitting,
-                    lambda: self.controller.preferences.imap_connections)
+                    lambda: self.controller.preferences.imap_connections,
+                    lambda: self.controller.preferences.multi_message_drag_format, self.save_drag_format)
                 self._windows_preferences_window = window
 
                 def closed(*_args: object) -> None:
@@ -1922,8 +2095,10 @@ class PyWebViewApplication:
                 self._refresh_menus()
             else:
                 if self._preferences_window is None:
-                    self._preferences_window = MacOSPreferences(self.updates, self.save_preferences)
-                self._preferences_window.show(self.worker_settings(), self.controller.preferences.imap_connections)
+                    self._preferences_window = MacOSPreferences(self.updates, self.save_preferences, self.save_drag_format)
+                preferences = self.controller.preferences
+                self._preferences_window.show(self.worker_settings(), preferences.imap_connections,
+                                              preferences.multi_message_drag_format)
         except (OSError, ValueError) as error:
             self.add_notice("warning", f"Could not save preferences: {error}")
             return
@@ -1932,6 +2107,23 @@ class PyWebViewApplication:
 
     def worker_settings(self) -> WorkerSettings:
         return WorkerSettings(preferences=self.controller.preferences.workers, command_line=self._workers_override)
+
+    def save_drag_format(self, value: MultiMessageFormat) -> None:
+        """Persist the multi-message drag format and tell open search windows."""
+        self.controller.configure_drag_format(value, strict=True)
+        windows = [api.window for api in self._search_apis() if api.window is not None]
+        script = f"window.setMultiMessageDragFormat?.({json.dumps(value)});"
+
+        def deliver() -> None:
+            # Off the caller's thread: the macOS preferences pane calls this on the main
+            # thread, where waiting for WebKit's script completion would deadlock.
+            for window in windows:
+                try:
+                    window.run_js(script)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    logging.getLogger(__name__).debug("Drag format delivery failed", exc_info=True)
+
+        Thread(target=deliver, name="drag-format", daemon=True).start()
 
     def save_preferences(self, channel: UpdateChannel, automatic: bool, workers: WorkerPreferences | None,
                          imap_connections: int | None = None) -> None:
@@ -2071,8 +2263,9 @@ class PyWebViewApplication:
         self._refresh_menus()
         return True
 
-    def add_notice(self, severity: Literal["information", "warning", "error"], message: str, *, window_id: str | None = None) -> None:
-        notice = ApplicationNotice(severity=severity, message=message, window_id=window_id)
+    def add_notice(self, severity: Literal["information", "warning", "error"], message: str, *,
+                   window_id: str | None = None, imap_source_id: str | None = None) -> None:
+        notice = ApplicationNotice(severity=severity, message=message, window_id=window_id, imap_source_id=imap_source_id)
         with self._lock:
             self._notices.append(notice)
             self._notices = self._notices[-100:]
@@ -2202,7 +2395,17 @@ class PyWebViewApplication:
         activity = getattr(self._sparkle, "activity_changed", None)
         if activity is not None:
             activity()
-        for window in self._registered_windows():
+        self._post_status_change(self._registered_windows())
+
+    def _lifecycle_status_changed(self) -> None:
+        # Cocoa may need to finish opening a window while a worker holds the
+        # application lock. The native window list suffices for this refresh.
+        if not self._quitting:
+            self._post_status_change(tuple(webview.windows))
+
+    @staticmethod
+    def _post_status_change(windows: tuple[webview.Window, ...]) -> None:
+        for window in windows:
             try:
                 post_window_event(window, "mailarchiver-status-changed")
             except Exception:  # pylint: disable=broad-exception-caught
@@ -2226,6 +2429,18 @@ class PyWebViewApplication:
     def active_document(self) -> ArchiveDocument | None:
         native = webview.active_window()
         return self.document_for_native_window(native.uid) if native is not None else self.controller.active_document
+
+    def menu_context(self, active: Any, *, open_window: bool = True) -> MenuContext:
+        """Which archive commands the focused native window supports (none when it is closed)."""
+        if active is None or not open_window:
+            return MenuContext()
+        with self._lock:
+            search_id = self._native_search_ids.get(active.uid)
+            search_api = self._apis.get(search_id) if search_id is not None else None
+            child_id = self._native_child_ids.get(active.uid)
+        search = bool(search_api and search_api.document and search_api.document.path)
+        child = self.controller.document(child_id) if child_id else None
+        return MenuContext(search=search, archive=search or bool(child and child.path))
 
     def active_api(self) -> GuiApi | None:
         native = webview.active_window()
@@ -2347,15 +2562,6 @@ class PyWebViewApplication:
         if api is None and (document := self.active_document()) is not None:
             api = self.create_search_window(self.controller.new_search_window(document))
         return self._import_document(api) if api is not None else False
-
-    def import_directory(self, document: ArchiveDocument, anchor: Any) -> bool:
-        """Use the Ingests window's document, independently of the active search window."""
-        if document.path is None or document.ingest_job is not None:
-            return False
-        api = next((item for item in self._search_apis() if item.document is document), None)
-        if api is None:
-            api = self.create_search_window(self.controller.new_search_window(document))
-        return self._import_document(api, directory_only=True, dialog_window=anchor)
 
     def _import_document(
         self, api: GuiApi, *, directory_only: bool = False, dialog_window: Any = None,
@@ -2526,18 +2732,41 @@ class PyWebViewApplication:
         return True
 
     def suspend_import(self, document: ArchiveDocument) -> bool:
-        """Checkpoint this archive's work without closing any windows or quitting."""
+        """Activity > Suspend: checkpoint an import, or stop a rebuild (keeping the current databases)."""
         with self._lock:
+            if self._quitting or self._updating:
+                return False
+            document_id = document.descriptor.document_id
+            if document_id in self._rebuilding:
+                self._rebuild_stops.add(document_id)
+                return True
             job = document.ingest_job
-            if job is None or self._quitting or self._updating:
+            if job is None:
                 return False
             job.stop.set()
         return True
 
+    def rebuild_running(self, document: ArchiveDocument) -> bool:
+        with self._lock:
+            return document.descriptor.document_id in self._rebuilding
+
+    def rebuild_stopping(self, document: ArchiveDocument) -> bool:
+        with self._lock:
+            return document.descriptor.document_id in self._rebuild_stops
+
     def resume_import(self, document: ArchiveDocument) -> bool:
         """Resume with the original request, including suspension during preflight."""
-        if document.path is None or document.ingest_job is not None:
+        if document.path is None or document.ingest_job is not None or self.rebuild_running(document):
             return False
+        latest = latest_ingest_status(document.path)
+        if latest is not None and latest.activity_kind in ("rebuild", "reprocess") and latest.state != "completed":
+            # A rebuild cannot resume part-way; Continue starts it again (no confirmation needed).
+            session = next((window for window in self.controller.windows()
+                            if window.document_id == document.descriptor.document_id), None)
+            api = (GuiApi(document.path, application=self, document=document, search_window=session) if session else
+                   self.create_search_window(self.controller.new_search_window(document)))
+            archive = document.path
+            return self._submit_task("Rebuild databases", lambda: self._rebuild_archive(api, document, archive)) is not None
         request = resume_request(document.path, True, True)
         session = next((window for window in self.controller.windows()
                         if window.document_id == document.descriptor.document_id), None)
@@ -2545,34 +2774,144 @@ class PyWebViewApplication:
                self.create_search_window(self.controller.new_search_window(document)))
         return self.start_import(api, [], processing_request=request)
 
-    def reprocess_active_document(self) -> bool:
-        """Confirm a curator-requested replay, targeting the archive selected at invocation."""
+    def offer_rebuild(self, api: GuiApi, reason: str) -> bool:
+        """Pop up the rebuild confirmation when a search finds an index it cannot use."""
+        return self._rebuild_document(api, "Rebuild needed before searching", reason)
+
+    def rescan_imports(self, api: GuiApi) -> bool:
+        """Confirm, then import every checked source again (unchanged files are skipped)."""
+        document = api.document
+        if document is None or document.path is None or api.search_window is None or api.window is None:
+            return False
+        if document.ingest_job is not None or self.rebuild_running(document):
+            self.add_notice("warning", "Wait for the current import or rebuild to finish before rescanning.",
+                            window_id=api.search_window.window_id)
+            return False
+        archive = document.path
+        window_id = api.search_window.window_id
+
+        def rescan() -> None:
+            sources = [entry for entry in archive_sources(archive) if entry.enabled]
+            roots = rescan_roots(archive, self.worker_settings().effective_count)
+            if not roots:
+                self.add_notice("warning", "No checked source is available to rescan. Check one on the Sources tab.",
+                                window_id=window_id)
+                return
+            owner_rules = DocumentOptions(archive).defaults()
+            title = "Rescan imports?"
+            message = ("Import every checked source again:\n" + "\n".join(
+                f"• {entry.detail}" + ("" if entry.available else " (unavailable, skipped)") for entry in sources)
+                + "\n\nFiles unchanged since they were last imported are skipped, mail servers are checked for "
+                "new messages, and messages already in the archive are recognized as duplicates.")
+            confirmed = (macos_alert(title, message, ("Rescan", "Cancel"), body_width=IMPORT_CONFIRMATION_WIDTH) == 0
+                         if sys.platform == "darwin" else api.window.create_confirmation_dialog(title, message))
+            if not confirmed:
+                return
+            request = IngestRequest(archive=archive, roots=roots, owner_rules=owner_rules, save_owner_defaults=False)
+            if self.start_import(api, [], processing_request=request):
+                self.open_ingest_window(document)
+
+        return self._submit_task("Rescan imports", rescan, window_id=window_id) is not None
+
+    def rebuild_active_document(self) -> bool:
+        """File > Rebuild Databases…: confirm, then rebuild derived data for the active archive.
+
+        Catalog metadata and the search index are rebuilt from the canonical MBOX files
+        into new databases that replace the live ones (kept as `.old`) only when complete;
+        then, if the archive has a processing database, its processors are re-run in place
+        so manual identity decisions are kept. Byte progress appears in the status line.
+        """
         api = self.active_api()
-        if api is None or api.document is None or api.document.path is None or api.window is None or api.search_window is None:
+        if api is None:
+            return False
+        return self._rebuild_document(api, "Rebuild databases?", "")
+
+    def _rebuild_document(self, api: GuiApi, title: str, reason: str) -> bool:
+        if api.document is None or api.document.path is None or api.window is None or api.search_window is None:
             return False
         document = api.document
         archive = document.path
         assert archive is not None
+        window_id = api.search_window.window_id
         if document.ingest_job is not None:
-            self.add_notice("warning", "Suspend the active import or processing before reprocessing saved mail.",
-                            window_id=api.search_window.window_id)
+            self.add_notice("warning", "Suspend the active import or processing before rebuilding the databases.",
+                            window_id=window_id)
+            return False
+        if document.descriptor.document_id in self._rebuilding:
+            self.add_notice("information", f"{document.display_path or archive} is already being rebuilt.",
+                            window_id=window_id)
             return False
 
-        def reprocess() -> None:
-            request = resume_request(archive, False, True).model_copy(update={"reprocess": True})
-            title = "Reprocess saved mail?"
+        def rebuild() -> None:
             message = (
-                f"Archive: {document.display_path}\n\n"
-                "Rebuild extracted content, search indexes and automatic identity evidence from all saved mail. "
-                "This may take a very long time. Search results may be incomplete until it finishes.\n\n"
-                "Original archived messages and curator edits are preserved. No mail will be downloaded."
+                (f"{reason}\n\n" if reason else "")
+                + f"Archive: {document.display_path}\n\n"
+                "Re-read every stored message and rebuild its catalog details (Message-ID, sender, recipients, "
+                "subject, date) and the search index, then re-run processors. This may take a long time; "
+                + ("search works again when the new databases are finished.\n\n" if reason else
+                   "search keeps working on the current databases until the new ones are finished.\n\n")
+                + "Stored mail, sources and your own decisions are kept. No mail is downloaded. The previous "
+                "databases are kept as archive.sqlite3.old and search.sqlite3.old."
             )
-            confirmed = (macos_alert(title, message, ("Reprocess", "Cancel")) == 0 if sys.platform == "darwin"
+            confirmed = (macos_alert(title, message, ("Rebuild", "Cancel")) == 0 if sys.platform == "darwin"
                          else api.window.create_confirmation_dialog(title, message))
-            if confirmed and self.start_import(api, [], processing_request=request):
-                self.open_ingest_window(document)
+            if confirmed:
+                self._rebuild_archive(api, document, archive)
 
-        return self._submit_task("Reprocess saved mail", reprocess, window_id=api.search_window.window_id) is not None
+        return self._submit_task("Rebuild databases", rebuild, window_id=window_id) is not None
+
+    def rebuild_status(self, document: ArchiveDocument) -> RebuildStatus | None:
+        with self._lock:
+            progress = self._rebuilding.get(document.descriptor.document_id)
+        if progress is None:
+            return None
+        return RebuildStatus(phase=progress.phase, percent=round(progress.percent, 1),
+                               completed_bytes=progress.completed_bytes, total_bytes=progress.total_bytes,
+                               eta=progress.eta(time.monotonic()))
+
+    def _rebuild_archive(self, api: GuiApi, document: ArchiveDocument, archive: Path) -> None:
+        """Run the rebuild under the writer lease, then queue processors when they exist."""
+        label = document.display_path or archive
+        document_id = document.descriptor.document_id
+        with self._lock:
+            if document_id in self._rebuilding:
+                return
+            self._rebuilding[document_id] = RebuildProgress(phase="Preparing to rebuild", total_bytes=0)
+            self._rebuild_stops.discard(document_id)
+        self._status_changed()
+
+        def observe(progress: RebuildProgress) -> None:
+            with self._lock:
+                self._rebuilding[document_id] = progress
+            self._status_changed()
+
+        result = None
+        try:
+            with self.writer_activity():
+                result = rebuild_archive(archive, workers=configured_workers(), observer=observe,
+                                           should_stop=lambda: self._quitting or document_id in self._rebuild_stops,
+                                           application_version=application_metadata().version)
+        except RebuildInterrupted:
+            return
+        except (OSError, ValueError, RuntimeError, sqlite3.Error) as error:
+            self.add_notice("error", f"Could not rebuild the databases of {label}: {error}")
+            return
+        finally:
+            with self._lock:
+                self._rebuilding.pop(document_id, None)
+                self._rebuild_stops.discard(document_id)
+                window_ids = tuple(window_id for window_id, item in self._apis.items() if item.document is document)
+            if not self._quitting:
+                self._refresh_search_windows(window_ids)
+            self._status_changed()
+        self.add_notice("information", (
+            f"Rebuilt the databases of {label} from {result.messages:,} messages; {result.changed:,} catalog entries changed"
+            + (f", {result.failures:,} kept their previous values" if result.failures else "")
+            + ". The previous databases are kept as .old files."))
+        if result.processing_database and not self._quitting:
+            request = resume_request(archive, False, True).model_copy(update={"reprocess": True})
+            if self.start_import(api, [], processing_request=request):
+                self.open_ingest_window(document)
 
     def stop_imports_for_quit(self) -> tuple[IngestJob, ...]:
         """Called only after confirmation; prevent new imports and stop all existing jobs."""
@@ -2601,14 +2940,16 @@ class PyWebViewApplication:
         notice_task = task or ApplicationTask(name=f"Import for {document.display_path}")
         notice_task.window_id = job.owner_window_id if job is not None else ""
 
-        def notice(severity: Literal["information", "warning", "error"], message: str) -> None:
+        def notice(severity: Literal["information", "warning", "error"], message: str, *,
+                   imap_source_id: str | None = None) -> None:
             current = document.ingest_job
             if current is not None and current.operation_id == operation_id:
                 notice_task.window_id = current.owner_window_id
-            self.add_notice(severity, message, window_id=notice_task.window_id)
+            self.add_notice(severity, message, window_id=notice_task.window_id, imap_source_id=imap_source_id)
 
         try:
-            run_ingest(request, lease, stop_event=stop, outcome=outcome, terminal=False)
+            run_ingest(request, lease, stop_event=stop, outcome=outcome, terminal=False,
+                       imap_transport=self._lifecycle.transport if self._lifecycle is not None else None)
             try:
                 if request.roots:
                     remember_import_directory(request.archive, [Path(root) for root in request.roots])
@@ -2646,11 +2987,11 @@ class PyWebViewApplication:
         if isinstance(error, ImapPaused):
             notice("information", f"Import paused for {document.display_path}: {error}")
         elif isinstance(error, IngestInterrupted):
-            notice("information", f"Import suspended for {document.display_path}; use Continue Import in Ingests to resume.")
+            notice("information", f"Import suspended for {document.display_path}; use Continue in Activity to resume.")
         elif error is None:
             notice("information", f"Import completed for {document.display_path}")
         elif isinstance(error, ImapAuthenticationError):
-            notice("error", str(error))
+            notice("error", str(error), imap_source_id=error.source_id)
         elif isinstance(error, ConfigurationError):
             notice("warning", str(error))
         else:
@@ -2685,14 +3026,23 @@ class PyWebViewApplication:
             return False
 
     def open_document(self, path: Path, *, recent: bool = False) -> GuiApi:
-        document = (
-            self.controller.open_recent_document(path)
-            if recent
-            else self.controller.open_document(path)
-        )
-        api = self.create_search_window(self.controller.new_search_window(document))
+        """Open an archive, raising its existing search window if it has one."""
+        session, created = self.controller.open_document_window(path, recent=recent)
+        api = self.create_search_window(session) if created else self._raise_search_window(session)
         if self._reader_window is not None:
             self._reader_window.hide()
+        return api
+
+    def _raise_search_window(self, session: SearchWindow) -> GuiApi:
+        """Bring an already-open archive's search window to the front."""
+        with self._lock:
+            api = self._apis.get(session.window_id)
+        if api is None or api.window is None:
+            # The logical window has no native window yet; give it one.
+            return self.create_search_window(session)
+        api.window.restore()
+        api.window.show()
+        self.activate_window(session.window_id)
         return api
 
     def open_recent_document(self, path: Path) -> bool:
@@ -2707,6 +3057,8 @@ class PyWebViewApplication:
         result = self.controller.handle_open_documents(paths)
         for session in result.windows:
             self.create_search_window(session)
+        for session in result.focused:
+            self._raise_search_window(session)
         for error in result.errors:
             self.add_notice("error", error)
         return result.errors
@@ -2763,6 +3115,51 @@ class PyWebViewApplication:
         document = self.active_document()
         return self.open_ingest_window(document) if document is not None else False
 
+    def export_selected_messages(self) -> bool:
+        """File > Export Selected Messages…: save the active window's selection as MBOX or ZIP."""
+        api = self.active_api()
+        if api is None or api.window is None or api.document is None or api.document.path is None:
+            return False
+        window_id = api.search_window.window_id if api.search_window else None
+        try:
+            selected = api.window.evaluate_js("selectedDragMessagePks()") or []
+            destination = api.export_messages([int(value) for value in selected])
+        except (OSError, ValueError, TypeError) as error:
+            self.add_notice("warning", f"Could not export messages: {error}", window_id=window_id)
+            return False
+        if destination is None:
+            return False
+        self.add_notice("information", f"Exported {len(selected):,} message{'s' if len(selected) != 1 else ''} to {destination}",
+                        window_id=window_id)
+        return True
+
+    def revalidate_active_archive(self) -> bool:
+        """File > Revalidate Archive: reread every message, then open an HTML report in the browser."""
+        document = self.active_document()
+        if document is None or document.path is None:
+            return False
+        archive = document.path
+        label = document.display_path or archive
+        note = " Manifests may differ while an import is running." if document.ingest_job is not None else ""
+        self.add_notice("information", f"Revalidating {label}. The report opens in your browser when it finishes.{note}")
+
+        def run() -> None:
+            try:
+                report = validate_archive(archive, should_stop=lambda: self._quitting)
+                path = write_validation_report(report)
+                open_export(path)
+            except ValidationStopped:
+                return
+            except (OSError, ValueError, sqlite3.Error) as error:
+                self.add_notice("error", f"Could not revalidate {label}: {error}")
+                return
+            severity: Literal["information", "warning"] = "warning" if report.problems else "information"
+            summary = (f"{report.validated:,} of {report.messages:,} messages validated"
+                       + (f"; {report.problems:,} files with problems" if report.problems else ""))
+            self.add_notice(severity, f"Validation of {label} finished: {summary}. Report: {path}")
+
+        return self._submit_task("Revalidate archive", run) is not None
+
     def reveal_active_archive(self) -> bool:
         """Open the saved archive folder through the platform shell."""
         document = self.active_document()
@@ -2789,7 +3186,7 @@ class PyWebViewApplication:
             editor = DefaultListsApi(archive, identity=document.descriptor.identity if document and archive else '',
                 version=application_metadata().version, writer_activity=self.writer_activity)
             window = webview.create_window(
-                f"{APPLICATION_NAME} — Customizable Default Lists" + (f" — {archive}" if archive else ""),
+                f"{APPLICATION_NAME} — Default Lists" + (f" — {archive}" if archive else ""),
                 self.asset_url("default-lists.html"), js_api=WindowBridge(editor, ("catalog", "load", "update")),
                 width=800, height=820, min_size=(600, 560), menu=self.menu())
             if window is None:
@@ -2878,7 +3275,8 @@ class PyWebViewApplication:
         self._refresh_menus()
         return True
 
-    def open_ingest_window(self, document: ArchiveDocument, status_id: str | None = None) -> bool:
+    def open_ingest_window(self, document: ArchiveDocument, status_id: str | None = None,
+                           imap_source_id: str | None = None) -> bool:
         if document.path is None:
             return False
         document_id = document.descriptor.document_id
@@ -2888,10 +3286,10 @@ class PyWebViewApplication:
             if reused is None:
                 api = IngestWindowApi(document.path, application=self, document=document)
                 window = webview.create_window(
-                    f"{APPLICATION_NAME} — Ingests — {document.display_path}",
+                    f"{APPLICATION_NAME} — Activity — {document.display_path}",
                     self.asset_url(
                         "ingests.html",
-                        [("status", status_id)] if status_id is not None else None,
+                        _ingest_window_parameters(status_id, imap_source_id),
                     ),
                     js_api=WindowBridge(api, INGEST_BRIDGE_METHODS),
                     width=1050,
@@ -2920,10 +3318,7 @@ class PyWebViewApplication:
                 window.events.shown += lambda *_args: set_macos_document_path(window, document.display_path)
                 set_macos_document_path(window, document.display_path)
         if reused is not None:
-            if status_id is not None:
-                reused.run_js(f"window.selectIngest({json.dumps(status_id)});")
-            reused.restore()
-            reused.show()
+            _raise_activity_window(reused, status_id, imap_source_id)
             return True
         self._refresh_menus()
         return True
@@ -3000,7 +3395,7 @@ class PyWebViewApplication:
             name = document.display_path.name if document.display_path else "Untitled"
             items.append(
                 MenuAction(
-                    f"{name} — Ingests",
+                    f"{name} — Activity",
                     lambda uid=api.window.uid: self.focus_window(uid),
                 )
             )
@@ -3034,6 +3429,11 @@ class PyWebViewApplication:
             pass  # A repeated native callback may refer to an already reserved close.
         return True
 
+    def has_active_rebuild(self) -> bool:
+        # Read without the application lock: Quit runs on Cocoa's event thread and
+        # must never wait. A dict's truth value is read atomically.
+        return bool(self._rebuilding)
+
     def has_active_ingest(self) -> bool:
         # Unknown state still requires confirmation, but never a pre-watchdog wait.
         return self.controller.has_jobs("ingest", blocking=False) is not False
@@ -3052,7 +3452,17 @@ class PyWebViewApplication:
         # returning from a bridge callback that needs that same event loop.
         if self._quitting and not update_install:
             return
-        if not self.prepare_quit() and confirm_ingest and self.has_active_ingest():
+        # Ask before prepare_quit: it marks Quit as started, which already stops a rebuild.
+        if confirm_ingest and self.has_active_rebuild():
+            if sys.platform == "darwin":
+                confirmed = macos_alert(QUIT_REBUILD_TITLE, QUIT_REBUILD_MESSAGE, QUIT_REBUILD_BUTTONS,
+                                        body_width=IMPORT_CONFIRMATION_WIDTH) == 1
+            else:
+                anchor = webview.active_window() or self._about_window
+                confirmed = bool(anchor and anchor.create_confirmation_dialog(QUIT_REBUILD_TITLE, QUIT_REBUILD_MESSAGE))
+            if not confirmed:
+                return
+        elif not self.prepare_quit() and confirm_ingest and self.has_active_ingest():
             if sys.platform == "darwin":
                 confirmed = macos_alert("Suspend import and quit?", QUIT_IMPORT_MESSAGE,
                     ("Cancel", "Suspend import and quit"), body_width=IMPORT_CONFIRMATION_WIDTH) == 1
@@ -3184,7 +3594,8 @@ class PyWebViewApplication:
 
         if sys.platform == "darwin" and self._menu_observer is not None:
             from Foundation import NSNotificationCenter  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
-            release(lambda: NSNotificationCenter.defaultCenter().removeObserver_(self._menu_observer))
+            for observer in self._menu_observer:
+                release(lambda observer=observer: NSNotificationCenter.defaultCenter().removeObserver_(observer))
             self._menu_observer = None
         if self._sparkle is not None:
             release(self._sparkle.close)
@@ -3199,6 +3610,9 @@ class PyWebViewApplication:
             release(lambda key=key, observer=observer: self._close_status_observer(key, observer))
         if self._connectivity is not None:
             release(self._connectivity.close)
+        if self._lifecycle is not None:
+            release(self._lifecycle.close)
+            self._lifecycle = None
         if self.asset_server is not None:
             release(self.asset_server.close)
         if cleanup_errors:
@@ -3266,10 +3680,11 @@ class PyWebViewApplication:
             if active is None:
                 return
             if self._menu_observer is None:
-                self._menu_observer = NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
-                    "NSWindowDidBecomeKeyNotification", None, None,
-                    lambda _notification: self._refresh_macos_menu(),
-                )
+                center = NSNotificationCenter.defaultCenter()
+                # Closing the last archive window must disable archive commands at once.
+                self._menu_observer = tuple(center.addObserverForName_object_queue_usingBlock_(
+                    name, None, None, lambda _notification: self._refresh_macos_menu())
+                    for name in ("NSWindowDidBecomeKeyNotification", "NSWindowWillCloseNotification"))
             for native in BrowserView.instances.values():
                 native.menu = active.menu
             instance = BrowserView.instances.get(active.uid)
@@ -3284,6 +3699,7 @@ class PyWebViewApplication:
             app_menu = menu.itemAtIndex_(0).submenu()
             for offset, (title, action, key) in enumerate((
                 ("Preferences…", "showUpdatePreferences:", ","),
+                ("Default Lists…", "showDefaultLists:", ""),
                 ("Check for Program Updates", "checkForUpdates:", ""),
                 ("Check for Anti-Virus Updates", "checkForAntivirusUpdates:", ""),
             ), 1):
@@ -3309,16 +3725,18 @@ class PyWebViewApplication:
                         item.setKeyEquivalent_(key)
                         item.setKeyEquivalentModifierMask_(1 << 20)
             close_item = file_item.submenu().itemWithTitle_("Close") if file_item else None
-            window_item = menu.itemWithTitle_("Window")
-            if window_item is not None:
-                submenu = window_item.submenu()
+            context = self.menu_context(active, open_window=bool(instance.window.isVisible() or instance.window.isMiniaturized()))
+            for heading in ("File", "Window"):
+                heading_item = menu.itemWithTitle_(heading)
+                if heading_item is None:
+                    continue
+                submenu = heading_item.submenu()
+                # Explicit enabled states; Cocoa's autoenabling would re-enable every targeted item.
                 submenu.setAutoenablesItems_(False)
-                new_search = submenu.itemWithTitle_("New Search Window")
-                if new_search is not None:
-                    with self._lock:
-                        search_id = self._native_search_ids.get(active.uid)
-                        search_api = self._apis.get(search_id) if search_id is not None else None
-                    new_search.setEnabled_(bool(search_api and search_api.document and search_api.document.path))
+                for entry in submenu.itemArray():
+                    enabled = menu_item_enabled(str(entry.title()), context)
+                    if enabled is not None:
+                        entry.setEnabled_(enabled)
             if close_item is not None:
                 with self._lock:
                     search_id = self._native_search_ids.get(active.uid)
@@ -3378,6 +3796,29 @@ def application_metadata() -> ApplicationMetadata:
     )
 
 
+class MenuContext(BaseModel):
+    """What the focused window offers to archive menu commands."""
+
+    archive: bool = False  # Any window of an open archive (search, Activity, Document Options…).
+    search: bool = False  # A search window of an open archive (selection, new sibling window).
+
+
+# Commands that act on an open archive, or specifically on its search window. Everything
+# else (New, Open…, Open Recent, Help, window list) works with no archive window open.
+ARCHIVE_MENU_ITEMS = frozenset({"Import Mail…", "Document Options…", "Rebuild Databases…", "Revalidate Archive",
+                                "Show Archive in Explorer", "Activity…"})
+SEARCH_MENU_ITEMS = frozenset({"Export Selected Messages…", "New Search Window"})
+
+
+def menu_item_enabled(title: str, context: MenuContext) -> bool | None:
+    """Return whether an archive command is available, or None for commands that always are."""
+    if title in SEARCH_MENU_ITEMS:
+        return context.search
+    if title in ARCHIVE_MENU_ITEMS:
+        return context.archive
+    return None
+
+
 def application_menu(application: PyWebViewApplication) -> list[Menu]:
     """Build native actions that resolve the active window at invocation time."""
     file_items: list[Menu | MenuAction | MenuSeparator] = [
@@ -3395,38 +3836,38 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
         for title, url in HELP_LINKS
     ]
     help_items.append(MenuAction("License", application.show_license))
+    # File groups: the archive file itself; what goes in and out of it; whole-archive
+    # maintenance; then Close. Application settings live with Preferences….
+    file_items.append(MenuSeparator())
+    file_items.extend((
+        MenuAction("Import Mail…", application.import_active_document),
+        MenuAction("Export Selected Messages…", application.export_selected_messages),
+        MenuAction("Document Options…", application.open_document_options),
+        MenuSeparator(),
+        MenuAction("Rebuild Databases…", application.rebuild_active_document),
+        MenuAction("Revalidate Archive", application.revalidate_active_archive),
+    ))
+    if sys.platform == "win32":
+        file_items.append(MenuAction("Show Archive in Explorer", application.reveal_active_archive))
+    file_items.extend((MenuSeparator(), MenuAction("Close", application.close_active_window)))
     if sys.platform == "win32":
         return [
-            Menu("File", [*file_items, MenuAction("Import…", application.import_active_document),
-                          MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
-                          MenuAction("Document Options…", application.open_document_options),
-                          MenuAction("Customizable Default Lists…", application.open_default_lists),
-                          MenuAction("Show Archive in Explorer", application.reveal_active_archive),
-                          MenuAction("Close", application.close_active_window),
-                          MenuSeparator(), MenuAction("Quit", application.request_quit)]),
+            Menu("File", [*file_items, MenuSeparator(), MenuAction("Quit", application.request_quit)]),
             Menu("Window", [MenuAction("New Search Window", application.new_search_window),
-                            MenuAction("Ingests", application.open_active_ingest_window),
+                            MenuAction("Activity…", application.open_active_ingest_window),
                             *application.window_menu_items()]),
             Menu("Help", [*help_items, MenuSeparator(), MenuAction("About", application.create_about_window),
                           MenuAction("Check for Program Updates", application.updates.check),
                           MenuAction("Check for Anti-Virus Updates", application.check_antivirus_updates),
-                          MenuAction("Preferences…", application.show_update_preferences)]),
+                          MenuAction("Preferences…", application.show_update_preferences),
+                          MenuAction("Default Lists…", application.open_default_lists)]),
         ]
-    file_items.extend(
-        (
-            MenuAction("Import…", application.import_active_document),
-            MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
-            MenuAction("Document Options…", application.open_document_options),
-                          MenuAction("Customizable Default Lists…", application.open_default_lists),
-            MenuAction("Close", application.close_active_window),
-        )
-    )
     return [
         Menu("File", file_items),
         Menu(
             "Window",
             [MenuAction("New Search Window", application.new_search_window),
-             MenuAction("Ingests", application.open_active_ingest_window), *application.window_menu_items()],
+             MenuAction("Activity…", application.open_active_ingest_window), *application.window_menu_items()],
         ),
         Menu("Help", help_items),
     ]
@@ -3471,8 +3912,11 @@ def configure_macos_application() -> None:
     install_cocoa_reply_boundary()
 
 
-def install_macos_document_events(application: PyWebViewApplication) -> None:
-    """Extend pywebview's delegate without replacing its quit/ingest safeguards."""
+def install_desktop_events(application: PyWebViewApplication) -> None:
+    """Install common lifecycle handling and the platform's document events."""
+    if application._lifecycle is None:
+        application._lifecycle = DesktopLifecycle(application._lifecycle_status_changed)
+        application._lifecycle.start(sys.platform)
     if sys.platform != "darwin":
         return
     from webview.platforms.cocoa import BrowserView  # pylint: disable=import-outside-toplevel
@@ -3508,6 +3952,13 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
 
         def showUpdatePreferences_(self, _sender):
             application.show_update_preferences()
+
+        def showDefaultLists_(self, _sender):
+            # Off Cocoa's main thread: pywebview window creation waits on it.
+            def open_lists() -> None:
+                application.open_default_lists()
+
+            application._submit_task("Default lists", open_lists)
 
         def checkForUpdates_(self, _sender):
             application.updates.check()
@@ -3603,7 +4054,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     else:
         controller = ApplicationController()
         application = PyWebViewApplication(controller, asset_server, workers_override=args.workers)
-        install_macos_document_events(application)
+        install_desktop_events(application)
         startup = controller.startup((archive,) if archive is not None else (), new=new_setup)
         prompt_for_archive = any(
             controller.document(session.document_id).descriptor.untitled

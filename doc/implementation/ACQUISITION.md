@@ -409,7 +409,7 @@ acquisition. It requires an existing `config.yaml`, reads native-vault credentia
 and uses sequential `ImapSession(authentication_only=True)` sessions. These stop
 after LOGIN/SASL PLAIN, before post-login capability negotiation or mailbox access.
 `--set-password` requires an interactive terminal and exactly one selected account;
-the Ingests password form calls the same session mode and saves only after success.
+the Activity password form calls the same session mode and saves only after success.
 Login errors retain a control-free, bounded server reply after redacting password,
 escaped password and base64 credential forms. Temporary capacity/rate refusals in
 the greeting, login or initial CAPABILITY/ENABLE exchange raise `ImapServerBusy`; the
@@ -443,8 +443,10 @@ instance capabilities; the concurrency-key scheduler applies it per account with
 reducing the configured processing worker pool. `make test-imap-auth`
 covers real TLS replies, automatic retry, cancellation, credential-only
 immutability, replacement safety, connection counts and the shipped browser form.
-Both desktop Ingests entry points expose the same explicit bridge methods used by
-the browser recovery test. The password dialog locks account/password controls,
+Both desktop Activity entry points expose the same explicit bridge methods used by
+the browser recovery test. An authentication failure carries the source ID in
+the search notice. The notice action opens Activity or refreshes the existing
+window before opening the password dialog for that account. The dialog locks account/password controls,
 rejects duplicate submission and blocks native cancel/Escape while its Test and Save call is pending and restores ordinary cancellation afterward. Initial discovery rejection saves the accepted source
 request before pipeline creation, allowing password repair and Continue Import
 after application restart without losing the chosen import policy. Early backoff
@@ -453,14 +455,14 @@ uses `await_activity` with cancellation futures and the existing native console
 notification, including discovery on the CLI main thread. `SyncReporter` reads
 current status phases and emits changed retry reasons/delays independently of
 unchanged download totals. Retry phases retain up to600 printable characters in
-status, while the terminal dashboard keeps its normal short labels. Ingests history treats unreadable account configuration
+status, while the terminal dashboard keeps its normal short labels. Activity history treats unreadable account configuration
 as an unavailable account list while retaining saved status records.
 The shared `configuration_diagnostics.ConfigurationError` summarizes archive and
 installation schema, YAML and access problems without
 raw values or chained validator exceptions, with printable single-line messages
 and repair guidance naming the affected file. CLI entry points print the complete
 repair message and stop cleanly; expected configuration diagnostics omit traceback
-frames. Ingests exposes the warning visibly and logs it once per changed condition.
+frames. Activity exposes the warning visibly and logs it once per changed condition.
 `read_plugin_configuration` checks built-in setting schemas after merging layers and
 identifies the layer supplying an invalid value. Production startup checks all selected
 processor namespaces before processing, after any explicit replay invalidation so stale
@@ -489,8 +491,13 @@ literal ampersands/quotes; the pymap fixture covers legacy Unicode selection.
 Each worker owns a TLS session,
 enumerates at most 65,536 UID numbers per SEARCH, fetches metadata in batches of
 256 messages, and streams complete BODY.PEEK literals through ordinary ingest.
-BODY size and UID identity must match the original wire literal before
-`normalize_download` replaces CRLF pairs with LF. It does not decode or
+`body_literal` verifies the requested UID in the FETCH that carries the full
+BODY[] literal and compares the declared literal length in imaplib's prefix to
+the received byte count. A missing or mismatched literal length produces a saved
+error with the UID and available byte counts. RFC822.SIZE is optional for
+validation. A conflicting value logs a warning, and the literal proceeds to
+`normalize_download`. These diagnostics contain no body bytes. Normalization
+replaces CRLF pairs with LF and does not decode or
 reserialize MIME, remove lone CR, or add a final newline. `ImapDownload` records
 `source_sha256`, `source_byte_length`, `crlf_pairs` and the `crlf-to-lf` policy;
 `remember` preserves this evidence across metadata-only refreshes, including
@@ -856,3 +863,58 @@ PDF MBOX derivation and definition-directory publication share
 `storage_sync.publish_exclusive`: Windows rename, macOS `RENAME_EXCL` or Linux
 `RENAME_NOREPLACE`. Publication atomically refuses existing files, links and
 directories without requiring hardlinks; unsupported native operations fail safely.
+
+## Timed scratch IMAP evaluation
+
+`make imap-acceptance` runs `scripts.imap_acceptance` against an explicit,
+disjoint scratch archive. It copies one enabled account reference and owner
+settings from the source archive without reading mail or modifying credentials
+there. Only marked, matching scratch archives can be resumed. An owned child
+uses the production importer with one connection and an acquisition deadline,
+followed by bounded cleanup grace. The existing owned-command supervisor
+contains descendants on timeout or owner death on POSIX and Windows. Canonical
+verification has its own configurable deadline (default 120 seconds). Forced termination, child failure, invalid
+final status or canonical verification errors fail the evaluation. The JSON
+summary retains the status, date/year counts and integrity result. Disposable TLS
+fixtures exercise destination rejection and exact resume through
+`make test-imap-progress`; live Gmail evaluation is separate evidence.
+
+## Automatic transport recovery
+
+Discovery and acquisition discard interrupted sessions before cancellable
+1, 2 and 4 second reconnect waits in the CLI. After three unsuccessful CLI recovery
+attempts, retain the paused/Resume behavior. Successful message delivery resets
+the acquisition retry budget. Authentication, TLS trust, malformed protocol and
+local storage failures are not retried as transport failures. Every replacement
+session EXAMINEs and checks UIDVALIDITY/capabilities before using old UID plans.
+Discovery freezes mailbox bounds and avoids emitting duplicate containers.
+Each worker retains temporary SQL sets of prior and already-delivered UIDs, so
+reconnecting cannot replay an object already handed to publication. Partial
+literals never reach publication. Initial capacity-refusal backoff retains its
+existing policy. CLI progress exposes reconnect deadlines while counts are still.
+Both macOS and Windows desktops supply a transient `ImapTransport` through the plugin
+context. Sleep expires a session token checked by the owning worker before a
+new IMAP command, and reconnects wait for wake or cancellation. A command already
+in progress retains its socket timeout and literal validation. Session expiry
+from sleep does not spend the failure retry budget. Wake and route
+notifications can shorten the transport backoff. Desktop discovery and acquisition
+wait 150 seconds between failed connection attempts without exhausting a retry
+budget. Their progress describes waiting for connectivity and possible network
+sign-in. Cancellation immediately releases the wait. Resolver EAI_AGAIN, EAI_NONAME
+and EAI_FAIL use this path because portal DNS may reject an otherwise valid host.
+Replacement
+sessions follow the same EXAMINE and UIDVALIDITY checks.
+`make test-imap-recovery` exercises transient and persistent faults, epoch change,
+source integrity and owned scratch-process lifecycle.
+
+A scratch evaluation succeeds only after downloading at least one source message;
+a completed metadata-only refresh is explicitly not a successful download test.
+
+The import worker returns a receipt containing only a newly created status for
+its own process. The evaluator uses that receipt, never the archive's latest
+status, so failed/suppressed writes cannot borrow a prior run's positive coverage.
+
+The source-pool driver also advances cooperative saved-content dispatch, combining
+source, publication and invocation futures in one event-driven wait. This permits
+TLS reads while processor invocations run, without sharing writer connections across
+threads or introducing an unbounded staging buffer. Existing IMAP limits still apply.

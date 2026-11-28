@@ -37,7 +37,13 @@ deleted.
 - Verify the archive after each import, after every copy, and from time to time
   while it is stored.
 
-To verify, stop any import and run:
+In the app, choose **File → Revalidate Archive**. It rereads every message
+and file, then opens a report in your browser that lists every file in the
+archive, how many messages each MBOX holds, and how many of them validate.
+Imports themselves only recheck MBOX files that changed since the last import,
+so finishing an import stays quick on a large archive.
+
+From a terminal, stop any import and run:
 
 ```sh
 ect verify collection.mailarchive
@@ -95,18 +101,27 @@ both. Do not add daily counts together to get a total.
 
 ## Rebuilding derived data
 
-**File → Reprocess Saved Mail…** rebuilds the search index, extracted text, and
-automatic name evidence from the archived messages. It can take a long time,
-and search may be incomplete until it finishes. Your own decisions, such as name
-groupings, are kept, and no mail is downloaded again. From the command line,
-`ect refresh-index` rebuilds only the search index.
+**File → Rebuild Databases…** re-reads every message saved in the archive
+and rebuilds what is derived from it: each message's catalog details
+(Message-ID, sender, recipients, subject and date) and the search index, then
+extracted text and automatic name evidence. Nothing is reimported or
+downloaded, the saved mail is not changed, and the record of where each
+message came from is kept, as are your own decisions such as name groupings.
+
+The new catalog and search index are built beside the current ones, and search
+keeps working on the current ones until they are finished. Then the current
+files are renamed `archive.sqlite3.old` and `search.sqlite3.old` and the new
+ones take their place. Progress, measured in bytes of mail processed, appears
+in the bar at the bottom of the search window. Quitting stops the work and
+keeps the current databases. From the command line, `ect rebuild` does the
+same and shows the same progress.
 
 ## Settings
 
 - **Archive settings** live in the archive's `config.yaml`. Besides owner rules
   and IMAP accounts, `mbox_max_bytes` sets the size at which MBOX files roll
   over. The default is 3.75 GiB.
-- **File → Customizable Default Lists…** edits owner-rule templates, reply-address
+- **Default Lists…**, next to **Preferences…**, edits owner-rule templates, reply-address
   patterns, contact filters, and the search highlight color. The
   [list reference](https://github.com/simsong/email-collection-toolkit/blob/main/doc/CUSTOMIZABLE_DEFAULT_LISTS.md)
   describes each list.

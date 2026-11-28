@@ -22,7 +22,11 @@ import pytest
 from mailarchiver.standalone_verify import verify_archive
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from perf_corpus import generate  # noqa: E402
+from corpus_verify import verify  # noqa: E402
+from perf_corpus import CorpusManifest, generate  # noqa: E402
+
+# Real services, subprocesses or whole imports: run in the full CI tier only (make check-tests).
+pytestmark = pytest.mark.slow
 
 BIN = Path(sys.executable).parent  # the environment's installed ect-* entry points
 
@@ -51,7 +55,7 @@ def _create(archive: Path) -> None:
 
 
 def _import_command(archive: Path, corpus: Path) -> list[str]:
-    return [str(BIN / "ect-import"), "--archive", str(archive), "--no-scan", "--workers", "2",
+    return [str(BIN / "ect-import"), "--archive", str(archive), "--no-scan", "--index-attachments", "--workers", "2",
             str(corpus / "maildir"), str(corpus / "mbox")]
 
 
@@ -74,7 +78,7 @@ def corpus(tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path_factory.mktemp("crash-corpus") / "corpus"
     # Large enough (~170 messages) that body processing spans more than one
     # 64-message commit batch, so the processing kill point is observable.
-    generate(root, 1536 * 1024, seed=7)
+    generate(root, 1536 * 1024, seed=22)  # Seed 22 includes four undated messages (dated by Received).
     return root
 
 
@@ -109,3 +113,43 @@ def test_sigkill_mid_import_then_restart_matches_uninterrupted_import(
     assert not verify_archive(archive, quiet=True)
     assert _messages(archive) == reference
     assert _unfinished_jobs(archive) == 0
+    assert verify(archive, _manifest(corpus)).problems == []
+
+
+def _manifest(corpus: Path) -> CorpusManifest:
+    return CorpusManifest.model_validate_json((corpus / "MANIFEST.json").read_text(encoding="utf-8"))
+
+
+def test_uninterrupted_import_holds_exactly_the_corpus_and_damage_is_detected(tmp_path: Path, corpus: Path) -> None:
+    """End to end: every generated message is cataloged byte-exact with correct metadata,
+    pointers and search; document identifiers are searchable wherever an extractor exists."""
+    archive = tmp_path / "complete.mailarchive"
+    _create(archive)
+    _import(archive, corpus)
+    manifest = _manifest(corpus)
+    clean = verify(archive, manifest)
+    assert clean.problems == []
+    # Only plain text has a built-in extractor today (#159, #163, #19 track the rest).
+    assert len(clean.gaps) == 16 and not any(".txt" in gap for gap in clean.gaps), clean.gaps
+    pdf = verify(archive, manifest, readable={"text/plain", "application/pdf"}).problems
+    assert sum("documentz0" in problem and ".pdf" in problem for problem in pdf) == 2, pdf
+    with sqlite3.connect(archive / "archive.sqlite3") as catalog:
+        catalog.execute("PRAGMA foreign_keys=OFF")
+        first, second, third, last = (row[0] for row in catalog.execute(
+            "SELECT message_pk FROM messages WHERE message_pk IN ((SELECT min(message_pk) FROM messages), "
+            "(SELECT min(message_pk) + 1 FROM messages), (SELECT min(message_pk) + 2 FROM messages), "
+            "(SELECT max(message_pk) FROM messages)) ORDER BY message_pk"))
+        catalog.execute("UPDATE messages SET subject = subject || ' changed' WHERE message_pk = ?", (first,))
+        catalog.execute("UPDATE messages SET sender_address_pk = (SELECT max(address_pk) FROM email_addresses "
+                        "WHERE address_pk != sender_address_pk) WHERE message_pk = ?", (second,))
+        catalog.execute("UPDATE locations SET byte_offset = byte_offset + 1 WHERE message_pk = ?", (third,))
+        catalog.execute("UPDATE messages SET sha256 = ? WHERE message_pk = ?", ("0" * 64, last))
+        # An undated message's date comes from its Received header; a changed timestamp must be caught.
+        assert catalog.execute("UPDATE messages SET date_utc = '2001-01-01T00:00:00+00:00' WHERE message_pk = "
+                               "(SELECT min(message_pk) FROM messages WHERE date_source = 'received')").rowcount == 1
+    with sqlite3.connect(archive / "search.sqlite3") as search:
+        search.execute("DELETE FROM message_fts WHERE rowid = (SELECT min(rowid) FROM message_fts)")
+    problems = verify(archive, manifest).problems
+    for expected in ("wrong subject", "wrong sender", "wrong location pointer", "not in the catalog",
+                     "not in the corpus", "missing from search", "wrong date (from received)"):
+        assert any(expected in problem for problem in problems), (expected, problems)

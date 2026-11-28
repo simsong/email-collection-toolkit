@@ -34,7 +34,7 @@ the complete ordinary suite to finish; timeout changes do not establish success.
 Native JavaScript checks must collect synchronous scalar values, including false
 and null, as well as Promise results; thrown errors and rejected Promises must
 fail with their JavaScript diagnostics. Import-window acceptance must explicitly
-open the Ingests window when calling the background import service directly.
+open the Activity window when calling the background import service directly.
 Stop/restart fixtures must prove partial durable publication and exact recovery
 without turning acceptance into a bulk throughput benchmark. Real OST acquisition
 and content processing retain bounded platform-appropriate test deadlines and all
@@ -237,8 +237,8 @@ leases until checkpoint completion or process death. Makefile Ruff checks select
 selects tracked and non-ignored new `.py` and `.pyi` files, so linked worktrees
 are checked without descending into ignored generated directories.
 
-An Ingests child window retains document routing after all search windows close.
-New Search and Ingests use that document directly; Import creates a new search
+An Activity child window retains document routing after all search windows close.
+New Search and Activity use that document directly; Import creates a new search
 owner when needed.
 
 Integrity hash-standard versions must be JSON integers. The standalone verifier

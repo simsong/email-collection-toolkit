@@ -105,6 +105,6 @@ content processing without source files. Plugins use cooperative cancellation
 and I/O deadlines; late results are rejected before publication.
 
 Durable jobs checkpoint completed work; plugin or configuration changes do not
-automatically reprocess archived mail. Use an explicit reprocessing request. Publication and queue handoff share a recovery
+automatically rebuild archived mail. Use an explicit rebuilding request. Publication and queue handoff share a recovery
 protocol. Scanner failure never counts as clean; child messages retain parent
 scan provenance. Manual identity edits and tags survive processing reruns.

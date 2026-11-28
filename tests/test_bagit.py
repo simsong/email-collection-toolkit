@@ -8,6 +8,7 @@ import csv
 import subprocess
 import sys
 from importlib.metadata import version
+from time import time_ns
 from pathlib import Path
 from shutil import copytree
 import pytest
@@ -180,3 +181,81 @@ def test_validator_rejects_root_level_legacy_mbox(tmp_path: Path) -> None:
     errors = verify_archive(archive)
 
     assert "unsupported root-level legacy archive output: old-layout.mbox" in errors
+
+
+def test_requested_stop_abandons_checkpoint_before_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ARCHIVE: Suspend/Quit can abandon a checkpoint before manifests; the next checkpoint repairs it."""
+    from mailarchiver.bagit import CheckpointInterrupted
+    from tests import generate_bagit_fixture
+    polls: list[int] = []
+
+    def stop_now() -> bool:
+        polls.append(1)
+        return True
+
+    def interrupted_then_complete(archive: Path, catalog, packaged_at=None) -> list[str]:
+        # Runs inside the fixture generator, so the catalog describes real archived messages.
+        with pytest.raises(CheckpointInterrupted):
+            write_bag_checkpoint(archive, catalog, packaged_at, should_stop=stop_now)
+        catalog.rollback()
+        assert polls == [1]
+        assert not (archive / "manifest-sha256.txt").exists()
+        assert not (archive / "tagmanifest-sha256.txt").exists()
+        return write_bag_checkpoint(archive, catalog, packaged_at, should_stop=lambda: False)
+
+    monkeypatch.setattr(generate_bagit_fixture, "write_bag_checkpoint", interrupted_then_complete)
+    archive = tmp_path / "bag"
+    generate_bagit_fixture.generate(archive)
+    assert verify_archive(archive) == []
+
+
+def test_checkpoint_rereads_only_mbox_files_modified_since_the_last_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ARCHIVE: routine checkpoints skip unchanged MBOX files; a full checkpoint rereads every message."""
+    import os
+    import sqlite3
+    from mailarchiver import mbox
+    from mailarchiver.__main__ import IngestRequest, run_ingest
+    from mailarchiver.owner_rules import OwnerRules
+    source = tmp_path / "source"
+    source.mkdir()
+    for year in (2001, 2002, 2003):
+        (source / f"{year}.eml").write_bytes(
+            f"From: owner@example.test\nTo: friend@example.test\nSubject: year {year}\n"
+            f"Date: Mon, 1 Jan {year} 12:00:00 +0000\nMessage-ID: <m{year}@example.test>\n\nbody {year}\n".encode())
+    archive = tmp_path / "archive"
+    run_ingest(IngestRequest(archive=archive, roots=[str(source)], scan_policy="not-scanned",
+                             owner_rules=OwnerRules(include=["owner@example.test"]), continue_content=False), terminal=False)
+    boxes = sorted((archive / "data" / "mbox").glob("*.mbox"))
+    assert len(boxes) >= 2, boxes
+    csv_before = (archive / "mailbag.csv").read_bytes()
+    hour_ago = time_ns() - 3600 * 1_000_000_000
+    for box in boxes:
+        os.utime(box, ns=(hour_ago, hour_ago))
+    reads: list[str] = []
+    original = mbox.read_verified_location
+
+    def counting(path: Path, *args, **kwargs):
+        reads.append(path.name)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(mbox, "read_verified_location", counting)
+
+    def checkpoint(*, full: bool = False) -> None:
+        reads.clear()
+        catalog = sqlite3.connect(archive / "archive.sqlite3")
+        try:
+            write_bag_checkpoint(archive, catalog, full=full)
+            catalog.commit()
+        finally:
+            catalog.close()
+        assert verify_archive(archive) == []
+        assert (archive / "mailbag.csv").read_bytes() == csv_before
+
+    checkpoint()
+    assert reads == []
+    now = time_ns() + 10 * 1_000_000_000
+    os.utime(boxes[0], ns=(now, now))
+    checkpoint()
+    assert reads and set(reads) == {boxes[0].name}
+    checkpoint(full=True)
+    assert set(reads) == {box.name for box in boxes}

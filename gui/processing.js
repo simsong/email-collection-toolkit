@@ -46,7 +46,27 @@ window.addEventListener("pywebviewready", async () => {
       if (!dialog.open) dialog.showModal();
     } catch (failure) { showError(`Could not read processing status: ${failure.message || failure}`); }
   }
-  document.getElementById("processing-open").addEventListener("click", () => showWork(true));
+  // One button: Continue Importing… while an import is unfinished, otherwise Rescan Imports….
+  const importButton = document.getElementById("processing-open");
+  let importUnfinished = false;
+  async function updateImportButton() {
+    if (!api.processing_work) return;
+    try {
+      const work = await api.processing_work();
+      importUnfinished = work.available !== false && Boolean(work.ingest || work.content || work.source_roots?.length);
+    } catch { importUnfinished = false; }
+    importButton.textContent = importUnfinished ? "Continue Importing…" : "Rescan Imports…";
+  }
+  window.mailArchiverUpdateImportButton = updateImportButton;
+  window.addEventListener("mailarchiver-status-changed", () => void updateImportButton());
+  void updateImportButton();
+  importButton.addEventListener("click", async () => {
+    await updateImportButton();
+    if (importUnfinished) { await showWork(true); return; }
+    try {
+      if (!await api.rescan_imports()) showError("Rescan could not start. Another import or rebuild may be running.");
+    } catch (failure) { showError(failure.message || String(failure)); }
+  });
   document.getElementById("processing-later").addEventListener("click", () => dialog.close());
   document.getElementById("processing-abort").addEventListener("click", async event => {
     event.target.disabled = true;

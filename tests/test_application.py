@@ -41,8 +41,8 @@ def controller(tmp_path: Path) -> ApplicationController:
     return ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
 
 
-def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_path: Path) -> None:
-    """Quit stops the shared ingest service, preserves committed bytes, and permits manual restart."""
+def test_gui_stop_keeps_partial_import_and_reimport_has_no_duplicates(tmp_path: Path) -> None:
+    """Quit stops the shared ingest service at once, preserves committed bytes, and permits manual restart."""
     source = tmp_path / "source.mbox"
     digests = set()
     with source.open("wb") as output:
@@ -98,7 +98,9 @@ def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_
     assert len(errors) == 1 and isinstance(errors[0], IngestInterrupted)
     assert read_ingest_history(archive).statuses[0].state == "interrupted"
     with phase("verify-partial-archive"):
-        assert not verify_archive(archive)
+        # Stopping skips the whole-archive checksum refresh; the stale checkpoint is
+        # detectable, and the resumed import below writes a valid one.
+        assert verify_archive(archive)
     with sqlite3.connect(archive / "archive.sqlite3") as catalog:
         partial = catalog.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
     assert 0 < partial < len(digests)
@@ -143,6 +145,35 @@ def test_confirmed_quit_stops_every_document_without_releasing_active_leases(tmp
         for document in state.documents():
             if document.ingest_job is not None:
                 state.finish_ingest(document.descriptor.document_id, document.ingest_job.operation_id, published=False)
+
+
+def test_reopening_an_open_archive_raises_its_window_instead_of_duplicating(tmp_path: Path) -> None:
+    """Requirement: Open and OS open events on an already-open archive reuse its search window."""
+    archive = make_archive(tmp_path / "archive")
+    other = make_archive(tmp_path / "other")
+    application = controller(tmp_path)
+
+    first, created = application.open_document_window(archive)
+    assert created
+    elsewhere, _ = application.open_document_window(other)
+    assert application.active_window == elsewhere
+
+    again, created = application.open_document_window(archive / ".." / archive.name)
+    assert not created and again == first
+    assert application.active_window == first
+    document = application.document(first.document_id)
+    assert document.window_ids == (first.window_id,)
+
+    result = application.handle_open_documents((archive, other, archive))
+    assert result.windows == [] and result.errors == []
+    assert [window.window_id for window in result.focused] == [first.window_id, elsewhere.window_id]
+
+    # New Search Window remains the explicit way to get a second view.
+    application.new_search_window(document)
+    assert len(document.window_ids) == 2
+    application.close_window(first.window_id)
+    reopened, created = application.open_document_window(archive)
+    assert not created and reopened.window_id in document.window_ids
 
 
 def test_same_archive_reuses_document_while_search_windows_remain_independent(tmp_path: Path) -> None:
@@ -507,7 +538,7 @@ def test_quit_keeps_active_import_document_alive(tmp_path: Path) -> None:
 
 
 def test_child_window_keeps_document_routing_without_search_windows(tmp_path: Path) -> None:
-    """Requirement: an Ingests window continues routing actions after searches close."""
+    """Requirement: an Activity window continues routing actions after searches close."""
     from mailarchiver.gui_app import PyWebViewApplication
 
     application = controller(tmp_path)

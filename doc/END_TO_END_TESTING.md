@@ -208,8 +208,8 @@ application. Swift Testing is for Swift logic and does not automate the UI.
 
 Mailarchiver passes custom **File** and **Window** menus to `webview.start`.
 File supplies **New**, **Open…**, launch-time **Open Recent**,
-**Import…**, and **Close** actions. Window supplies **New Search Window**, **Ingests** and
-the current About, search, and Ingests window inventory. Every callback
+**Import…**, and **Close** actions. Window supplies **New Search Window**, **Activity** and
+the current About, search, and Activity window inventory. Every callback
 resolves the active logical search window when invoked; opening an archive
 creates a new document window rather than retargeting an existing one.
 pywebview's Cocoa backend also creates these native defaults:
@@ -263,7 +263,7 @@ file-open events, and dispatch in packaged applications under issues 72 and 76.
 | Chromium rendering | No | Yes | No | No |
 | Cocoa bridge injection and shutdown | No | No | Yes | Yes |
 | Document identity, startup, and active-window routing | Yes | No | No | Yes |
-| Independent Ingests-window content and action routing | No | Yes | No | Yes |
+| Independent Activity-window content and action routing | No | Yes | No | Yes |
 | Native menu inspection, dialogs, Finder drag | No | No | No | Yes |
 
 The required end-to-end gate is successful only when the archive lifecycle and

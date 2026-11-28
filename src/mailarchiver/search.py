@@ -29,7 +29,7 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from pydantic import BaseModel
 
 from .encoding import decode_text
-from .message import MetadataDefect, decoded_header, decoded_message_header, header_addresses
+from .message import MetadataDefect, decoded_header, decoded_message_header, display_entity, header_addresses
 from .mime_tree import OriginalMimeParts, decoded_leaf_payload, is_attachment as is_attachment, walk_mime
 from .search_text import search_fold
 
@@ -200,6 +200,7 @@ def prepare_search_message(
 ) -> PreparedSearchMessage:
     """Read, hash, and MIME-parse one message without touching SQLite."""
     digest = hashlib.sha256(raw).hexdigest() if sha256 is None else sha256
+    raw = display_entity(raw)  # Hash the stored bytes; parse without a leading envelope line.
     message = BytesParser(policy=policy.compat32).parsebytes(raw)
     attachments = indexed_attachments(message, raw)
     body = preferred_body_text(message)

@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict
@@ -63,8 +63,13 @@ class ArchiveIntegrityControls(ABC):
         archive: ArchiveReference,
         catalog: sqlite3.Connection,
         packaged_at: datetime | None = None,
+        *,
+        should_stop: Callable[[], bool] | None = None,
     ) -> Iterator[ArchiveIntegrityEvent]:
-        """Publish and describe one complete archive-integrity checkpoint."""
+        """Publish and describe one complete archive-integrity checkpoint.
+
+        A true ``should_stop`` abandons the checkpoint with ``CheckpointInterrupted``.
+        """
 
     @abstractmethod
     def verify(self, archive: ArchiveReference) -> Iterator[ArchiveIntegrityEvent]:
@@ -114,6 +119,8 @@ class MailbagArchiveIntegrityControls(ArchiveIntegrityControls):
         archive: ArchiveReference,
         catalog: sqlite3.Connection,
         packaged_at: datetime | None = None,
+        *,
+        should_stop: Callable[[], bool] | None = None,
     ) -> Iterator[ArchiveIntegrityEvent]:
         yield ProgressEvent(
             work_id=archive.archive_id,
@@ -122,7 +129,7 @@ class MailbagArchiveIntegrityControls(ArchiveIntegrityControls):
             total=1,
             unit="checkpoint",
         )
-        for warning in write_bag_checkpoint(archive.root, catalog, packaged_at):
+        for warning in write_bag_checkpoint(archive.root, catalog, packaged_at, should_stop=should_stop):
             yield ArchiveIntegrityWarning(message=warning)
         yield _file_evidence(PAYLOAD_MANIFEST_CONTROL, archive, archive.root / "manifest-sha256.txt")
         yield _file_evidence(TAG_MANIFEST_CONTROL, archive, archive.root / "tagmanifest-sha256.txt")

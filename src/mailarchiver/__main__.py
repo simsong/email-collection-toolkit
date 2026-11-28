@@ -20,7 +20,6 @@ import argparse
 import hashlib
 import logging
 import mailbox
-import math
 import os
 import queue
 import re
@@ -32,7 +31,7 @@ import threading
 import tempfile
 import time
 from collections import Counter, deque
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable, Iterator
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import UTC, datetime
 from functools import partial
@@ -48,13 +47,25 @@ from pydantic import BaseModel, Field
 from tabulate import tabulate
 
 from .scan_evidence import ScanEvidence, ScanFailure
-from .future_coordinator import BoundedWorkers, FutureCoordinator, WORKER_NUMBER
+from .future_coordinator import BoundedWorkers, FutureCoordinator, PROCESSING_WORKER, WORKER_NUMBER
 from .application import configured_imap_connections, configured_workers, validate_ingest_paths
 from .configuration_diagnostics import ConfigurationError
+from .identity import APPLICATION_VERSION
 from .imap_source import IMAP_BUSY_PHASE
 from .imap_preferences import ImapConnectionLimit
+from .imap_transport import ImapTransport
 from .worker_preferences import half_cpus, worker_argument
+from .gui_sources import record_local_sources
+from .rebuild import (
+    ByteProgressReporter,
+    RebuildInterrupted,
+    RebuildProgress,
+    formatted_bytes,
+    formatted_duration,
+    rebuild_archive,
+)
 from .archive_integrity import ArchiveIntegrityWarning, MailbagArchiveIntegrityControls
+from .bagit import CheckpointInterrupted
 from .archive_path import add_archive_argument, require_archive
 from .contacts import contacts, load_owner_addresses, print_contacts
 from .document_options import DocumentOptions, read_owner_names
@@ -72,6 +83,7 @@ from .change_signal import ActivityCallback, ChangeEvent, ChangeSignal
 from .console_events import console_signal
 from .ingest_status import (
     IngestCounts,
+    ImapDownloadCoverage,
     IngestState,
     IngestStatus,
     IngestStatusFile,
@@ -100,7 +112,8 @@ from .mbox import (
 from .message import ParsedMessage
 from .processing.api import PluginStatistics, ProcessingObject
 from .processing.contracts import MailboxReference, ProcessingPolicy, SourceMetadata
-from .processing.production import ProductionPipeline
+from .processing.production import RELEASE_BATCH_SECONDS, ProductionPipeline
+from .processing.runtime import ProcessorStop
 from .processing.store import connect as processing_connection
 from .processing_progress import saved_messages_remaining
 from .plugin_api import (
@@ -138,8 +151,8 @@ from .writer_lock import ArchiveBusyError, WriterLease
 from .imap_state import initialize_state, record_download, refresh_observation
 
 DEFAULT_REPORT_TOP = 10
-REFRESH_INDEX_DEFAULT_WORKERS = half_cpus()
-REFRESH_INDEX_MAX_IN_FLIGHT_BYTES = 256 * 1024 * 1024
+REBUILD_INDEX_DEFAULT_WORKERS = half_cpus()
+REBUILD_INDEX_MAX_IN_FLIGHT_BYTES = 256 * 1024 * 1024
 CLAMAV_START_PHASE = "waiting for ClamAV startup"
 DISCOVERY_PHASE = "discovering sources"
 TOP_LINE_STYLE = "\x1b[37;44m"
@@ -285,6 +298,7 @@ class SourceOriginMetadata(BaseModel):
 
 class ProgressUpdate(BaseModel):
     worker: int
+    saved_pool: bool = False
     phase: str | None = None
     path: str | None = None
     bytes_done: int | None = None
@@ -293,6 +307,7 @@ class ProgressUpdate(BaseModel):
     activity_total: int | None = None
     activity_unit: str | None = None
     message_date: datetime | None = None
+    download_date: datetime | None = None
     disposition: str | None = None
     file_complete: bool = False
     notice_kind: Literal["skipped input", "skipped unchanged"] | None = None
@@ -316,6 +331,7 @@ class ProgressState(BaseModel):
     current_year: int | None = None
     current_year_messages: int = 0
     source_files_total: int = 0
+    unknown_size_sources_remaining: int = 0
     source_bytes_completed: int = 0
     source_bytes_total: int = 0
     skipped_files_total: int = 0
@@ -323,13 +339,21 @@ class ProgressState(BaseModel):
     byte_progress_started_monotonic: float | None = None
     peak_active_files: int = 0
     workers: list[WorkerProgress] = Field(default_factory=list)
+    saved_workers: list[WorkerProgress] = Field(default_factory=list)
+    concurrent_processing: bool = False
     counts: IngestCounts = Field(default_factory=IngestCounts)
     years: list[YearProgress] = Field(default_factory=list)
+    download_coverage: ImapDownloadCoverage = Field(default_factory=ImapDownloadCoverage)
     processing_active: bool = False
     processing_jobs_completed: int = 0
     processing_job_id: int | None = None
     processing_processor: str | None = None
     saved_messages_remaining: int | None = None
+
+    @property
+    def overlap_active(self) -> bool:
+        return (self.concurrent_processing and self.processing_active
+                and any(worker.phase != "idle" for worker in self.workers))
 
 
 class OverallProgress(BaseModel):
@@ -339,77 +363,7 @@ class OverallProgress(BaseModel):
     eta: str
 
 
-class RefreshIndexProgress(BaseModel):
-    """A single, observable phase of the disposable-index rebuild."""
-
-    phase: str
-    total: int
-    unit: str
-    started_monotonic: float = Field(default_factory=time.monotonic)
-    completed: int = 0
-
-
-def refresh_index_line(progress: RefreshIndexProgress, now: float, width: int = 24) -> str:
-    """Render bounded rebuild progress without relying on terminal controls."""
-    completed = min(progress.completed, progress.total)
-    percent = 100 if progress.total == 0 else 100 * completed / progress.total
-    elapsed = max(now - progress.started_monotonic, 0.001)
-    if completed >= progress.total:
-        eta = "0s"
-    elif completed == 0:
-        eta = "calculating"
-    else:
-        eta = formatted_duration((progress.total - completed) * elapsed / completed)
-    filled = round(width * percent / 100)
-    bar = "#" * filled + "-" * (width - filled)
-    rate = completed / elapsed
-    return (
-        f"{progress.phase}: [{bar}] {percent:5.1f}% {completed:,}/{progress.total:,} "
-        f"{progress.unit}  {rate:,.0f} {progress.unit}/s  ETA {eta}"
-    )
-
-
-class RefreshIndexReporter:
-    """Show low-noise, terminal-friendly progress for a refresh-index run."""
-
-    def __init__(self, phase: str, total: int, unit: str) -> None:
-        self.progress = RefreshIndexProgress(phase=phase, total=total, unit=unit)
-        self.tty = sys.stderr.isatty()
-
-    def display(self, *, force: bool = False) -> None:
-        now = time.monotonic()
-        percent = self.progress.completed * 100 // max(self.progress.total, 1)
-        if not force and getattr(self, "last_percent", None) == percent:
-            return
-        self.last_percent = percent
-        line = refresh_index_line(self.progress, now)
-        if self.tty:
-            sys.stderr.write(f"\r\x1b[2K{line}")
-        else:
-            print(line, file=sys.stderr)
-        sys.stderr.flush()
-
-    def advance(self, amount: int = 1) -> None:
-        self.progress.completed += amount
-        self.display()
-
-    def finish(self) -> None:
-        self.progress.completed = self.progress.total
-        self.display(force=True)
-        if self.tty:
-            sys.stderr.write("\n")
-            sys.stderr.flush()
-
-
-class RefreshIndexInterrupted(KeyboardInterrupt):
-    """Report whether Ctrl-C arrived before or after atomic search publication."""
-
-    def __init__(self, published: bool) -> None:
-        super().__init__()
-        self.published = published
-
-
-class RefreshIndexWork(BaseModel):
+class RebuildIndexWork(BaseModel):
     """One immutable verified-MBOX read assigned to a refresh worker."""
 
     message_pk: int
@@ -419,7 +373,7 @@ class RefreshIndexWork(BaseModel):
     location: MboxLocation
 
 
-class PreparedRefreshIndexMessage(BaseModel):
+class PreparedRebuildIndexMessage(BaseModel):
     """The ordered worker result consumed by the sole SQLite writer."""
 
     message_pk: int
@@ -427,7 +381,7 @@ class PreparedRefreshIndexMessage(BaseModel):
     indexed: PreparedSearchMessage
 
 
-class RefreshIndexPublication:
+class RebuildIndexPublication:
     """Make the final paired derived-data publication uninterruptible."""
 
     def __enter__(self) -> None:
@@ -440,15 +394,6 @@ class RefreshIndexPublication:
     def __exit__(self, exception_type: type[BaseException] | None, _value: BaseException | None, _traceback: TracebackType | None) -> None:
         if self.previous_handler is not None:
             signal.signal(signal.SIGINT, self.previous_handler)
-
-
-def formatted_bytes(value: int) -> str:
-    amount = float(value)
-    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
-        if amount < 1024 or unit == "TiB":
-            return f"{int(amount)} B" if unit == "B" else f"{amount:.1f} {unit}"
-        amount /= 1024
-    raise AssertionError("unreachable")
 
 
 def processor_statistics_table(statistics: tuple[PluginStatistics, ...]) -> str:
@@ -467,14 +412,6 @@ def processor_statistics_table(statistics: tuple[PluginStatistics, ...]) -> str:
         if position == 0:
             lines.append("  ".join("-" * width for width in widths))
     return "\n".join(lines)
-
-
-def formatted_duration(seconds: float) -> str:
-    remaining = max(0, math.ceil(seconds))
-    hours, remaining = divmod(remaining, 3600)
-    minutes, seconds = divmod(remaining, 60)
-    fields = ([f"{hours}h"] if hours else []) + ([f"{minutes}m"] if hours or minutes else []) + [f"{seconds}s"]
-    return " ".join(fields)
 
 
 def safe_status_text(value: str, *, limit: int = 80) -> str:
@@ -501,8 +438,10 @@ def overall_progress(state: ProgressState, now: float) -> OverallProgress:
             percent = min(percent, 99.9)
     if not state.inventory_complete:
         eta = "calculating"
+    elif state.unknown_size_sources_remaining:
+        eta = "unavailable"
     elif total == 0:
-        eta = "0s" if state.files_processed >= state.source_files_total else "finalizing"
+        eta = "0s" if state.files_processed >= state.source_files_total else "unavailable"
     elif done == 0 or state.byte_progress_started_monotonic is None:
         eta = "calculating"
     elif done >= total:
@@ -514,7 +453,7 @@ def overall_progress(state: ProgressState, now: float) -> OverallProgress:
 
 
 def overall_line(state: ProgressState, now: float) -> str:
-    if state.processing_active:
+    if state.processing_active and not state.overlap_active:
         return (f"Processing: {state.processing_jobs_completed:,} jobs finished  "
                 f"Job {state.processing_job_id}: {state.processing_processor}  Total/ETA pending discovery")
     if not state.inventory_complete:
@@ -570,6 +509,7 @@ class ProgressReporter:
         self.interrupt_announced = False
         self.activity_kind: Literal["source", "processing"] = "source"
         self.saved_message_counter: Callable[[], int] | None = None
+        self.saved_count_sample: tuple[float, tuple[int, int, int]] | None = None
         # Unlabelled refreshes arrive many times per message. Rendering each one
         # re-printed the status line, rewrote and fsynced the status file, and
         # (while processing) ran a jobs-table count that grows with the archive,
@@ -591,6 +531,8 @@ class ProgressReporter:
         self.trailing_render.start()
 
     def _queue_update(self, update: ProgressUpdate) -> None:
+        if self.state.concurrent_processing and PROCESSING_WORKER.get():
+            update = update.model_copy(update={"saved_pool": True})
         self.updates.put(update)
         self.changed.notify()
 
@@ -620,6 +562,10 @@ class ProgressReporter:
 
     def record(self, parsed: ParsedMessage, source: MailObject) -> None:
         self._record_source_progress(source, datetime.fromisoformat(parsed.date_utc))
+
+    def record_download(self, source: MailObject) -> None:
+        if source.source.plugin_kind == "imap" and "#mime=" not in source.cursor and source.source_date_utc is not None:
+            self._queue_update(ProgressUpdate(worker=self._worker_number(), download_date=source.source_date_utc))
 
     def record_source(self, source: MailObject) -> None:
         self._record_source_progress(source)
@@ -678,6 +624,7 @@ class ProgressReporter:
         self._assert_driver_thread()
         self.state.source_files_total = inventory.file_count
         self.state.source_bytes_total = inventory.byte_count
+        self.state.unknown_size_sources_remaining = inventory.unknown_size_count
         self.state.skipped_files_total = inventory.skipped_file_count
         self.state.inventory_complete = True
         self._emit_notices({"skipped input"})
@@ -711,7 +658,7 @@ class ProgressReporter:
             )
         )
 
-    def record_file_complete(self, path: Path | str, byte_count: int) -> None:
+    def record_file_complete(self, path: Path | str, byte_count: int | None) -> None:
         self._send("idle", path, byte_count, byte_count, file_complete=True)
 
     def record_file_inactive(self, path: Path | str) -> None:
@@ -733,24 +680,62 @@ class ProgressReporter:
 
     def record_processing(self, item: ProcessingObject, processor: str, finished: bool, worker: int | None = None) -> None:
         """Queue actual processor activity without counting recovered jobs as new mail."""
-        self._queue_update(ProgressUpdate(worker=worker or self._worker_number(), phase="idle" if finished else f"processing {processor}",
+        self._queue_update(ProgressUpdate(worker=worker or self._worker_number(), saved_pool=self.state.concurrent_processing,
+            phase="idle" if finished else f"processing {processor}",
             path=f"{item.pipeline} job {item.job_id}", activity_unit="jobs", processing_active=not finished,
             processing_finished=finished, processing_job_id=item.job_id, processing_processor=processor))
 
     def finish_processing(self) -> None:
         self._queue_update(ProgressUpdate(worker=self._worker_number(), phase="idle", processing_active=False))
 
+    def begin_concurrent_processing(self) -> None:
+        self._assert_driver_thread()
+        self.state.concurrent_processing = True
+        self.saved_count_sample = None
+        self.saved_count_due_monotonic = 0.0
+        self.state.saved_workers = [WorkerProgress(worker=worker.worker, processing_jobs_completed=0)
+                                    for worker in self.state.workers]
+
+    def finish_concurrent_processing(self) -> None:
+        self._assert_driver_thread()
+        for worker in self.state.saved_workers:
+            self._queue_update(ProgressUpdate(worker=worker.worker, saved_pool=True, phase="idle", processing_active=False))
+        self._drain_updates()
+        self.state.concurrent_processing = False
+
     def track_saved_messages(self, counter: Callable[[], int]) -> None:
         """Bind a read-only queue counter owned by this status driver."""
         self._assert_driver_thread()
         self.saved_message_counter = counter
+        self.saved_count_sample = None
+        self.saved_count_due_monotonic = 0.0
+
+    def _sample_saved_count(self, now: float, *, force: bool = False) -> None:
+        if self.saved_message_counter is None:
+            return
+        revision = (self.state.processed, self.state.processing_jobs_completed, self.state.files_processed)
+        if not force and self.state.concurrent_processing and self.saved_count_sample is not None:
+            sampled_at, previous_revision = self.saved_count_sample
+            # Sample on real status changes, not a timer. Rapid admissions and
+            # invocation heartbeats share a bounded read of the saved backlog.
+            sources_finished = previous_revision[2] < revision[2] == self.state.source_files_total
+            if revision == previous_revision or (now - sampled_at < 1 and not sources_finished):
+                return
+        elif not force and not self.state.concurrent_processing and now < self.saved_count_due_monotonic:
+            return
+        self.state.saved_messages_remaining = self.saved_message_counter()
+        self.saved_count_sample = (now, revision)
+        # The count scans the job table; keep it under ~5% of wall time.
+        counted = time.monotonic()
+        self.saved_count_due_monotonic = (counted + max(self.saved_count_min_interval, 20 * (counted - now))
+                                          if self.saved_count_min_interval else counted)
 
     def _send(
         self,
         phase: str,
         path: Path | str,
-        bytes_done: int,
-        bytes_total: int,
+        bytes_done: int | None,
+        bytes_total: int | None,
         *,
         message_date: datetime | None = None,
         file_complete: bool = False,
@@ -814,7 +799,7 @@ class ProgressReporter:
                 update = self.updates.get_nowait()
             except queue.Empty:
                 break
-            worker = self.state.workers[update.worker - 1]
+            worker = (self.state.saved_workers if update.saved_pool else self.state.workers)[update.worker - 1]
             if update.scan_active is not None:
                 self.scan_workers[update.worker - 1] = update if update.scan_active else None
                 active = sum(item.phase != "idle" for item in self.visible_workers())
@@ -829,13 +814,15 @@ class ProgressReporter:
             if update.processing_finished:
                 self.state.processing_jobs_completed += 1
                 worker.processing_jobs_completed = (worker.processing_jobs_completed or 0) + 1
-            if update.operation is not None and not (update.processing_active is None and self.state.processing_active):
+            if update.operation is not None and not (update.processing_active is None and self.state.processing_active and not self.state.concurrent_processing):
                 worker.operation = update.operation
             if update.processing_active:
                 worker.operation = "processing"
             if update.file_complete:
                 self.state.files_processed += 1
                 self.state.source_bytes_completed += update.bytes_total or 0
+                if update.bytes_total is None:
+                    self.state.unknown_size_sources_remaining -= 1
                 worker.last_path = update.path or worker.path
                 worker.files_processed += 1
                 worker.phase = "idle"
@@ -845,7 +832,7 @@ class ProgressReporter:
                 worker.activity_done = None
                 worker.activity_total = None
                 worker.activity_unit = None
-            elif update.processing_active is None and self.state.processing_active:
+            elif update.processing_active is None and self.state.processing_active and not self.state.concurrent_processing:
                 # Child publication may emit source-style events on the coordinator.
                 # Preserve processing lanes, including idle ones, while counting below.
                 pass
@@ -883,6 +870,8 @@ class ProgressReporter:
                     worker.activity_unit = update.activity_unit
                 if update.processing_active:
                     worker.activity_done = worker.processing_jobs_completed
+            if update.download_date is not None:
+                self.state.download_coverage.record(update.download_date)
             if update.message_date is not None:
                 self._record_message(update.message_date)
                 worker.messages_processed += 1
@@ -939,6 +928,9 @@ class ProgressReporter:
         if self.interrupt_announced:
             return "shutting down"
         if self.state.processing_active:
+            if self.state.concurrent_processing:
+                return ("Importing and processing saved mail" if self.state.overlap_active
+                        else "Processing saved mail")
             return self.base_phase
         phases = {worker.phase for worker in self.visible_workers()}
         if phases != {"idle"}:
@@ -987,12 +979,8 @@ class ProgressReporter:
         if self.trailing_render is not None:
             self.trailing_render.cancel()
             self.trailing_render = None
-        if (self.activity_kind == "processing" and self.saved_message_counter is not None
-                and (now >= self.saved_count_due_monotonic or ingest_state != "running")):
-            self.state.saved_messages_remaining = self.saved_message_counter()
-            # The count scans the job table; keep it under ~5% of wall time.
-            counted = time.monotonic()
-            self.saved_count_due_monotonic = counted + max(self.saved_count_min_interval, 20 * (counted - now)) if self.saved_count_min_interval else counted
+        if self.activity_kind == "processing" or self.state.concurrent_processing:
+            self._sample_saved_count(now, force=ingest_state != "running")
         if display_label != self.phase:
             self.phase = display_label
             self.phase_started_monotonic = now
@@ -1001,7 +989,7 @@ class ProgressReporter:
         phase_elapsed = max(now - self.phase_started_monotonic, 0.0)
         overall = overall_progress(state, now)
         state.workers = self.visible_workers()
-        if state.processing_active:
+        if state.processing_active and not state.overlap_active and overall.eta != "unavailable":
             overall = overall.model_copy(update={"eta": "calculating"})
         dates = "none" if state.earliest_date is None or state.latest_date is None else f"{state.earliest_date.date()}..{state.latest_date.date()}"
         year = "none" if state.current_year is None else str(state.current_year)
@@ -1017,6 +1005,8 @@ class ProgressReporter:
                 f"Rate: {state.processed / elapsed:.2f} messages/s  Elapsed: {elapsed:.0f}s"),
                 f"Workers:   {active:,} active; peak {state.peak_active_files:,}; {len(state.workers):,} configured",
                 *(self._worker_line(worker, self.terminal_columns) for worker in state.workers),
+                *(["Saved-mail processing workers:", *(self._worker_line(worker, self.terminal_columns)
+                    for worker in state.saved_workers)] if state.saved_workers else []),
                 f"Dates:     {dates}  Current year: {year} ({state.current_year_messages:,} messages)",
                 (f"Archived:  {state.counts.archived:,}  Seen/skipped: {state.counts.duplicates:,}  "
                 f"Autosaved: {state.counts.autosaves:,}  Metadata: {state.counts.metadata_excluded:,}  "
@@ -1032,6 +1022,8 @@ class ProgressReporter:
                 f"{worker.worker}:{worker.phase}:{Path(worker.path).name if worker.path else '-'}"
                 for worker in state.workers
             )
+            saved_workers = " ".join(f"{worker.worker}:{worker.phase}" for worker in state.saved_workers)
+            saved_field = f" saved_workers={saved_workers}" if saved_workers else ""
             print(
                 f"{display_label}: overall_bytes={overall.bytes_done} overall_total_bytes={overall.bytes_total} "
                 f"overall_percent={overall.percent:.1f}% files_processed={state.files_processed} "
@@ -1040,7 +1032,7 @@ class ProgressReporter:
                 f"active_workers={active} peak_workers={state.peak_active_files} "
                 f"processing_jobs_completed={state.processing_jobs_completed} "
                 f"rate={state.processed / elapsed:.2f}/s "
-                f"workers={workers} dates={dates} current_year={year} year_messages={state.current_year_messages} "
+                f"workers={workers}{saved_field} dates={dates} current_year={year} year_messages={state.current_year_messages} "
                 f"archived={state.counts.archived} seen_skipped={state.counts.duplicates} "
                 f"autosaved={state.counts.autosaves} metadata_excluded={state.counts.metadata_excluded} "
                 f"infected={state.counts.infected} skipped_files={state.counts.skipped_files} "
@@ -1080,6 +1072,7 @@ class ProgressReporter:
             archive=str(self.status_archive.resolve()),
             run_pk=self.status_run_pk,
             process_id=os.getpid(),
+            application_version=APPLICATION_VERSION,
             source_roots=self.status_source_roots,
             started_at=state.started_at,
             updated_at=updated_at,
@@ -1104,8 +1097,11 @@ class ProgressReporter:
             peak_workers=state.peak_active_files,
             configured_workers=len(state.workers),
             workers=[WorkerProgress.model_validate(worker) for worker in state.workers],
+            saved_workers=state.saved_workers,
+            concurrent_processing=state.overlap_active,
             counts=state.counts,
             years=state.years,
+            download_coverage=state.download_coverage,
             failure_detail=failure_detail,
             scan_policy=self.scan_policy,
             processing_active=state.processing_active,
@@ -1145,6 +1141,7 @@ def run_file_workers[WorkerItem](
     on_interrupt: Callable[[], None] | None = None,
     coordinator: FutureCoordinator | None = None,
     signals: tuple[ChangeSignal, ...] = (),
+    background: Callable[[Callable[[BaseException], None]], Generator[tuple[Future[object], ...], None, None]] | None = None,
     idle: Callable[[], float | None] | None = None,
 ) -> None:
     """Run framework workers with optional source-declared per-key concurrency limits.
@@ -1163,6 +1160,56 @@ def run_file_workers[WorkerItem](
     lookahead = max(worker_count * 4, worker_count)
     exhausted = False
     discovery_error: tuple[BaseException, TracebackType | None] | None = None
+    background_steps: Generator[tuple[Future[object], ...], None, None] | None = None
+    background_waiting: tuple[Future[object], ...] = ()
+
+    primary_error: BaseException | None = None
+
+    def fail(error: BaseException) -> None:
+        nonlocal primary_error
+        if background is None:
+            raise error
+        if primary_error is None:
+            primary_error = error
+            stop.set()
+            if coordinator is not None:
+                coordinator.abort(error)
+            for future in pending:
+                future.cancel()
+            if isinstance(error, KeyboardInterrupt) and on_interrupt is not None:
+                on_interrupt()
+
+    def background_failed(error: BaseException) -> None:
+        # A peer source can set stop before its future exposes the actual failure.
+        # Its cleanup cancellation must not become the reported source error.
+        if not (isinstance(error, IngestInterrupted) and stop.is_set()):
+            fail(error)
+
+    def advance_background() -> None:
+        nonlocal background_steps, background_waiting
+        if background is None:
+            return
+        if background_steps is None:
+            if stop.is_set():
+                return
+            background_steps = background(background_failed)
+        if not background_waiting or any(future.done() for future in background_waiting):
+            try:
+                background_waiting = next(background_steps)
+            except StopIteration:
+                background_steps = None
+                background_waiting = ()
+            except BaseException as error:
+                background_steps = None
+                background_waiting = ()
+                background_failed(error)
+
+    def drive(operation: Callable[[], None]) -> None:
+        if primary_error is None:
+            try:
+                operation()
+            except BaseException as error:
+                fail(error)
 
     def invoke(item: WorkerItem) -> None:
         token = WORKER_NUMBER.set(ProgressReporter._worker_number())
@@ -1172,7 +1219,7 @@ def run_file_workers[WorkerItem](
             WORKER_NUMBER.reset(token)
 
     try:
-        while pending or waiting_items or not exhausted:
+        while pending or waiting_items or not exhausted or background_steps is not None:
             if stop.is_set():
                 exhausted = True
                 waiting_items.clear()
@@ -1181,8 +1228,9 @@ def run_file_workers[WorkerItem](
                     item = next(iterator)
                 except StopIteration:
                     exhausted = True
-                except KeyboardInterrupt:
-                    raise
+                except KeyboardInterrupt as error:
+                    fail(error)
+                    exhausted = True
                 except BaseException as error:
                     logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                     discovery_error = (error, error.__traceback__)
@@ -1210,29 +1258,48 @@ def run_file_workers[WorkerItem](
                 if key is not None:
                     active[key] += 1
                 pending[pool.submit(invoke, item)] = key
-            if not pending:
+            advance_background()
+            if not pending and background_steps is None:
                 if exhausted:
                     break
                 continue
             changed = tuple(signal.ready for signal in signals)
-            status_driver()
-            completed, _unfinished = wait(
-                (*pending, *changed, *((coordinator.ready,) if coordinator is not None else ())),
-                timeout=idle() if idle is not None else None,
-                return_when=FIRST_COMPLETED,
-            )
+            drive(status_driver)
+            publication = (coordinator.ready,) if coordinator is not None and primary_error is None else ()
+            idle_timeout: float | None = None
+            if idle is not None and primary_error is None:
+                try:
+                    idle_timeout = idle()
+                except BaseException as error:  # pylint: disable=broad-exception-caught
+                    fail(error)
+                    continue
+            try:
+                completed, _unfinished = wait(
+                    (*pending, *changed, *background_waiting, *publication),
+                    timeout=idle_timeout,
+                    return_when=FIRST_COMPLETED,
+                )
+            except KeyboardInterrupt as error:
+                fail(error)
+                continue
             if coordinator is not None:
-                coordinator.drain()
-            status_driver()
+                drive(coordinator.drain)
+            drive(status_driver)
             for future in completed:
                 if future not in pending:
                     continue
                 key = pending.pop(future)
                 try:
-                    future.result()
+                    if primary_error is None:
+                        try:
+                            future.result()
+                        except BaseException as error:
+                            fail(error)
                 finally:
                     if key is not None:
                         active[key] -= 1
+        if primary_error is not None:
+            raise primary_error
         if discovery_error is not None:
             error, traceback = discovery_error
             raise error.with_traceback(traceback)
@@ -1242,12 +1309,17 @@ def run_file_workers[WorkerItem](
             coordinator.abort(error)
         for future in pending:
             future.cancel()
-        if isinstance(error, KeyboardInterrupt) and on_interrupt is not None:
+        if primary_error is None and isinstance(error, KeyboardInterrupt) and on_interrupt is not None:
             on_interrupt()
         raise
     finally:
-        pool.shutdown(wait=True, cancel_futures=True)
-        status_driver()
+        try:
+            if background_steps is not None:
+                background_steps.close()
+        finally:
+            pool.shutdown(wait=True, cancel_futures=True)
+            if primary_error is None:
+                status_driver()
 
 
 def start_ingest_scanner(status_driver: Callable[[], None], workers: int, *,
@@ -1375,6 +1447,7 @@ class IngestInterrupted(KeyboardInterrupt):
 
 def run_ingest(
     request: IngestRequest, writer_lease: WriterLease | None = None, *, outcome: IngestOutcome | None = None, terminal: bool = True, stop_event: threading.Event | None = None,
+    imap_transport: ImapTransport | None = None,
 ) -> None:
     """Run ingest under the archive's OS writer lock."""
     validate_ingest_paths(request.roots, request.archive)
@@ -1401,13 +1474,14 @@ def run_ingest(
             lease.release()
         raise ValueError("an acquired writer lease for this archive is required")
     try:
-        _run_ingest(request, lease, outcome if outcome is not None else IngestOutcome(), terminal, stop_event)
+        _run_ingest(request, lease, outcome if outcome is not None else IngestOutcome(), terminal, stop_event, imap_transport)
     finally:
         if owned:
             lease.release()
 
 
-def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: IngestOutcome, terminal: bool, stop_event: threading.Event | None = None) -> None:
+def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: IngestOutcome, terminal: bool,
+                stop_event: threading.Event | None, imap_transport: ImapTransport | None) -> None:
     from .archive_config import load_archive_config
     mbox_max_bytes = load_archive_config(request.archive).mbox_max_bytes
     options = DocumentOptions(request.archive)
@@ -1426,7 +1500,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         if stop_event.is_set():
             stop.set()
     plugins = load_plugins(request.plugin_dir, archive=request.archive, installation_config=request.installation_config,
-                           scan_policy=request.scan_policy, cancellation=stop,
+                           scan_policy=request.scan_policy, cancellation=stop, imap_transport=imap_transport,
                            imap_connections=request.imap_connections if request.imap_connections is not None
                            else configured_imap_connections())
     source_specs = [SourceSpec(locator=str(Path(root).resolve())
@@ -1477,8 +1551,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         raise
     progress_started = False
 
-    def checkpoint_archive() -> None:
-        for event in archive_integrity.checkpoint(archive_reference, catalog):
+    def checkpoint_archive(should_stop: Callable[[], bool] | None = None) -> None:
+        for event in archive_integrity.checkpoint(archive_reference, catalog, should_stop=should_stop):
             if isinstance(event, ArchiveIntegrityWarning) and event.message not in outcome.warnings:
                 outcome.warnings.append(event.message)
                 print(f"Warning: {safe_status_text(event.message)}", file=sys.stderr)
@@ -1541,7 +1615,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     source_file_pks: dict[tuple[str, str, str], int] = {}
     source_volume_pks: dict[str, int] = {}
     coordinator = FutureCoordinator()
-    progress_signals = (progress.changed, *((stop_event.changed,) if isinstance(stop_event, ChangeEvent) else ()))
+    progress_signals = (progress.changed, stop.changed, *((stop_event.changed,) if isinstance(stop_event, ChangeEvent) else ()))
+    finish_active_processing = False
+    concurrent_content = False
 
     def check_interrupted() -> None:
         if stop_event is not None and stop_event.is_set():
@@ -1554,7 +1630,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
 
     def check_processor_cancelled() -> None:
         check_interrupted()
-        if stop.is_set():
+        if stop.is_set() and not finish_active_processing:
             raise IngestInterrupted("Processing stopped; unfinished work is retained.")
 
     scanner: ClamScanner | None = None
@@ -1755,6 +1831,33 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             )
         return ContainerIntegrityResult(decision=decision, evidence=tuple(evidence))
 
+    # Source bookkeeping (registration, integrity check start, completion
+    # checkpoint) is not committed on its own: it rides along with the next
+    # message commit, or commits within RELEASE_BATCH_SECONDS while sources
+    # stall. A crash only loses checkpoints, so those sources are rescanned.
+    checkpoint_due: list[float] = []
+
+    def defer_checkpoint_commit() -> None:
+        if not checkpoint_due:
+            checkpoint_due.append(time.monotonic() + RELEASE_BATCH_SECONDS)
+
+    def commit_due_work() -> float | None:
+        """Idle hook: commit deferred checkpoints and collect released objects when due."""
+        assert pipeline is not None
+        if checkpoint_due and not catalog.in_transaction:
+            checkpoint_due.clear()  # A message commit already carried them.
+        bounds: list[float] = []
+        if checkpoint_due:
+            remaining = checkpoint_due[0] - time.monotonic()
+            if remaining > 0:
+                bounds.append(remaining)
+            else:
+                catalog.commit()
+                checkpoint_due.clear()
+        if (released := pipeline.collect_released_when_due()) is not None:
+            bounds.append(released)
+        return min(bounds, default=None)
+
     def begin_integrity_check(source_file_pk: int, work: ContainerWork, result: ContainerIntegrityResult) -> int:
         controls = work.plugin.implementation.integrity_controls
         subject = next(
@@ -1782,7 +1885,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         assert cursor.lastrowid is not None
         integrity_check_pk = cursor.lastrowid
         record_integrity_evidence(integrity_check_pk, result.evidence)
-        catalog.commit()
+        defer_checkpoint_commit()
         return integrity_check_pk
 
     def record_integrity_evidence(
@@ -1883,9 +1986,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     source_file_pk,
                 ),
             )
-            catalog.commit()
+            defer_checkpoint_commit()
         coordinator.call(publish_checkpoint)
-        progress.record_file_complete(path, progress_length)
+        progress.record_file_complete(path, catalog_byte_length)
 
     def archive_scanned(candidate: PendingScan, target: MailboxReference) -> int:
         raw, parsed = candidate.source.raw, candidate.parsed
@@ -1903,8 +2006,13 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             sha256=parsed.sha256,
         )
         box: mailbox.mbox | None = None
+        committed = False
         try:
-            catalog.execute("BEGIN")
+            # A savepoint, not BEGIN: earlier deferred catalog rows (processor
+            # results, source checkpoints) may already be pending, and a failed
+            # publication must roll back only its own rows. The commit below
+            # makes all of them durable together.
+            catalog.execute("SAVEPOINT publication")
             sender_pk = address_pk(catalog, parsed.sender)
             message_pk = catalog.execute("INSERT INTO messages(message_id_normalized, sha256, sender_address_pk, subject, date_utc, date_source, category) VALUES (?, ?, ?, ?, ?, ?, ?)", (parsed.message_id, parsed.sha256, sender_pk, parsed.subject, parsed.date_utc, parsed.date_source, category)).lastrowid
             assert message_pk is not None
@@ -1946,10 +2054,16 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             )
             observe(candidate.source, "archived", category, parsed.sha256, message_pk)
             catalog.commit()
+            committed = True
             outcome.published = True
             clear_publication_journal(archive)
         except BaseException:
-            catalog.rollback()
+            try:
+                if catalog.in_transaction and not committed:
+                    catalog.execute("ROLLBACK TO publication")
+                    catalog.execute("RELEASE publication")
+            except sqlite3.Error:
+                catalog.rollback()
             if box is not None:
                 box.close()
                 boxes.pop(destination, None)
@@ -1963,14 +2077,12 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
 
     def publish_processed(source: MailObject, parsed: ParsedMessage, target: MailboxReference, source_file_pk: int) -> int:
         source_file_pks[(source.source.plugin_kind, source.source.source_id, source.work_id)] = source_file_pk
-        if "#mime=" in source.cursor:
-            progress.record(parsed, source)
         return archive_scanned(PendingScan(source=source, parsed=parsed), target)
 
     def publish_source(source: MailObject, metadata: SourceMetadata) -> ParsedMessage:
         assert pipeline is not None
         try:
-            decision = pipeline.ingest(source, metadata)
+            decision = pipeline.ingest(source, metadata, defer_existing_jobs=concurrent_content)
         except RuntimeError as error:
             cause = error.__cause__ or error
             observe(source, "error", f"{type(cause).__name__}: {cause}", hashlib.sha256(source.raw).hexdigest())
@@ -2000,7 +2112,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     def register_container(work: ContainerWork) -> tuple[int, tuple[IntegrityEvidence, ...]]:
         source_file_pk = register_source_file(work)
         prior = prior_source_evidence(source_file_pk, work.plugin.implementation.integrity_controls.control_id)
-        catalog.commit()
+        defer_checkpoint_commit()
         return source_file_pk, prior
 
     def scan_source(item: MailObject | SourceObservation | ProgressEvent) -> tuple[MailObject | SourceObservation | ProgressEvent, ScanEvidence | None]:
@@ -2048,6 +2160,15 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             check_interrupted()
             return not stop.is_set()
 
+        def track_downloads(source_items: Iterator[MailObject | SourceObservation | ProgressEvent]
+                            ) -> Iterator[MailObject | SourceObservation | ProgressEvent]:
+            for item in source_items:
+                if isinstance(item, MailObject):
+                    if item.work_id != work.container.work_id or item.source != work.container.source:
+                        raise RuntimeError(f"source plug-in {work.plugin.manifest.kind} yielded a mail object for the wrong container")
+                    progress.record_download(item)
+                yield item
+
         try:
             check_interrupted()
             if stop.is_set():
@@ -2083,7 +2204,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     prior_date = datetime.fromisoformat(row[0])
 
             items = iter(source_plugin.messages(work.container, decision.resume_cursor))
-            scanned = message_workers.map(scan_source, items, before_read=before_read,
+            scanned = message_workers.map(scan_source, track_downloads(items), before_read=before_read,
                 max_pending=1 if source_plugin.capabilities.network_access else None)
             while True:
                 # Both native and API sources stop before requesting another
@@ -2110,10 +2231,6 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     coordinator.call(partial(publish_observation, item))
                     continue
                 source = item
-                if source.work_id != work.container.work_id or source.source != work.container.source:
-                    raise RuntimeError(
-                        f"source plug-in {work.plugin.manifest.kind} yielded a mail object for the wrong container"
-                    )
                 raw = source.raw
                 progress.record_source(source)
                 if source.exclusion_reason is not None:
@@ -2213,6 +2330,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                         continue
                     inventory.file_count += 1
                     inventory.byte_count += item.estimated_bytes or 0
+                    inventory.unknown_size_count += int(item.estimated_bytes is None)
                     if table == "containers":
                         progress.record_inventory(inventory.file_count, inventory.byte_count)
                 elif isinstance(item, SkippedInput):
@@ -2302,7 +2420,13 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                                          workers=request.workers))
             finally:
                 progress.finish_processing()
-        if request.continue_ingest and request.continue_content and request.max_content_jobs is None:
+        combined_content = request.continue_ingest and request.continue_content and request.max_content_jobs is None
+        concurrent_content = combined_content and inventory.file_count > 0
+        unpublished = pipeline.database.execute("SELECT 1 FROM jobs JOIN message_state ON "
+            "json_extract(jobs.item_json,'$.message_id')=message_state.message_id "
+            "WHERE jobs.status IN ('pending','running') AND json_extract(jobs.item_json,'$.pipeline')='ingest' "
+            "AND message_state.parsed_json IS NULL LIMIT 1").fetchone() is not None
+        if combined_content and (unpublished or not concurrent_content):
             # Restore searchable archived mail before retrying unpublished ingest
             # roots; a new source/scanner failure must not starve this work.
             progress.set_phase("Processing saved mail", activity_kind="processing")
@@ -2313,26 +2437,40 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             def resume_ingest(_unused: int) -> None:
                 assert pipeline is not None
                 try:
-                    coordinator.call(partial(pipeline.resume_ingest, progress=progress.record_processing))
+                    coordinator.call(partial(pipeline.resume_ingest, progress=progress.record_processing,
+                                             mandatory_only=concurrent_content))
                 finally:
                     progress.finish_processing()
             run_file_workers([0], 1, resume_ingest, stop, refresh_import, on_interrupt=progress.announce_interrupt, coordinator=coordinator, signals=progress_signals)
         progress.set_phase("checking sources")
-        with BoundedWorkers(request.workers) as message_workers:
-            run_file_workers(
-                snapshotted_containers(),
-                request.workers,
-                ingest_container,
-                stop,
-                refresh_import,
-                concurrency=lambda work: (
-                    f"{work.plugin.manifest.kind}:{work.container.concurrency_key}",
-                    work.plugin.implementation.capabilities.max_concurrency,
-                ),
-                on_interrupt=progress.announce_interrupt,
-                coordinator=coordinator, signals=progress_signals,
-                idle=pipeline.collect_released_when_due,
-            )
+        if concurrent_content:
+            progress.begin_concurrent_processing()
+        def background_content(failed: Callable[[BaseException], None]) -> Generator[tuple[Future[object], ...], None, None]:
+            assert pipeline is not None
+            def stop_admission(error: BaseException) -> None:
+                nonlocal finish_active_processing
+                if not stop.is_set() and isinstance(error, ProcessorStop):
+                    finish_active_processing = True
+                failed(error)
+            yield from pipeline.resume_steps(progress=progress.record_processing, workers=request.workers,
+                stop_claiming=stop.is_set, on_failure=stop_admission)
+        try:
+            with BoundedWorkers(request.workers) as message_workers:
+                run_file_workers(
+                    snapshotted_containers(), request.workers, ingest_container, stop, refresh_import,
+                    concurrency=lambda work: (
+                        f"{work.plugin.manifest.kind}:{work.container.concurrency_key}",
+                        work.plugin.implementation.capabilities.max_concurrency,
+                    ),
+                    on_interrupt=progress.announce_interrupt,
+                    coordinator=coordinator, signals=progress_signals,
+                    background=background_content if concurrent_content else None,
+                    idle=commit_due_work,
+                )
+        finally:
+            if concurrent_content:
+                progress.finish_concurrent_processing()
+        catalog.commit()
         pipeline.collect_released()
         check_interrupted()
         if request.continue_content:
@@ -2396,10 +2534,21 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         )
         catalog.commit()
         integrity_error: Exception | None = None
-        if boxes or succeeded or interrupted or pause_reason:
+        checkpoint_deferred = interrupted
+        if interrupted:
+            # Suspend and Quit must take effect at once. The checkpoint rereads every
+            # archived message, which takes minutes to hours on a large archive;
+            # an interrupted archive is not promised current manifests, and the
+            # next completed import or Continue in Activity writes them.
+            options.write_detected(catalog, owners, writer_lease)
+        elif boxes or succeeded or pause_reason:
             try:
-                checkpoint_archive()
+                checkpoint_archive(should_stop=lambda: stop_event is not None and stop_event.is_set())
                 catalog.commit()
+                options.write_detected(catalog, owners, writer_lease)
+            except CheckpointInterrupted:
+                catalog.rollback()
+                checkpoint_deferred = True
                 options.write_detected(catalog, owners, writer_lease)
             except Exception as error:
                 logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
@@ -2408,6 +2557,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     failure_detail = format_failure(error)
                 else:
                     print(f"integrity refresh also failed: {error}", file=sys.stderr)
+        if checkpoint_deferred:
+            print("Checksums not refreshed: the import was stopped. Continue in Activity or the next "
+                  "completed import refreshes them.", file=sys.stderr)
         if integrity_error is not None:
             result = "failed"
             catalog.execute(
@@ -2416,7 +2568,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             )
             catalog.commit()
         if pipeline is not None:
-            if progress.saved_message_counter is not None and progress.activity_kind == "processing":
+            if (progress.saved_message_counter is not None
+                    and (progress.activity_kind == "processing" or progress.state.saved_workers)):
                 progress.state.saved_messages_remaining = progress.saved_message_counter()
             progress.saved_message_counter = None
             print(processor_statistics_table(pipeline.statistics().statistics), file=sys.stderr)
@@ -2424,6 +2577,11 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         catalog.close()
         search.close()
         progress.finish(result, failure_detail, phase=pause_reason if result == "paused" else None)
+        if result == "completed":
+            try:  # The Sources tab lists every imported directory or file; rescans reuse them.
+                record_local_sources(archive, request.roots)
+            except (OSError, ValueError, ConfigurationError) as error:
+                print(f"Warning: could not record import sources: {safe_status_text(str(error))}", file=sys.stderr)
         if integrity_error is not None and (succeeded or pause_reason is not None):
             raise integrity_error
 
@@ -2544,16 +2702,16 @@ def report(args: argparse.Namespace) -> None:
     print_report(Path(args.archive), report_years(args.year), args.top)
 
 
-def prepare_refresh_index_message(
-    archive: Path, index_attachments: bool, work: RefreshIndexWork
-) -> PreparedRefreshIndexMessage:
+def prepare_rebuild_index_message(
+    archive: Path, index_attachments: bool, work: RebuildIndexWork
+) -> PreparedRebuildIndexMessage:
     """Verify and parse one canonical message away from the SQLite writer."""
     raw = read_verified_location(
         mbox_path(archive, work.filename),
         work.location,
         work.sha256,
     )
-    return PreparedRefreshIndexMessage(
+    return PreparedRebuildIndexMessage(
         message_pk=work.message_pk,
         date_utc=work.date_utc,
         indexed=prepare_search_message(raw, index_attachments, sha256=work.sha256),
@@ -2563,17 +2721,23 @@ def prepare_refresh_index_message(
 def rebuild_search_index(
     archive: Path,
     index_attachments: bool,
-    workers: int = REFRESH_INDEX_DEFAULT_WORKERS,
+    workers: int = REBUILD_INDEX_DEFAULT_WORKERS,
     *,
     writer_lease: WriterLease | None = None,
+    observer: Callable[[RebuildProgress], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> None:
-    """Build and publish a replacement search database under the writer lease."""
+    """Build and publish a replacement search database under the writer lease.
+
+    ``observer`` receives byte progress instead of terminal output (the GUI).
+    ``should_stop`` is polled between messages; stopping discards the replacement.
+    """
     identity = os.path.normcase(str(archive.resolve(strict=True)))
     owned = writer_lease is None
     lease = writer_lease or WriterLease.acquire(
         archive,
         identity,
-        "refresh search index",
+        "rebuild search index",
         uuid4().hex,
         version("mailarchiver"),
     )
@@ -2582,14 +2746,16 @@ def rebuild_search_index(
             lease.release()
         raise ValueError("an acquired writer lease for this archive is required")
     try:
-        _rebuild_search_index(archive, index_attachments, workers)
+        _rebuild_search_index(archive, index_attachments, workers, observer, should_stop)
     finally:
         if owned:
             lease.release()
 
 
 def _rebuild_search_index(
-    archive: Path, index_attachments: bool, workers: int
+    archive: Path, index_attachments: bool, workers: int,
+    observer: Callable[[RebuildProgress], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> None:
     temporary = archive / "search.sqlite3.tmp"
     temporary.unlink(missing_ok=True)
@@ -2616,11 +2782,13 @@ def _rebuild_search_index(
                 for path in sorted(mbox_directory(archive).glob("*.mbox"))
                 if not QUARANTINE_MAILBOX.fullmatch(path.name)
             ]
-            mailbox_progress = RefreshIndexReporter(
-                "Checking canonical mailboxes", int(expected_row[0]), "messages"
+            mailbox_progress = ByteProgressReporter(
+                "Checking canonical mailboxes", sum(path.stat().st_size for path in mailboxes), observer
             )
             mailbox_progress.display(force=True)
             for path in mailboxes:
+                if should_stop is not None and should_stop():
+                    raise KeyboardInterrupt
                 box = PreservingMbox(path, factory=None, create=False)
                 try:
                     actual = len(box)
@@ -2631,7 +2799,7 @@ def _rebuild_search_index(
                     raise RuntimeError(
                         f"canonical MBOX/catalog count mismatch for {path.name}: {actual} records, {expected} catalogued"
                     )
-                mailbox_progress.advance(expected)
+                mailbox_progress.advance(path.stat().st_size)
             mailbox_progress.finish()
             rows = catalog.execute(
                 "SELECT messages.message_pk, messages.sha256, messages.date_utc, mbox_generations.filename, "
@@ -2642,32 +2810,42 @@ def _rebuild_search_index(
                 "WHERE messages.category IN (?, ?) ORDER BY mbox_generations.filename, locations.byte_offset",
                 SEARCH_CATEGORIES,
             )
+            total_row = catalog.execute(
+                "SELECT COALESCE(SUM(locations.byte_length), 0) FROM locations "
+                "JOIN messages ON messages.message_pk = locations.message_pk WHERE messages.category IN (?, ?)",
+                SEARCH_CATEGORIES,
+            ).fetchone()
+            assert total_row is not None
             catalog.execute("BEGIN")
             indexed = 0
-            message_progress = RefreshIndexReporter(
-                f"Refreshing search index ({workers} workers)", int(expected_row[0]), "messages"
+            message_progress = ByteProgressReporter(
+                f"Rebuilding search index ({workers} workers)", int(total_row[0]), observer
             )
             message_progress.display(force=True)
             next_row = next(rows, None)
-            pending: deque[tuple[Future[PreparedRefreshIndexMessage], int]] = deque()
+            pending: deque[tuple[Future[PreparedRebuildIndexMessage], int]] = deque()
             in_flight_bytes = 0
-            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="refresh-index") as pool:
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="rebuild-index") as pool:
                 while next_row is not None or pending:
+                    if should_stop is not None and should_stop():
+                        for future, _length in pending:
+                            future.cancel()
+                        raise KeyboardInterrupt
                     while next_row is not None and len(pending) < workers:
                         message_pk, digest, date_utc, filename, offset, length = next_row
                         if QUARANTINE_MAILBOX.fullmatch(filename):
                             raise RuntimeError(f"searchable catalog message is stored in quarantine MBOX: {filename}")
-                        work = RefreshIndexWork(
+                        work = RebuildIndexWork(
                             message_pk=message_pk,
                             sha256=digest,
                             date_utc=date_utc,
                             filename=filename,
                             location=MboxLocation(byte_offset=offset, byte_length=length),
                         )
-                        if pending and in_flight_bytes + work.location.byte_length > REFRESH_INDEX_MAX_IN_FLIGHT_BYTES:
+                        if pending and in_flight_bytes + work.location.byte_length > REBUILD_INDEX_MAX_IN_FLIGHT_BYTES:
                             break
                         pending.append(
-                            (pool.submit(prepare_refresh_index_message, archive, index_attachments, work), work.location.byte_length)
+                            (pool.submit(prepare_rebuild_index_message, archive, index_attachments, work), work.location.byte_length)
                         )
                         in_flight_bytes += work.location.byte_length
                         next_row = next(rows, None)
@@ -2680,13 +2858,13 @@ def _rebuild_search_index(
                         (prepared.indexed.subject, prepared.message_pk, prepared.indexed.subject),
                     )
                     indexed += 1
-                    message_progress.advance()
+                    message_progress.advance(byte_length)
             if indexed != int(expected_row[0]):
                 raise RuntimeError(
                     f"catalog has {expected_row[0]} searchable messages but only {indexed} have canonical locations"
                 )
             message_progress.finish()
-            with RefreshIndexPublication():
+            with RebuildIndexPublication():
                 search.commit()
                 catalog.commit()
                 search.close()
@@ -2697,19 +2875,25 @@ def _rebuild_search_index(
     except KeyboardInterrupt as error:
         if catalog.in_transaction:
             catalog.rollback()
-        raise RefreshIndexInterrupted(published) from error
+        raise RebuildInterrupted(published) from error
     finally:
         catalog.close()
         temporary.unlink(missing_ok=True)
 
 
-def refresh_index(args: argparse.Namespace) -> None:
-    print(
-        "refresh-index: Ctrl-C discards the incomplete replacement; the existing search index remains unchanged",
-        file=sys.stderr,
-        flush=True,
-    )
-    rebuild_search_index(Path(args.archive), args.index_attachments, configured_workers(args.workers))
+def rebuild_command(args: argparse.Namespace) -> None:
+    """Rebuild derived catalog fields and the search index from stored mail, then processors."""
+    print("rebuild: Ctrl-C discards the new databases; the existing catalog and search index remain unchanged",
+          file=sys.stderr, flush=True)
+    result = rebuild_archive(Path(args.archive), workers=configured_workers(args.workers),
+                               index_attachments=True if args.index_attachments else None,
+                               application_version=version("mailarchiver"))
+    print(f"rebuilt from {result.messages:,} messages; {result.changed:,} catalog entries changed; "
+          f"{result.failures:,} kept previous values. Previous databases: archive.sqlite3.old, search.sqlite3.old")
+    if result.processing_database and not args.skip_processors:
+        print("re-running processors (extracted content and identity evidence)", file=sys.stderr, flush=True)
+        process_archive(argparse.Namespace(archive=args.archive, workers=args.workers, phase="content", max_jobs=None,
+                                           plugin_dir=[], installation_config=None, reprocess=True))
 
 
 def add_ingest_arguments(parser: argparse.ArgumentParser, *, require_scan: bool = True,
@@ -2749,7 +2933,8 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     processing = commands.add_parser("process", help="resume saved processing jobs without rereading source mailboxes")
     processing.add_argument("--phase", choices=("ingest", "content", "all"), default="content")
     processing.add_argument("--max-jobs", type=positive_integer, help="stop after this many content/message jobs")
-    processing.add_argument("--reprocess", action="store_true", help="queue a fresh processing generation, preserving manual identity decisions")
+    processing.add_argument("--rebuild", "--reprocess", dest="reprocess", action="store_true",
+                            help="queue a fresh processing generation, preserving manual identity decisions")
     processing.add_argument("--workers", type=worker_argument, help="override worker preferences (maximum: twice CPUs)")
     processing.add_argument("--plugin-dir", type=Path, action="append", default=[])
     processing.add_argument("--installation-config", type=Path)
@@ -2782,14 +2967,18 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     contacts_parser.add_argument("--all", action="store_true", help="include all human header addresses, not only direct Contacts")
     contacts_parser.add_argument("--format", choices=("table", "tsv", "json"), default="table")
     contacts_parser.set_defaults(function=contact_list)
-    refresh_parser = commands.add_parser("refresh-index")
-    refresh_parser.add_argument("--index-attachments", action="store_true", help="include text attachments; PDF and Office extraction is planned")
-    refresh_parser.add_argument(
+    rebuild_parser = commands.add_parser(
+        "rebuild", help="rebuild catalog metadata and the search index from stored mail, without reimporting")
+    rebuild_parser.add_argument("--index-attachments", action="store_true",
+                                  help="index text attachments (default: keep the current index's setting)")
+    rebuild_parser.add_argument(
         "--workers",
         type=worker_argument,
         help="verified-message workers; override preferences (default: half CPUs; maximum: twice CPUs)",
     )
-    refresh_parser.set_defaults(function=refresh_index)
+    rebuild_parser.add_argument("--skip-processors", action="store_true",
+                                  help="rebuild the catalog and search index only; do not re-run processors")
+    rebuild_parser.set_defaults(function=rebuild_command)
     for child in commands.choices.values():
         child.add_argument("--archive", type=Path, default=argparse.SUPPRESS,
                            help="archive directory; defaults to $MAIL_ARCHIVE_DIR")
@@ -2808,11 +2997,11 @@ def execute(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         args.function(args)
     except ContactInputError as error:
         parser.error(str(error))
-    except RefreshIndexInterrupted as error:
+    except RebuildInterrupted as error:
         message = (
-            "interrupted: the rebuilt search index was already published; no partial index exists"
+            "interrupted: the new databases were already published; no partial database exists"
             if error.published
-            else "interrupted: discarded incomplete replacement; the existing search index is unchanged"
+            else "interrupted: discarded the incomplete replacement; the existing databases are unchanged"
         )
         print(f"\n{message}\n", file=sys.stderr, flush=True)
         return 130

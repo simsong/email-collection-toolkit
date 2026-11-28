@@ -30,7 +30,7 @@ from .objects import OBJECT_NAME, ensure_object_index, index_inputs
 from .api import ArchiveContext, ContentReference, PluginStatistics, ProcessingObject, RAW_MESSAGE, RunReport
 from ..catalog import PROCESSING_DATABASE as DATABASE
 from ..catalog import require_processing_schema
-from ..storage_sync import replace_file, sync_directory
+from ..storage_sync import durable_sqlite, durable_sync, replace_file, sync_directory
 
 SCHEMA_RESOURCE = "V2__processing.sql"
 
@@ -62,7 +62,7 @@ def connect(archive: Path, *, create: bool = False, production: bool = False) ->
             replace_file(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
-    database = sqlite3.connect(path)
+    database = durable_sqlite(sqlite3.connect(path))
     try:
         database.execute("PRAGMA foreign_keys=ON")
         require_processing_schema(database)
@@ -86,6 +86,8 @@ def content_reference(path: Path) -> ContentReference:
 
 def _store_object(destination: Path, chunks: Iterable[bytes]) -> ContentReference:
     """Write, hash and fsync in one pass, then publish under the SHA-256 name."""
+    if destination.is_symlink():
+        raise ValueError("processor objects directory must not be a symlink")
     destination.mkdir(exist_ok=True)
     digest = hashlib.sha256()
     with tempfile.NamedTemporaryFile(dir=destination, prefix=".object-", delete=False) as target:
@@ -95,12 +97,25 @@ def _store_object(destination: Path, chunks: Iterable[bytes]) -> ContentReferenc
                 digest.update(chunk)
                 target.write(chunk)
             target.flush()
-            os.fsync(target.fileno())
+            durable_sync(target.fileno())
         except BaseException:
             target.close()
             temporary.unlink(missing_ok=True)
             raise
     final = destination / digest.hexdigest()
+    try:
+        if final.is_symlink():
+            raise ValueError("processor object must not be a symlink")
+        if final.exists():
+            if not final.is_file() or content_reference(final).sha256 != digest.hexdigest():
+                raise ValueError("existing processor object failed SHA-256 verification")
+            # A saved processor can hold this immutable input open. Replacing
+            # identical bytes is unnecessary and fails with Windows delete sharing.
+            temporary.unlink(missing_ok=True)
+            return ContentReference(path=final.resolve(), sha256=digest.hexdigest())
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
     if _GROUPED and os.name != "nt":
         # The file itself is already fsynced. Its directory entry only has to be
         # durable before a commit can refer to it, so one directory sync per
@@ -122,6 +137,8 @@ def _file_chunks(path: Path) -> Iterator[bytes]:
 def snapshot(archive: Path, path: Path) -> ContentReference:
     """Copy once into content-addressed storage before committing a DB reference."""
     destination = archive / "objects"
+    if destination.is_symlink():
+        raise ValueError("processor objects directory must not be a symlink")
     resolved = path.resolve()
     if (resolved.parent == destination.resolve() and OBJECT_NAME.fullmatch(resolved.name)
             and not path.is_symlink()):

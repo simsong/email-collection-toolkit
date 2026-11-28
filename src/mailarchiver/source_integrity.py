@@ -33,6 +33,9 @@ from .sources import SourceFile, SourcePlan
 LOCAL_FILE_CONTROL_ID = "local-file-sha256-v1"
 LOCAL_PARSER_CONTROL_ID = "local-parser-settings-v1"
 LOCAL_FILE_PREFIX_CONTROL_ID = "local-file-prefix-sha256-v1"
+# Size and modification time recorded with each completed checkpoint. A file whose size
+# and mtime still match is skipped without rereading it (Revalidate Archive rereads all).
+LOCAL_FILE_METADATA_CONTROL_ID = "local-file-mtime-v1"
 SOURCE_INTEGRITY_PHASE = "checking source integrity"
 
 IntegrityEvent = IntegrityDecision | IntegrityEvidence | ProgressEvent
@@ -84,6 +87,11 @@ class LocalFileIntegrityControls:
             yield _full_file_evidence(source, digest)
             yield IntegrityDecision(action="read", reason="prior checkpoint is incomplete")
             return
+        if source.byte_length == prior.byte_length and prior.modified_at_ns == source.modified_at_ns:
+            yield _full_file_evidence(source, prior.sha256)  # The checkpoint's digest, carried forward.
+            yield _metadata_evidence(source)
+            yield IntegrityDecision(action="skip", reason="size and modification time match prior checkpoint")
+            return
         if source.byte_length == prior.byte_length:
             digest = yield from _sha256_file(source)
             yield _full_file_evidence(source, digest)
@@ -128,6 +136,7 @@ class LocalFileIntegrityControls:
         if current.st_size != source.byte_length or current.st_mtime_ns != source.modified_at_ns:
             raise RuntimeError(f"source changed during ingest: {source.path}")
         yield _full_file_evidence(source, digest)
+        yield _metadata_evidence(source)
 
     def source_plan(
         self,
@@ -231,8 +240,17 @@ class LocalContainerIntegrityControls(SourceIntegrityControls):
             ),
             None,
         )
+        metadata = next(
+            (item for item in reversed(prior)
+             if item.control_id == LOCAL_FILE_METADATA_CONTROL_ID and item.evidence_kind == "metadata"),
+            None,
+        )
         if full is not None:
-            checkpoint = SourceIntegrityCheckpoint(byte_length=full.byte_length, sha256=full.value)
+            modified_at_ns = None
+            if metadata is not None and metadata.byte_length == full.byte_length and metadata.value.startswith("mtime_ns:"):
+                modified_at_ns = int(metadata.value.removeprefix("mtime_ns:"))
+            checkpoint = SourceIntegrityCheckpoint(byte_length=full.byte_length, sha256=full.value,
+                                                   modified_at_ns=modified_at_ns)
         fingerprint = self._parser_evidence(container)
         if fingerprint is not None:
             if not any(item == fingerprint for item in prior):
@@ -286,6 +304,16 @@ def _full_file_evidence(source: SourceFile, digest: str) -> IntegrityEvidence:
         evidence_kind="cryptographic-digest",
         algorithm="sha256",
         value=digest,
+        byte_length=source.byte_length,
+    )
+
+
+def _metadata_evidence(source: SourceFile) -> IntegrityEvidence:
+    return IntegrityEvidence(
+        control_id=LOCAL_FILE_METADATA_CONTROL_ID,
+        subject_id=_subject_id(source),
+        evidence_kind="metadata",
+        value=f"mtime_ns:{source.modified_at_ns}",
         byte_length=source.byte_length,
     )
 

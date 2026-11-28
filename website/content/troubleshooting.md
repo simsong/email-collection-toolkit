@@ -6,7 +6,7 @@ description = "Fix common import problems and report the ones you cannot fix."
 
 ## An import failed
 
-Select the failed run in **Window → Ingests** to see what went wrong. The
+Select the failed run in **Window → Activity…** to see what went wrong. The
 details name the source file, the position of the message in it, and the
 message's hash, so you can find the exact email. The same details are saved in
 the archive's `status/ingest-*.json` files.
@@ -33,12 +33,12 @@ imported are not rescanned automatically.
 ## IMAP problems
 
 - **Wrong password:** run `ect imap --archive ARCHIVE --check-credentials`, or
-  use **Update IMAP Password…** in Ingests. A new password is saved only after
+  use **Update IMAP Password…** in Activity. A new password is saved only after
   it works.
 - **Timeouts or "too many connections":** the download waits and retries on its
   own. Lower **Preferences → Maximum IMAP connections per account** if another
   mail program needs connections.
-- **Laptop slept:** reconnect and click **Resume** in Ingests. Nothing already
+- **Laptop slept:** reconnect and click **Resume** in Activity. Nothing already
   saved is downloaded again.
 
 ## Settings errors
