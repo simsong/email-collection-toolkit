@@ -6,6 +6,12 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a118 — clearer rebuild progress by year
+
+- In the Activity window's **Progress by year** table, the year a rebuild is
+  working on is shown in bold with dots that cycle (".", "..", "...") instead of
+  the confusing "(now)" label.
+
 ## 1.0.0a117 — Search and Sources tabs, Rescan Imports
 
 - The search window has **Search** and **Sources** tabs. **Sources** lists every

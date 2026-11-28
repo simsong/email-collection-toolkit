@@ -457,10 +457,22 @@ function rebuildWorkerTable(workers) {
 }
 
 function rebuildYearTable(status) {
-  const rows = [...status.years].sort((a, b) => a.year - b.year).map(entry => [
-    `${entry.year}${entry.year === status.current_year && status.state === "running" ? " (now)" : ""}`, integer(entry.messages),
-  ]);
-  return simpleTable(["Year", "Messages rebuilt"], rows, "coverage-table");
+  const years = [...status.years].sort((a, b) => a.year - b.year);
+  const table = simpleTable(["Year", "Messages rebuilt"], years.map(entry => [String(entry.year), integer(entry.messages)]),
+    "coverage-table");
+  // The year being worked on is bold, with dots that cycle . .. ... while it runs.
+  const current = status.state === "running" ? years.findIndex(entry => entry.year === status.current_year) : -1;
+  const row = current >= 0 ? table.querySelectorAll("tbody tr")[current] : null;
+  if (row) {
+    row.classList.add("current-year");
+    row.setAttribute("aria-current", "true");
+    const dots = document.createElement("span");
+    dots.className = "working-dots";
+    dots.setAttribute("aria-hidden", "true");
+    dots.textContent = "...";
+    row.cells[0].append(dots);
+  }
+  return table;
 }
 
 function simpleTable(labels, rows, className) {

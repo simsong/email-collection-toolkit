@@ -79,3 +79,10 @@ body { display: flex; flex-direction: column; }
 .coverage-table { border-collapse: collapse; }
 .coverage-table th, .coverage-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; }
 .coverage-table th:last-child, .coverage-table td:last-child { text-align: right; }
+
+/* Rebuild "Progress by year": the year in progress is bold, followed by . .. ... cycling. */
+.coverage-table tr.current-year td { font-weight: 700; }
+.working-dots { display: inline-block; width: 1ch; overflow: hidden; vertical-align: bottom; white-space: nowrap;
+  animation: working-dots 1.2s steps(1, end) infinite; }
+@keyframes working-dots { 0% { width: 1ch; } 33.333% { width: 2ch; } 66.667% { width: 3ch; } }
+@media (prefers-reduced-motion: reduce) { .working-dots { animation: none; width: 3ch; } }

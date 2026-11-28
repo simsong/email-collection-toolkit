@@ -47,7 +47,13 @@ def test_activity_window_lists_completed_and_running_rebuild_runs(tmp_path: Path
     expect(workers.nth(0)).to_contain_text("1986-Archive1.mbox")
     expect(workers.nth(1)).to_contain_text("1985-Sent1.mbox")
     years = detail.locator(".coverage-table tbody tr")
-    expect(years).to_have_text(["19852", "1986 (now)1"])
+    expect(years).to_have_text(["19852", "1986...1"])  # The year in progress carries the animated dots.
+    expect(years.nth(1)).to_have_class("current-year")
+    expect(years.nth(0)).not_to_have_class("current-year")
+    assert years.nth(1).locator("td").first.evaluate("cell => getComputedStyle(cell).fontWeight") == "700"
+    dots = years.nth(1).locator(".working-dots")
+    assert dots.evaluate("dots => getComputedStyle(dots).animationName") == "working-dots"
+    expect(detail).not_to_contain_text("(now)")
     rows = page.locator(".history-row")
     expect(rows).to_have_count(2)
     rows.nth(1).click()
