@@ -28,6 +28,7 @@ from mailarchiver.gui_sources import (
     update_imap_account,
 )
 from mailarchiver.imap_models import ImapAccount
+from mailarchiver.owner_rules import OwnerRules
 from tests.test_cli_processing import HEADER
 
 OWNER = "owner@example.test"
@@ -35,7 +36,7 @@ OWNER = "owner@example.test"
 
 def _import(archive: Path, roots: list[str]) -> None:
     run_ingest(IngestRequest(archive=archive, roots=roots, scan_policy="not-scanned",
-                             owner_rules={"include": [OWNER], "exclude": []}), terminal=False)
+                             owner_rules=OwnerRules(include=[OWNER], exclude=[])), terminal=False)
 
 
 def _source(tmp_path: Path) -> Path:
