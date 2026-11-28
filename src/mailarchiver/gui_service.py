@@ -41,6 +41,7 @@ from .search_completion import search_suggestions as search_suggestions
 from .gui_provenance import AttachedOrigin, attached_messages, attached_origins
 from .encoding import decode_text
 from .mailbox_tree import MailboxSelection
+from .catalog import SearchIndexRebuildRequired
 from .mailsearch import (
     MessageHeader,
     SearchTerms,
@@ -50,7 +51,6 @@ from .mailsearch import (
     read_message_bytes,
     search_header_page,
     search_result_count,
-    warm_search_vocabulary,
 )
 from .mbox import frame_message
 from .message import decoded_message_header, display_entity
@@ -91,6 +91,7 @@ SAFE_OPEN_SUFFIXES = {
 
 class SearchPage(BaseModel):
     error: str | None = None
+    rebuild_required: bool = False
     results: list[MessageHeader]
     offset: int
     has_more: bool
@@ -99,6 +100,7 @@ class SearchPage(BaseModel):
 
 class SearchCount(BaseModel):
     total: int | None
+    rebuild_required: bool = False
     immediate_limit: int = IMMEDIATE_SEARCH_LIMIT
 
 
@@ -214,11 +216,14 @@ def search_page(
     except ValueError as error:
         return SearchPage(results=[], offset=offset, has_more=False, error=str(error))
     fetch_limit = limit + 1 if limit else 0
-    page = search_header_page(
-        archive, terms, fetch_limit, offset, SortField(sort_by),
-        SortDirection(direction), search_attachments, selections, find_older=True,
-        complete_sort=True,
-    )
+    try:
+        page = search_header_page(
+            archive, terms, fetch_limit, offset, SortField(sort_by),
+            SortDirection(direction), search_attachments, selections, find_older=True,
+            complete_sort=True,
+        )
+    except SearchIndexRebuildRequired as error:
+        return SearchPage(results=[], offset=offset, has_more=False, error=str(error), rebuild_required=True)
     results = page.results[:limit] if limit else page.results
     tagged = attached_messages(archive, [row.message_pk for row in results])
     for row in results:
@@ -229,14 +234,6 @@ def search_page(
         highlight_terms=_highlight_terms(terms),
         has_more=bool(limit and len(page.results) > limit),
     )
-
-
-def warm_search(archive: Path) -> None:
-    """Prepare legacy search vocabulary in the background; failures surface on search."""
-    try:
-        warm_search_vocabulary(archive)
-    except (OSError, ValueError, sqlite3.Error):
-        return
 
 
 def search_count(
@@ -253,10 +250,13 @@ def search_count(
     selections = [MailboxSelection.from_token(token) for token in mailbox_selections or []]
     terms = parse_query(query)
     terms.identity_messages = identity_messages
-    observed = search_result_count(
-        archive, terms, search_attachments, selections,
-        maximum=immediate_limit + 1,
-    )
+    try:
+        observed = search_result_count(
+            archive, terms, search_attachments, selections,
+            maximum=immediate_limit + 1,
+        )
+    except SearchIndexRebuildRequired:
+        return SearchCount(total=None, immediate_limit=immediate_limit, rebuild_required=True)
     return SearchCount(
         total=observed if observed <= immediate_limit else None,
         immediate_limit=immediate_limit,

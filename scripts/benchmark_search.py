@@ -6,8 +6,7 @@ Purpose: a repeatable check that a word search shows its first page quickly and
 completes its count, so search-latency regressions are visible across commits.
 How it works: for each query, a fresh Python process (like a newly launched app)
 calls the same ``gui_service.search_count`` and ``search_page`` the desktop app
-uses, first once and then again warm. ``--vocabulary-cache empty`` points the
-process at an empty vocabulary cache to time a never-before-searched index.
+uses, first once and then again warm.
 Results are appended as JSON lines; ``--check`` fails when a goal is missed.
 System role: backs ``make benchmark-search``; it only opens archives read-only.
 """
@@ -16,11 +15,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import platform
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -50,7 +47,6 @@ class BenchmarkResult(BaseModel):
     label: str
     machine: str
     python: str
-    vocabulary_cache: str
     archive_messages: int
     queries: list[QueryTiming]
     first_page_goal_met: bool
@@ -80,23 +76,16 @@ def child(archive: Path, query: str) -> QueryTiming:
                        warm_page_seconds=warm_page, warm_count_seconds=warm_count)
 
 
-def run(archive: Path, queries: list[str], label: str, empty_cache: bool) -> BenchmarkResult:
+def run(archive: Path, queries: list[str], label: str) -> BenchmarkResult:
     from mailarchiver.gui_service import searchable_message_count
 
     timings: list[QueryTiming] = []
-    with tempfile.TemporaryDirectory(prefix="ect-search-vocabulary-") as empty:
-        environment = dict(os.environ)
-        if empty_cache:
-            environment["MAILARCHIVER_SEARCH_VOCABULARY_CACHE"] = empty
-        for query in queries:
-            if empty_cache:
-                for stored in Path(empty).glob("*"):
-                    stored.unlink()
-            output = subprocess.run(
-                [sys.executable, __file__, "--child", "--archive", str(archive), query],
-                check=True, capture_output=True, text=True, env=environment,
-            ).stdout
-            timings.append(QueryTiming.model_validate_json(output.strip().splitlines()[-1]))
+    for query in queries:
+        output = subprocess.run(
+            [sys.executable, __file__, "--child", "--archive", str(archive), query],
+            check=True, capture_output=True, text=True,
+        ).stdout
+        timings.append(QueryTiming.model_validate_json(output.strip().splitlines()[-1]))
     return BenchmarkResult(
         recorded_at=datetime.now(UTC).isoformat(timespec="seconds"),
         git_commit=_git("rev-parse", "--short", "HEAD"),
@@ -104,7 +93,6 @@ def run(archive: Path, queries: list[str], label: str, empty_cache: bool) -> Ben
         label=label,
         machine=f"{platform.system()} {platform.release()} {platform.machine()}",
         python=platform.python_version(),
-        vocabulary_cache="empty" if empty_cache else "stored",
         archive_messages=searchable_message_count(archive),
         queries=timings,
         first_page_goal_met=all(item.first_page_seconds < FIRST_PAGE_GOAL_SECONDS for item in timings),
@@ -118,7 +106,6 @@ def main() -> None:
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("queries", nargs="*", default=["gandalf"])
     parser.add_argument("--label", default="")
-    parser.add_argument("--vocabulary-cache", choices=("stored", "empty"), default="stored")
     parser.add_argument("--results", type=Path, default=DEFAULT_RESULTS)
     parser.add_argument("--check", action="store_true", help="exit 1 when a latency goal is missed")
     parser.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
@@ -127,7 +114,7 @@ def main() -> None:
     if arguments.child:
         print(child(archive, arguments.queries[0]).model_dump_json())
         return
-    result = run(archive, arguments.queries, arguments.label, arguments.vocabulary_cache == "empty")
+    result = run(archive, arguments.queries, arguments.label)
     arguments.results.parent.mkdir(parents=True, exist_ok=True)
     with arguments.results.open("a", encoding="utf-8") as handle:
         handle.write(result.model_dump_json() + "\n")

@@ -168,7 +168,7 @@ and recorded results.
 `make benchmark-search BENCH_ARCHIVE=<archive>` times desktop text search end to
 end on an existing archive, opened read-only. Each query (`BENCH_QUERIES`,
 default `gandalf`) runs in a fresh process: first page, count, then both warm.
-`BENCH_VOCABULARY=empty` times an index never searched before. Rows go to
+Rows go to
 `benchmarks/search/results.jsonl`; the target fails when a first page takes 1 s
 or a first page plus count takes 5 s. See
 [the search benchmark README](../benchmarks/search/README.md).

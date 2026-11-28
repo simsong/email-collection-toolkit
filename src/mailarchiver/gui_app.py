@@ -91,7 +91,6 @@ from .plugin_api import PluginManifest
 from .gui_processing import abort_processing, picker_page, picker_search, PickerSearchRequest, plugin_inventory, remember_interrupted_request, resume_request, save_identity, source_label, unfinished_work
 from .processing.api import ProcessorManifest
 from .processing.identities import IdentityFilter, IdentityMessages, ManualDecision
-from .search_text import index_lineage
 from .gui_service import (
     MessagePreview,
     MessageView,
@@ -109,7 +108,6 @@ from .gui_service import (
     search_page,
     search_suggestions,
     searchable_message_count,
-    warm_search,
     write_attachment,
     write_message,
     write_messages_mbox,
@@ -996,29 +994,11 @@ class GuiApi:
         self._suggestion_closed = False
         self._tree_cache: dict[bool, list[dict[str, Any]]] = {}
         self._message_count: int | None = None
-        self._warm_lock = Lock()
-        self._warmed_lineage: tuple[str, int, int, int] | None = None
         self._ingest_window_lock = Lock()
         self._ingest_window_api: IngestWindowApi | None = None
 
     def set_window(self, window: Any) -> None:
         self.window = window
-
-    def _warm_search_if_replaced(self) -> None:
-        """Start the one-time vocabulary scan when a window opens an index or a rebuild replaces it.
-
-        In-place index writes keep the file's lineage and reuse its stored scan, so
-        ingest publishes never rescan; only a new file (open, rebuild, restore) does.
-        """
-        try:
-            lineage = index_lineage(self._archive() / "search.sqlite3")
-        except OSError:
-            return
-        with self._warm_lock:
-            if lineage == self._warmed_lineage:
-                return
-            self._warmed_lineage = lineage
-        Thread(target=warm_search, args=(self._archive(),), name="search-warmup", daemon=True).start()
 
     def invalidate_archive(self) -> None:
         """Discard derived view caches after a writer may have published."""
@@ -1033,15 +1013,11 @@ class GuiApi:
             self._preview_error = None
         self._tree_cache.clear()
         self._message_count = None
-        if self.archive is not None and _is_archive(self.archive):
-            self._warm_search_if_replaced()
 
     # JSON bridge results come from validated Pydantic models; values can be
     # nested objects, arrays, or scalars at this external JavaScript boundary.
     def status(self, *, opened_in_new_window: bool = False) -> dict[str, Any]:
         ready = self.archive is not None and _is_archive(self.archive)
-        if ready:
-            self._warm_search_if_replaced()
         if ready and self._message_count is None:
             self._message_count = searchable_message_count(self._archive())
         return GuiStatus(
@@ -1189,6 +1165,10 @@ class GuiApi:
             search_attachments, mailbox_selections,
             IdentityMessages.model_validate(identity_messages) if identity_messages is not None else None,
         )
+        if page.rebuild_required and self.application is not None:
+            self.application.offer_rebuild(
+                self, "This archive's search index was built by an older version, so search cannot use it. "
+                "Search works again once the databases are rebuilt.")
         if page.error is not None:
             return page.model_dump(mode="json")
         if self.search_window is not None:
@@ -2734,6 +2714,10 @@ class PyWebViewApplication:
                self.create_search_window(self.controller.new_search_window(document)))
         return self.start_import(api, [], processing_request=request)
 
+    def offer_rebuild(self, api: GuiApi, reason: str) -> bool:
+        """Pop up the rebuild confirmation when a search finds an index it cannot use."""
+        return self._rebuild_document(api, "Rebuild needed before searching", reason)
+
     def rebuild_active_document(self) -> bool:
         """File > Rebuild Databases…: confirm, then rebuild derived data for the active archive.
 
@@ -2743,7 +2727,12 @@ class PyWebViewApplication:
         so manual identity decisions are kept. Byte progress appears in the status line.
         """
         api = self.active_api()
-        if api is None or api.document is None or api.document.path is None or api.window is None or api.search_window is None:
+        if api is None:
+            return False
+        return self._rebuild_document(api, "Rebuild databases?", "")
+
+    def _rebuild_document(self, api: GuiApi, title: str, reason: str) -> bool:
+        if api.document is None or api.document.path is None or api.window is None or api.search_window is None:
             return False
         document = api.document
         archive = document.path
@@ -2759,13 +2748,14 @@ class PyWebViewApplication:
             return False
 
         def rebuild() -> None:
-            title = "Rebuild databases?"
             message = (
-                f"Archive: {document.display_path}\n\n"
+                (f"{reason}\n\n" if reason else "")
+                + f"Archive: {document.display_path}\n\n"
                 "Re-read every stored message and rebuild its catalog details (Message-ID, sender, recipients, "
-                "subject, date) and the search index, then re-run processors. This may take a long time; search "
-                "keeps working on the current databases until the new ones are finished.\n\n"
-                "Stored mail, sources and your own decisions are kept. No mail is downloaded. The previous "
+                "subject, date) and the search index, then re-run processors. This may take a long time; "
+                + ("search works again when the new databases are finished.\n\n" if reason else
+                   "search keeps working on the current databases until the new ones are finished.\n\n")
+                + "Stored mail, sources and your own decisions are kept. No mail is downloaded. The previous "
                 "databases are kept as archive.sqlite3.old and search.sqlite3.old."
             )
             confirmed = (macos_alert(title, message, ("Rebuild", "Cancel")) == 0 if sys.platform == "darwin"

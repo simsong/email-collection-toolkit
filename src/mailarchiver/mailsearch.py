@@ -37,6 +37,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from .catalog import SEARCH_CONTENT_FOLDED, SearchIndexRebuildRequired
 from .sqlite_paths import sqlite_uri
 
 from .archive_path import add_archive_argument, require_archive
@@ -48,9 +49,7 @@ from .search import SEARCH_CATEGORIES, decoded_part, html_text
 from .mime_tree import walk_mime
 from .processing.identities import IdentityMessages
 from .search_selectors import SELECTORS, SearchStatement, prepare_names, selector_for
-from .search_text import (
-    SearchIndexStamp, compile_text, has_symbols, quote_fts, search_fold, search_vocabulary,
-)
+from .search_text import has_symbols, quote_fts, search_fold, search_words
 
 DEFAULT_LIMIT = 10
 RECENT_FTS_SCAN_LIMIT = 10_000
@@ -75,9 +74,6 @@ class SearchTerms(BaseModel):
     after: list[CalendarDate] = Field(default_factory=list)
     text: list[str] = Field(default_factory=list)
     literal_text: list[str] = Field(default_factory=list)
-    fts_matches: list[str] = Field(default_factory=list)
-    split_matches: list[str] = Field(default_factory=list)
-    phrase_checks: list[str] = Field(default_factory=list)
 
 
 class MessageHeader(BaseModel):
@@ -125,10 +121,6 @@ def parse_terms(tokens: list[str]) -> SearchTerms:
     return terms
 
 
-def fts_query(words: list[str]) -> str:
-    return " AND ".join(quote_fts(search_fold(word)) for word in words)
-
-
 def _quoted_symbol_terms(query: str, tokens: list[str]) -> list[str]:
     """Retain quote intent that POSIX shlex removes, including escaped quotes."""
     raw_tokens = re.finditer(r'''(?:[^ \t\r\n"'\\]+|\\[\s\S]|"(?:\\[\s\S]|[^"\\])*"|'[^']*')+''', query)
@@ -154,66 +146,39 @@ def parse_query(query: str) -> SearchTerms:
         raise
 
 
-def _prepare_text(database: sqlite3.Connection, terms: SearchTerms, attachments: bool,
-                  stamp: SearchIndexStamp | None) -> SearchTerms:
-    if not terms.text:
-        return terms
-    vocabulary = search_vocabulary(database, stamp, attachments)
-    compiled = [compile_text(term, vocabulary, database, attachments) for term in terms.text]
-    return terms.model_copy(update={
-        "fts_matches": [item.match for item in compiled],
-        "split_matches": [item.split_match for item in compiled],
-        "phrase_checks": [term for term, item in zip(terms.text, compiled, strict=True) if item.check_phrase],
-    })
-
-
 def _text_predicate(terms: SearchTerms, content: str = "content", index: int | None = None,
-                    table: str = "message_fts", fts_match: bool = True) -> SearchStatement:
+                    fts_match: bool = True) -> SearchStatement:
+    """Match folded words with FTS; quoted symbols also need a literal check in that text."""
     selected = terms.text if index is None else [terms.text[index]]
-    matches = terms.fts_matches or [fts_query([term]) for term in terms.text]
-    splits = terms.split_matches or [""] * len(terms.text)
-    broad = [f"({match} OR ({split}))" if split else match
-             for match, split in zip(matches, splits, strict=True)]
-    selected_matches = broad if index is None else [broad[index]]
-    match = " AND ".join(value for value in selected_matches if value)
-    # Callers that already restricted rows to the broad match omit the per-row MATCH.
+    match = _broad_match(terms.model_copy(update={"text": selected}))
+    # Callers that already restricted rows to the FTS match omit the per-row MATCH.
     clauses = [f"{content} MATCH ?"] if match and fts_match else []
     parameters: list[str | int] = [match] if match and fts_match else []
     for term in selected:
-        term_index = terms.text.index(term)
-        if splits[term_index]:
-            rowid = content.removesuffix("content") + "rowid"
-            clauses.append(f"({rowid} IN (SELECT rowid FROM search.{table} WHERE {table} MATCH ?) "
-                           f"OR search_split_phrase({content}, ?))")
-            parameters.extend((matches[term_index], search_fold(term)))
         if term in terms.literal_text:
             clauses.append(f"search_literal({content}, ?)")
             parameters.append(search_fold(term))
-        elif not matches[terms.text.index(term)]:
+        elif not _word_match(term):
             clauses.append("0")
-        if terms.fts_matches and matches[term_index]:
-            clauses.append(f"search_native_phrase({content}, ?)")
-            parameters.append(search_fold(term))
-        if term in terms.phrase_checks:
-            clauses.append(f"search_phrase({content}, ?)")
-            parameters.append(search_fold(term))
     return SearchStatement(sql=" AND ".join(clauses) or ("0" if fts_match else "1"), parameters=parameters)
 
 
 def _broad_match(terms: SearchTerms) -> str:
-    """FTS expression every candidate of a body search satisfies, before content checks."""
-    matches = terms.fts_matches or [fts_query([term]) for term in terms.text]
-    splits = terms.split_matches or [""] * len(terms.text)
-    return " AND ".join(f"({match} OR ({split}))" if split else match
-                        for match, split in zip(matches, splits, strict=True) if match)
+    """FTS expression every candidate of a body search satisfies, before literal checks."""
+    return " AND ".join(match for match in (_word_match(term) for term in terms.text) if match)
+
+
+def _word_match(term: str) -> str:
+    """One term's folded words as an FTS phrase; symbols-only text has no words."""
+    words = search_words(search_fold(term))
+    return quote_fts(" ".join(words)) if words else ""
 
 
 def _date_walk_statement(terms: SearchTerms, limit: int, offset: int) -> SearchStatement:
     """Walk the newest-first date index, testing each message against the precomputed FTS hits.
 
-    For frequent words a page fills after a few hundred messages, so neither
-    every hit's date nor every hit's content is read. Content checks run only
-    on messages already known to be broad FTS hits.
+    For frequent words a page fills after a few hundred messages, so most hits'
+    dates are never read. Literal checks read text only for FTS hits.
     """
     text = _text_predicate(terms, "f.content", fts_match=False)
     sql = (
@@ -222,8 +187,8 @@ def _date_walk_statement(terms: SearchTerms, limit: int, offset: int) -> SearchS
         "SELECT m.message_pk, m.sha256, sender.address AS sender, m.subject, m.date_utc "
         "FROM messages m INDEXED BY messages_date_message "
         "CROSS JOIN search.message_metadata metadata ON metadata.sha256 = m.sha256 "
-        "CROSS JOIN search.message_fts f ON f.rowid = metadata.message_fts_rowid "
-        "CROSS JOIN email_addresses sender ON sender.address_pk = m.sender_address_pk "
+        + ("CROSS JOIN search.message_fts f ON f.rowid = metadata.message_fts_rowid " if text.sql != "1" else "")
+        + "CROSS JOIN email_addresses sender ON sender.address_pk = m.sender_address_pk "
         f"WHERE m.category IN (?, ?) AND metadata.message_fts_rowid IN hits AND {text.sql} "
         "ORDER BY m.date_utc DESC, m.message_pk DESC LIMIT ? OFFSET ?) "
         "SELECT c.message_pk, COALESCE(group_concat(DISTINCT recipient.address), ''), "
@@ -282,7 +247,7 @@ def _search_predicate(
         if search_attachments:
             for index, _term in enumerate(terms.text):
                 predicate = _text_predicate(terms, index=index)
-                attached = _text_predicate(terms, index=index, table="attachment_fts")
+                attached = _text_predicate(terms, index=index)
                 clauses.append(
                     f"m.sha256 IN (SELECT sha256 FROM search.message_fts WHERE {predicate.sql} "
                     f"UNION SELECT sha256 FROM search.attachment_fts WHERE {attached.sql})"
@@ -522,29 +487,21 @@ def _is_plain_recent_text_search(
 
 
 @contextmanager
-def _search_session(archive: Path) -> Iterator[tuple[sqlite3.Connection, SearchIndexStamp | None]]:
-    """Keep page/count vocabulary preparation on the same read-only snapshot contract."""
+def _search_session(archive: Path) -> Iterator[sqlite3.Connection]:
+    """Open the catalog with the search index attached, in one read-only snapshot."""
     catalog_path, search_path = archive / "archive.sqlite3", archive / "search.sqlite3"
     if not catalog_path.is_file() or not search_path.is_file():
         raise ValueError(f"{archive} must contain archive.sqlite3 and search.sqlite3")
     database = sqlite3.connect(sqlite_uri(catalog_path), uri=True)
     try:
-        before = SearchIndexStamp.read(search_path)
         database.execute("ATTACH DATABASE ? AS search", (sqlite_uri(search_path),))
         database.execute("BEGIN")
         database.execute("SELECT version FROM search.schema_info").fetchone()
-        after = SearchIndexStamp.read(search_path)
-        stamp = before if before == after and database.execute("PRAGMA search.journal_mode").fetchone()[0] == "delete" else None
-        yield database, stamp
+        if database.execute("PRAGMA search.user_version").fetchone()[0] != SEARCH_CONTENT_FOLDED:
+            raise SearchIndexRebuildRequired()
+        yield database
     finally:
         database.close()
-
-
-def warm_search_vocabulary(archive: Path) -> None:
-    """Scan (or load the stored scan of) legacy vocabulary before the first text search."""
-    with _search_session(archive) as (database, stamp):
-        if stamp is not None:
-            search_vocabulary(database, stamp, False)
 
 
 def search_header_page(
@@ -559,10 +516,9 @@ def search_header_page(
     find_older: bool = False,
     complete_sort: bool = False,
 ) -> SearchHeaderPage:
-    with _search_session(archive) as (database, stamp):
+    with _search_session(archive) as database:
         prepare_names(database, archive)
         terms = terms.model_copy(update={"address_names": True})
-        terms = _prepare_text(database, terms, search_attachments, stamp)
         fields = ("message_pk", "recipients", "sender", "subject", "date_utc", "attachment_count")
         if (limit and sort_by is SortField.DATE and direction is SortDirection.DESCENDING
                 and _is_plain_text_search(terms, sort_by, direction, search_attachments, mailbox_selections)
@@ -604,10 +560,9 @@ def search_result_count(
     maximum: int | None = None,
 ) -> int:
     """Count searchable matches, stopping at ``maximum`` when supplied."""
-    with _search_session(archive) as (database, stamp):
+    with _search_session(archive) as database:
         prepare_names(database, archive)
         terms = terms.model_copy(update={"address_names": True})
-        terms = _prepare_text(database, terms, search_attachments, stamp)
         statement = _count_statement(terms, search_attachments, mailbox_selections, maximum)
         return int(database.execute(statement.sql, statement.parameters).fetchone()[0])
 

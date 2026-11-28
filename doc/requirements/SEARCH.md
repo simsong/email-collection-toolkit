@@ -10,8 +10,10 @@ platform/release acceptance. Deferred features live in [plans](../plans/README.m
 Search ignores case and combining accents and treats `ß`/`ẞ` as `ss`, without
 stemming or a case-sensitivity option. The same normalization applies to query
 text, indexed derivatives, subject/address/name selectors and suggestions.
-Existing word indexes remain usable without reindexing: query compilation must
-include native vocabulary spellings that normalize to the requested words.
+Indexed text is folded before it is written, and a new index is marked as
+folded. Search never adapts to older, unfolded indexes: searching an unmarked
+index reports that the databases must be rebuilt, and the desktop app offers
+the rebuild in a pop-up, instead of returning incomplete results.
 Canonical bytes, hashes, displayed headers and previews remain unchanged.
 Inside quotes, punctuation and symbols are significant, including prefixes,
 suffixes and separators: `"CACM-"` requires the hyphen and `"Ham+Sandwhich"`
@@ -123,10 +125,9 @@ remain address-specific; organization names retain their domain-based membership
 
 On a warm machine, a single-word desktop search shows its first page in under
 1 s and completes page plus count in under 5 s, including the first search after
-launch on an index searched before. Legacy-index compatibility must not read the
-text of every message that merely contains a one-letter fragment of the word.
+launch or after a rebuild. A search must not wait for any scan of the whole index.
 `make benchmark-search` measures this end to end on a real archive; the
-natural-search tests check candidate pruning and date-walk equivalence.
+natural-search tests check date-walk equivalence.
 
 ## Autocomplete responsiveness
 

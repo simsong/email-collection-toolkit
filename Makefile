@@ -493,13 +493,12 @@ benchmark-import:
 
 # End-to-end desktop search latency on an existing archive, opened read-only;
 # appends to benchmarks/search/results.jsonl. BENCH_ARCHIVE (required) names the
-# archive, BENCH_QUERIES the words (default gandalf), BENCH_VOCABULARY=empty times
-# a never-searched index, BENCH_LABEL tags the row. Fails if a latency goal is missed.
+# archive, BENCH_QUERIES the words (default gandalf), BENCH_LABEL tags the row.
+# Fails if a latency goal is missed.
 BENCH_QUERIES ?= gandalf
-BENCH_VOCABULARY ?= stored
 benchmark-search:
 	@test -n "$(BENCH_ARCHIVE)" || { echo "set BENCH_ARCHIVE=/path/to/archive"; exit 2; }
-	uv run python scripts/benchmark_search.py --check --archive "$(BENCH_ARCHIVE)" --vocabulary-cache $(BENCH_VOCABULARY) $(if $(BENCH_LABEL),--label "$(BENCH_LABEL)") $(BENCH_QUERIES)
+	uv run python scripts/benchmark_search.py --check --archive "$(BENCH_ARCHIVE)" $(if $(BENCH_LABEL),--label "$(BENCH_LABEL)") $(BENCH_QUERIES)
 
 data-quality-summary:
 	@test -d "$(AUDIT_OUTPUT)" || { echo "missing audit output directory: $(AUDIT_OUTPUT)"; exit 2; }

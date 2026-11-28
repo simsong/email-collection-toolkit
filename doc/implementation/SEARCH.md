@@ -214,34 +214,15 @@ results without replacing the search service.
 ## Natural search matching
 
 Natural search shares `search_text.search_fold`: Unicode case folding expands
-sharp s to `ss`, then NFD decomposition removes combining accents. New body
-and attachment FTS writes normalize only search content; previews and canonical
-mail retain their original text. The existing V1 index needs no rebuild.
-For legacy content, connection-local `fts5vocab` tables supply exceptional
-spellings whose normalization differs from their native token. Query compilation
-expands those words into FTS phrases; more than 64 phrase combinations use
-ANDed word alternatives followed by a normalized token-adjacency check.
-Legacy words split by combining accents are found with adjacent fragment pairs:
-every split begins with (proper prefix, next fragment) and ends with (fragment,
-proper suffix), so the split expression ANDs one OR-list of each, O(n²) phrases
-filtered by one indexed vocabulary lookup. It replaces both per-fragmentation
-phrases and the old one-letter prefix fallback, which made a 1.2M-message archive
-read 68,000 bodies for `gandalf`; pairs leave about 2,000. Native matches whose
-content contains combining marks and all extra
-candidates pass the normalized token-adjacency check, including Latin words.
-This also rejects legacy fragments that become interior parts of a normalized word.
-A bounded process cache follows the index's path, inode, size and nanosecond
-timestamps, sampled across attachment/read-lock acquisition. WAL indexes bypass
-that cache. The full vocabulary scan takes 13–30 s on a 7.8 GB index, so each
-scan is also stored as JSON under the user cache folder (or
-`MAILARCHIVER_SEARCH_VOCABULARY_CACHE`), keeping the eight newest. Stored scans
-are keyed by index-file lineage (path, device, inode, birth time), not by every
-write: writers fold content before indexing it, so in-place writes add no
-exceptional spellings and an earlier scan of the same file remains a harmless
-superset. A rebuild or restore replaces the file and is rescanned once. Scans are
-serialized, and the desktop app starts one in the background whenever a window
-opens an archive or sees its index file replaced, so the first search after a
-rebuild does not wait for it.
+sharp s to `ss`, then NFD decomposition removes combining accents. Body and
+attachment FTS writes fold search content; previews and canonical mail retain
+their original text. `create_search` marks a new index with
+`PRAGMA user_version = 1` (`SEARCH_CONTENT_FOLDED`); opening an existing
+unmarked index for writing raises `UnsupportedSearchSchemaError`, so import
+rebuilds it, and searching one raises `SearchIndexRebuildRequired`. The desktop
+window then shows the File > Rebuild Databases… confirmation with the reason.
+A query word is folded and matched as one FTS phrase, so no vocabulary scan,
+accent-split matching or per-message content check is needed for plain words.
 POSIX quote intent survives parsing for symbol-containing text; `search_literal`
 checks the normalized literal and its own word boundaries in each matching FTS table before counts, sorts
 or limits. Symbols-only quotes scan indexed text. Selectors and suggestions use
@@ -284,7 +265,7 @@ when the list is limited. No archive schema or content-index rebuild is needed.
 IDs. Viewer body selection, `preferred_body_text`, attachment text and inventory
 use that boundary; the streaming processor inventory also excludes descendants
 of an already inventoried attachment. `mailsearch._search_session` shares the
-read-only attached-database transaction and vocabulary stamp between page and count.
+read-only attached-database transaction and folded-index check for page and count.
 Transform-codec `LookupError` is handled by the ordinary text decoding fallback.
 ID-bearing reader walks receive `OriginalMimeParts` and parse decoded RFC child
 trees, matching production's preflight numbering. Failed encoded children remain

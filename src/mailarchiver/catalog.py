@@ -30,8 +30,24 @@ SEARCH_SCHEMA = "V1__search.sql"
 PROCESSING_DATABASE = "processing.sqlite3"
 
 
+# PRAGMA user_version of a search.sqlite3 whose FTS content was folded (search_fold)
+# before indexing. Search requires it; older indexes must be rebuilt.
+SEARCH_CONTENT_FOLDED = 1
+SEARCH_REBUILD_MESSAGE = (
+    "This archive's search index was built by an older version and must be rebuilt before you can "
+    "search. Rebuild the databases (File > Rebuild Databases…, or ect rebuild)."
+)
+
+
 class UnsupportedSearchSchemaError(RuntimeError):
     """The disposable search database must be rebuilt from canonical mail."""
+
+
+class SearchIndexRebuildRequired(ValueError):
+    """Searching an index without folded content would miss accented and case-variant words."""
+
+    def __init__(self) -> None:
+        super().__init__(SEARCH_REBUILD_MESSAGE)
 
 
 def _schema(name: str) -> str:
@@ -211,9 +227,12 @@ def create_search(path: Path, *, check_same_thread: bool = True) -> sqlite3.Conn
             try:
                 _require_version(database, tables, SEARCH_SCHEMA_VERSION, "search")
                 _require_search_layout(database, tables)
+                if database.execute("PRAGMA user_version").fetchone()[0] != SEARCH_CONTENT_FOLDED:
+                    raise RuntimeError("search index predates folded search text")
             except RuntimeError as error:
                 raise UnsupportedSearchSchemaError(str(error)) from error
-        database.executescript("BEGIN IMMEDIATE;\n" + _schema(SEARCH_SCHEMA) + "\nCOMMIT;")
+        marker = "" if tables else f"PRAGMA user_version = {SEARCH_CONTENT_FOLDED};\n"
+        database.executescript("BEGIN IMMEDIATE;\n" + _schema(SEARCH_SCHEMA) + "\n" + marker + "COMMIT;")
         return database
     except BaseException:
         database.close()
