@@ -24,10 +24,34 @@
       </header>
 
       <nav class="archive-tools no-print" aria-label="Archive tools">
-        <button id="name-picker" type="button">Names and addresses</button>
-        <button id="institution-picker" type="button">Institutions</button>
-        <button id="processing-open" type="button" disabled>Continue Processing</button>
+        <div class="view-tabs" role="tablist" aria-label="Archive view">
+          <button id="tab-search" type="button" role="tab" aria-selected="true" aria-controls="search-view">Search</button>
+          <button id="tab-sources" type="button" role="tab" aria-selected="false" aria-controls="sources-panel" tabindex="-1">Sources</button>
+        </div>
+        <button id="name-picker" type="button">Names and addresses…</button>
+        <button id="institution-picker" type="button">Institutions…</button>
+        <button id="processing-open" type="button" disabled>Rescan Imports…</button>
       </nav>
+      <section id="sources-panel" class="sources-panel no-print" role="tabpanel" aria-labelledby="tab-sources" hidden>
+        <p class="sources-help">Checked sources are included in <strong>Rescan Imports…</strong>. Files unchanged since their last import are skipped; mail servers are checked for new messages.</p>
+        <ul id="source-list" class="source-list" aria-label="Imported sources"></ul>
+        <p id="sources-empty" class="sources-help" hidden>No sources yet. Choose File → Import Mail… to import mail.</p>
+      </section>
+      <dialog id="imap-config-dialog" aria-labelledby="imap-config-heading">
+        <form id="imap-config-form" method="dialog">
+          <h2 id="imap-config-heading">IMAP account</h2>
+          <label>Server <input id="imap-config-server" required autocomplete="off" spellcheck="false"></label>
+          <label>Port <input id="imap-config-port" type="number" min="1" max="65535" required></label>
+          <label>Security <select id="imap-config-tls"><option value="implicit">TLS</option><option value="starttls">STARTTLS</option></select></label>
+          <label>Username <input id="imap-config-username" required autocomplete="off" spellcheck="false"></label>
+          <label>Password <input id="imap-config-password" type="password" autocomplete="new-password" placeholder="Unchanged"></label>
+          <p id="imap-config-error" class="failure" role="alert"></p>
+          <div class="dialog-actions">
+            <button id="imap-config-cancel" type="button">Cancel</button>
+            <button id="imap-config-save" type="submit">Save</button>
+          </div>
+        </form>
+      </dialog>
       <dialog id="processing-dialog" aria-labelledby="processing-heading">
         <h2 id="processing-heading">Incomplete work</h2>
         <p id="processing-detail"></p>
@@ -193,5 +217,6 @@
   <script src="vendor/tabulator/dist/js/tabulator.min.js"></script>
     <script src="app.js"></script>
     <script src="processing.js"></script>
+    <script src="sources.js"></script>
   </body>
 </html>

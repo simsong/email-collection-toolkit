@@ -102,7 +102,7 @@ phase checkboxes. Leaving suspended and closing the dialog preserve work and ask
 again on reopening; Continue Import resumes both ingest and content processing
 using saved policy. Initially focus Leave import suspended so Enter preserves
 the checkpoint. Focus changes and count/name/message navigation must not
-repeat the automatic prompt; Continue Processing remains an explicit way to open it.
+repeat the automatic prompt; Continue Importing… remains an explicit way to open it.
 Stop import cancels all displayed saved traversal and pending,
 running or failed jobs under the archive writer lease, retaining archived mail,
 source checkpoints and run history. A changed source history blocks a stale stop request.
@@ -440,7 +440,16 @@ including senders from prior imports and applying exclusions. Detected addresses
 are derived evidence, never expanded into YAML or reused as implicit owner rules.
 Existing Sent/Archive classifications remain unchanged by rule edits or
 reindexing; correcting historical misclassification requires a fresh rebuild.
-CLI processing, Continue Processing and explicit rebuilding replay their saved
+The search window has **Search** and **Sources** tabs (real ARIA tabs; arrow keys
+move between them). Sources replaces the search view with every imported top-level
+directory or file and every IMAP account, each with a checkbox saying whether
+Rescan Imports… includes it; unavailable local sources are marked. IMAP rows have
+**Config…** for server, port, security, username and password; changing the
+endpoint requires the password, which is verified by logging in and stored only in
+the system keychain. Edits to config.yaml hold the archive writer lease. Buttons
+that open a window or dialog end in "…" (Names and addresses…, Institutions…,
+Continue Importing… / Rescan Imports…).
+CLI processing, Continue Importing… and explicit rebuilding replay their saved
 ingest policy without overwriting later owner defaults in `config.yaml`.
 Only an explicitly requested import saves its owner rules as document defaults.
 

@@ -218,7 +218,7 @@ existing evidence and must not modify source mail or the canonical archive.
 ## Deduplication and provenance
 
 On macOS, Command-Q during an active import must offer Cancel or Stop Import
-and Quit. Explain that quitting stops imports, that **Continue Processing**
+and Quit. Explain that quitting stops imports, that **Continue Importing…**
 resumes saved work (or File → Import retries the source), and that already
 archived messages are not imported twice. Cancel leaves imports running. Confirmed
 Quit disallows new imports and signals every local/native and API import to stop
@@ -247,7 +247,7 @@ including while a scan is blocked. Replayed ingest work follows the same
 current-message cancellation boundary as newly acquired mail. GUI Open must
 recover hot SQLite rollback journals under the archive writer lease before
 read-only schema validation, retaining database and sidecar path-safety checks.
-Include the optional existing processing database so Continue Processing can
+Include the optional existing processing database so Continue Importing… can
 read its queue and saved policy after a crash. Import startup remains tracked
 from lease acquisition and settings writes through job registration; failed
 startup releases its lease before reporting completion. Definition refreshes

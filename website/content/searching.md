@@ -110,7 +110,7 @@ Filter sets are saved on this computer, not in the archive.
 
 ## Names and contacts
 
-The **Names and addresses** button opens the Name matcher, which groups the
+The **Names and addresses…** button opens the Name matcher, which groups the
 addresses that belong to one person. Drag one entry onto
 another to merge them, or use **Make separate** to split an address off. Your
 changes are saved in the archive right away. Double-click a name to search all

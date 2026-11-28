@@ -235,7 +235,12 @@ its existing graceful checkpoint behavior without the GUI's forced-exit deadline
 
 Matcher matrix cells use two-point vertical padding, black text and column
 headings, and dark supporting text. Live pickers have no Archive identities badge.
-The main-window resume action is labeled **Continue Processing**.
+The main-window import action is labeled **Continue Importing…** while an import is
+unfinished (it opens the incomplete-work dialog) and **Rescan Imports…** otherwise:
+after confirmation it imports every checked source on the Sources tab again. Local
+files whose size and modification time match their last checkpoint are skipped
+without rereading; changed files are reread; IMAP accounts are rechecked; dedup
+applies as in any import.
 It shall be disabled while a resume request is pending or archive processing is
 active, including startup before the first status snapshot and work started in
 another window. Completion or a rejected resume shall restore the action.

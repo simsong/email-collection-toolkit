@@ -369,7 +369,7 @@ missing processing database. Unsupported/missing saved policy reports an error.
 
 `processing.js` offers **Continue Import** for both phases, **Leave import suspended**,
 and **Stop import**, without phase checkboxes. It provides an explicit
-**Continue Processing** action to reopen the dialog. The action starts disabled until status
+**Continue Importing…** action to reopen the dialog. The action starts disabled until status
 is known, stays disabled during the resume bridge request, and follows the shared
 ingest-overview notifications afterward. The overview includes the document's accepted
 job before a status file exists. Resume generations reject replies started before

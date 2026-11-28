@@ -55,6 +55,7 @@ from .imap_source import IMAP_BUSY_PHASE
 from .imap_preferences import ImapConnectionLimit
 from .imap_transport import ImapTransport
 from .worker_preferences import half_cpus, worker_argument
+from .gui_sources import record_local_sources
 from .rebuild import (
     ByteProgressReporter,
     RebuildInterrupted,
@@ -2576,6 +2577,11 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         catalog.close()
         search.close()
         progress.finish(result, failure_detail, phase=pause_reason if result == "paused" else None)
+        if result == "completed":
+            try:  # The Sources tab lists every imported directory or file; rescans reuse them.
+                record_local_sources(archive, request.roots)
+            except (OSError, ValueError, ConfigurationError) as error:
+                print(f"Warning: could not record import sources: {safe_status_text(str(error))}", file=sys.stderr)
         if integrity_error is not None and (succeeded or pause_reason is not None):
             raise integrity_error
 

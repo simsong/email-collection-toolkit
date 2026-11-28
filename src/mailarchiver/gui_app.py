@@ -79,6 +79,7 @@ from .scanner import CLAMAV_DOWNLOAD_URL, UNSCANNED_WARNING, ScannerAvailability
 from .configuration import GuiConfiguration, application_configuration
 from .gui_default_lists import DefaultListsApi
 from .gui_metadata import message_metadata
+from .gui_sources import archive_sources, rescan_roots, set_source_enabled, update_imap_account
 from .document_options import DocumentOptions, OwnerRulesState
 from .owner_rules import OwnerRules
 from .configuration_diagnostics import ConfigurationError
@@ -487,7 +488,7 @@ def application_icon_path() -> Path:
 IMPORT_CONFIRMATION_WIDTH = 560
 QUIT_IMPORT_MESSAGE = (
     "Quitting will suspend active ingest and content processing. Reopen the archive and use "
-    "Continue Processing to resume. Messages already archived will not be imported twice.\n\n"
+    "Continue Importing… to resume. Messages already archived will not be imported twice.\n\n"
     "Each import will pause after its current message. The application will quit within five seconds; "
     "unfinished work will be recovered when you resume."
 )
@@ -934,6 +935,7 @@ SEARCH_BRIDGE_METHODS = (
     "open_message_window", "request_previews", "take_previews", "message", "message_metadata", "part", "attachment",
     "copy_source_path", "copy_visible_text", "copy_link", "open_link", "open_attachment",
     "save_message", "save_attachment", "prepare_drag", "start_drag",
+    "sources", "set_source_enabled", "save_imap_source", "rescan_imports",
 )
 
 INGEST_BRIDGE_METHODS = (
@@ -1046,6 +1048,64 @@ class GuiApi:
         if self.application is not None and self.search_window is not None:
             self.application.activate_window(self.search_window.window_id)
         return True
+
+    def sources(self) -> list[dict[str, Any]]:
+        """The Sources tab: every imported directory or file and every IMAP account."""
+        if self.archive is None:
+            return []
+        return [entry.model_dump(mode="json") for entry in archive_sources(self._archive())]
+
+    def _config_write(self) -> Any:
+        """Hold the archive writer lease (and the application's writer guard) for a config.yaml edit."""
+        document = self.document
+        if document is not None and document.ingest_job is not None:
+            raise ValueError("Suspend the import before changing sources.")
+        identity = (document.descriptor.identity if document is not None
+                    else os.path.normcase(str(self._archive().resolve())))
+
+        @contextmanager
+        def held() -> Iterator[None]:
+            with self.application.writer_activity() if self.application else nullcontext():
+                with WriterLease.acquire(self._archive(), identity, "Sources", uuid4().hex,
+                                         application_metadata().version):
+                    yield
+        return held()
+
+    def set_source_enabled(self, source_id: str, enabled: bool) -> bool:
+        with self._config_write():
+            set_source_enabled(self._archive(), source_id, bool(enabled))
+        return True
+
+    def save_imap_source(self, source_id: str, server: str, port: int, username: str, tls: str,
+                         password: str = "") -> bool:
+        """Config…: change an IMAP account; a new password (or a new endpoint) is verified by logging in."""
+        if tls not in ("implicit", "starttls"):
+            raise ValueError("Choose implicit TLS or STARTTLS.")
+        try:
+            with self._config_write():
+                previous = next((account for account in load_archive_config(self._archive()).imap_sources
+                                 if account.id == source_id), None)
+                if previous is None:
+                    raise ValueError("The selected IMAP account is unavailable")
+                candidate = ImapAccount(id=previous.id, server=server.strip(), port=int(port), username=username.strip(),
+                                        tls=tls, enabled=previous.enabled)
+                if candidate.credential_ref != previous.credential_ref and not password:
+                    raise ValueError("Enter the password for the changed server, port or TLS setting.")
+                if password:
+                    with ImapSession(candidate, password, authentication_only=True):
+                        pass
+                    save_password(candidate, password)
+                update_imap_account(self._archive(), source_id, candidate.server, candidate.port,
+                                    candidate.username, candidate.tls)
+        finally:
+            password = ""
+        return True
+
+    def rescan_imports(self) -> bool:
+        """Rescan Imports…: confirm, then import every checked source again."""
+        if self.application is None:
+            raise ValueError("Rescanning requires an open archive document.")
+        return self.application.rescan_imports(self)
 
     def processing_work(self) -> dict[str, Any]:
         if self.archive is None:
@@ -2717,6 +2777,41 @@ class PyWebViewApplication:
     def offer_rebuild(self, api: GuiApi, reason: str) -> bool:
         """Pop up the rebuild confirmation when a search finds an index it cannot use."""
         return self._rebuild_document(api, "Rebuild needed before searching", reason)
+
+    def rescan_imports(self, api: GuiApi) -> bool:
+        """Confirm, then import every checked source again (unchanged files are skipped)."""
+        document = api.document
+        if document is None or document.path is None or api.search_window is None or api.window is None:
+            return False
+        if document.ingest_job is not None or self.rebuild_running(document):
+            self.add_notice("warning", "Wait for the current import or rebuild to finish before rescanning.",
+                            window_id=api.search_window.window_id)
+            return False
+        archive = document.path
+        window_id = api.search_window.window_id
+
+        def rescan() -> None:
+            sources = [entry for entry in archive_sources(archive) if entry.enabled]
+            roots = rescan_roots(archive, self.worker_settings().effective_count)
+            if not roots:
+                self.add_notice("warning", "No checked source is available to rescan. Check one on the Sources tab.",
+                                window_id=window_id)
+                return
+            owner_rules = DocumentOptions(archive).defaults()
+            title = "Rescan imports?"
+            message = ("Import every checked source again:\n" + "\n".join(
+                f"• {entry.detail}" + ("" if entry.available else " (unavailable, skipped)") for entry in sources)
+                + "\n\nFiles unchanged since they were last imported are skipped, mail servers are checked for "
+                "new messages, and messages already in the archive are recognized as duplicates.")
+            confirmed = (macos_alert(title, message, ("Rescan", "Cancel"), body_width=IMPORT_CONFIRMATION_WIDTH) == 0
+                         if sys.platform == "darwin" else api.window.create_confirmation_dialog(title, message))
+            if not confirmed:
+                return
+            request = IngestRequest(archive=archive, roots=roots, owner_rules=owner_rules, save_owner_defaults=False)
+            if self.start_import(api, [], processing_request=request):
+                self.open_ingest_window(document)
+
+        return self._submit_task("Rescan imports", rescan, window_id=window_id) is not None
 
     def rebuild_active_document(self) -> bool:
         """File > Rebuild Databases…: confirm, then rebuild derived data for the active archive.

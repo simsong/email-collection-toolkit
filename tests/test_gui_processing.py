@@ -219,6 +219,33 @@ def test_quit_during_rebuild_warns_that_it_aborts_the_rebuild(tmp_path: Path, mo
     assert not list(archive.glob("*.sqlite3.new.*"))
 
 
+def test_sources_tab_checkbox_and_imap_config_use_the_writer_lease(tmp_path: Path) -> None:
+    """DESKTOP: Sources edits persist through the bridge; a changed IMAP endpoint needs a password."""
+    from mailarchiver.imap_models import ImapAccount  # pylint: disable=import-outside-toplevel
+    archive = build_deferred_archive(tmp_path)
+    account = ImapAccount(server="imap.example.test", username="owner@example.test")
+    config = load_archive_config(archive)
+    config.imap_sources = [account]
+    save_archive_config(archive, config)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    try:
+        rows = {row["id"]: row for row in api.sources()}
+        assert rows[account.id]["kind"] == "imap" and rows[account.id]["enabled"]
+        assert api.set_source_enabled(account.id, False)
+        assert not {row["id"]: row for row in api.sources()}[account.id]["enabled"]
+        with pytest.raises(ValueError, match="Enter the password"):
+            api.save_imap_source(account.id, "mail.example.test", 993, "owner@example.test", "implicit", "")
+        assert api.save_imap_source(account.id, "imap.example.test", 993, "renamed@example.test", "implicit", "")
+        saved = load_archive_config(archive).imap_sources[0]
+        assert (saved.id, saved.username, saved.server, saved.enabled) == (
+            account.id, "renamed@example.test", "imap.example.test", False)
+        with pytest.raises(ValueError, match="TLS"):
+            api.save_imap_source(account.id, "imap.example.test", 993, "x", "plaintext", "")
+    finally:
+        api.close()
+        app.shutdown()
+
+
 def test_opening_an_open_archive_raises_its_native_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """DESKTOP: File Open, Open Recent and Finder opens raise the archive's window rather than adding a copy."""
     archive = build_deferred_archive(tmp_path)

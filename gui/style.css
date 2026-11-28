@@ -224,3 +224,20 @@ body.standalone .message { height: 100%; overflow: auto; }
 
 .result.attached-message, .attachment-tag { background-color: #f2f2f2; }
 .attachment-tag { font-size: 11px; padding: 2px 4px; }
+
+/* Search / Sources tabs and the Sources list. */
+.view-tabs { display: flex; gap: 0; margin-right: 8px; }
+.view-tabs [role="tab"] { border-radius: 0; border: 1px solid var(--border); background: transparent; color: CanvasText; padding: 2px 14px; }
+.view-tabs [role="tab"]:first-child { border-radius: 6px 0 0 6px; }
+.view-tabs [role="tab"]:last-child { border-radius: 0 6px 6px 0; border-left: 0; }
+.view-tabs [role="tab"][aria-selected="true"] { background: AccentColor; color: AccentColorText; border-color: AccentColor; }
+.sources-panel { flex: 1; min-height: 0; overflow: auto; padding: 8px 16px; }
+.sources-panel[hidden] { display: none; }
+.sources-help { color: var(--muted); margin: 4px 0 10px; }
+.source-list { list-style: none; margin: 0; padding: 0; }
+.source-list li { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 4px 12px; padding: 8px 4px; border-bottom: 1px solid var(--border); }
+.source-list .source-name { font-weight: 600; }
+.source-list .source-detail { grid-column: 2; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.source-list .source-unavailable { color: #b3261e; }
+#imap-config-form label { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 8px; margin: 6px 0; }
+#app > .toolbar[hidden], #app > .workspace[hidden] { display: none; }

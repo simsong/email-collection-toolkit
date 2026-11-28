@@ -279,7 +279,7 @@ Import** to resume both ingest and content processing, **Leave import suspended*
 to preserve the checkpoint without starting work, and **Stop import** to cancel
 remaining work while retaining archived mail. The desktop bridge
 uses the shared `IngestRequest` service, saved owner/scanner/plugin settings and
-writer lease. The **Names and addresses** and **Institutions** controls query the
+writer lease. The **Names and addresses…** and **Institutions…** controls query the
 processor database; manual name/address decisions commit immediately and survive
 replay. Institution membership is domain-based. About lists processor manifests
 by subscribed MIME type. Authoritative matching is not yet connected. No persistent

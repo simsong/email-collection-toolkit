@@ -153,7 +153,7 @@ def abort_processing(archive: Path, status_ids: list[str]) -> None:
         work = unfinished_work(archive)
         current = {status_id for item in work.imports for status_id in item.status_ids}
         if current != set(status_ids):
-            raise ValueError("Saved imports changed. Reopen Continue Processing to review them.")
+            raise ValueError("Saved imports changed. Reopen Continue Importing… to review them.")
         if not work.available:
             raise ValueError("No saved processing database is available.")
         with closing(sqlite3.connect(sqlite_uri(archive / DATABASE, mode="rw"), uri=True)) as database, database:

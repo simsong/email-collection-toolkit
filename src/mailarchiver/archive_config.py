@@ -38,16 +38,26 @@ from .configuration_diagnostics import ConfigurationError
 ARCHIVE_CONFIG_FILENAME = "config.yaml"
 
 
+class LocalSource(BaseModel):
+    """A local directory or file this archive imports from (Sources tab, Rescan Imports…)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str = Field(pattern=r"^local-[0-9a-f]{16}$")
+    path: str = Field(min_length=1)
+    enabled: bool = True
+
+
 class ArchiveConfig(BaseModel):
     """Settings that describe how the application should open an archive."""
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
-    version: Literal[1, 2, 3] = 2
+    version: Literal[1, 2, 3, 4] = 2
     last_import_directory: Path | None = None
     owner: OwnerRules | None = None
     mbox_max_bytes: int = Field(default=DEFAULT_MBOX_MAX_BYTES, gt=0, strict=True)
     plugins: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     imap_sources: list[ImapAccount] = Field(default_factory=list, exclude_if=lambda value: not value)
+    local_sources: list[LocalSource] = Field(default_factory=list, exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def unique_imap_ids(self) -> ArchiveConfig:
@@ -90,7 +100,7 @@ def load_archive_config(archive: Path) -> ArchiveConfig:
 def save_archive_config(archive: Path, config: ArchiveConfig) -> None:
     """Atomically write readable YAML beside the archive's operational state."""
     archive.mkdir(parents=True, exist_ok=True)
-    config.version = 3 if config.imap_sources else 2
+    config.version = 4 if config.local_sources else 3 if config.imap_sources else 2
     path = config_path(archive)
     descriptor, temporary = tempfile.mkstemp(prefix=".config-", dir=archive)
     try:

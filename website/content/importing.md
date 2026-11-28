@@ -95,6 +95,16 @@ Yellow notices, such as **Extra file detected** for an unrelated file in the
 archive folder, are warnings only. Importing continues. Choose **Dismiss
 messages** to clear them.
 
+## Sources and rescanning
+
+The **Sources** tab of the search window lists every directory or file you have
+imported and every IMAP account. Uncheck a source to leave it out of rescans.
+Choose **Config…** next to an IMAP account to change its server, port, security,
+username or password. **Rescan Imports…** imports every checked source again:
+files unchanged since their last import are skipped, mail servers are checked for
+new messages, and messages already in the archive are recognized as duplicates.
+While an import is unfinished the same button reads **Continue Importing…**.
+
 ## Stopping and continuing
 
 Choose **Suspend** in the Activity window to pause safely, or quit the

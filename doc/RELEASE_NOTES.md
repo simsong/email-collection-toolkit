@@ -6,6 +6,23 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](https://simsong.github.io/email-collection-toolkit/manual/) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a117 — Search and Sources tabs, Rescan Imports
+
+- The search window has **Search** and **Sources** tabs. **Sources** lists every
+  directory or file you have imported and every IMAP account, each with a
+  checkbox. IMAP accounts have **Config…** to change the server, port, security,
+  username or password.
+- The import button reads **Continue Importing…** while an import is unfinished
+  and **Rescan Imports…** otherwise. Rescan imports every checked source again:
+  files whose size and modification time have not changed since their last import
+  are skipped without being reread, changed files are reread, mail servers are
+  checked for new messages, and duplicates are recognized as always.
+- Imports now remember their directories and files in `config.yaml`
+  (`local_sources`, config version 4); directories from earlier imports are found
+  in the Activity history.
+- Buttons that open a window end in "…": **Names and addresses…**,
+  **Institutions…**.
+
 ## 1.0.0a115 — menus follow the open window
 
 - With no archive window open, File and Window commands that need one are
