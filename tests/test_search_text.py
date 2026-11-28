@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 from contextlib import closing
 import sqlite3
+import time
 from email.header import Header
 from pathlib import Path
 
@@ -22,7 +23,7 @@ from mailarchiver.gui_service import search_page, search_suggestions
 from mailarchiver.mailsearch import SortDirection, SortField, parse_query, search_headers, search_result_count
 from mailarchiver.search import index_message, message_text
 from mailarchiver import mailsearch, search_text
-from mailarchiver.search_text import compile_text, search_vocabulary
+from mailarchiver.search_text import compile_text, search_fold, search_vocabulary
 from test_mailsearch import add_catalogued_message, run_search
 
 
@@ -284,14 +285,20 @@ def test_large_legacy_phrase_expansion_still_requires_adjacent_words(tmp_path: P
     assert search_page(archive, interrupted).results == []
 
 
-def test_vocabulary_cache_tracks_index_updates_and_atomic_replacement(tmp_path: Path) -> None:
-    """An index's changed contents or inode cannot reuse stale legacy token alternatives."""
+def test_vocabulary_scan_survives_writes_but_not_replacement(tmp_path: Path) -> None:
+    """In-place (folded) index writes reuse the stored scan; a replaced index file is rescanned."""
     archive = natural_archive(tmp_path, ["body"], legacy=True)
     assert search_page(archive, "unusualstrasse").results == []
     path = archive / "search.sqlite3"
+    search_text._VOCABULARIES.clear()
     with closing(sqlite3.connect(path)) as database, database:
-        database.execute("UPDATE message_fts SET content=content || ' unusualstraße'")
-    assert len(search_page(archive, "unusualstrasse").results) == 1
+        # Current writers fold content, so an import adds no exceptional spellings.
+        database.execute("UPDATE message_fts SET content=content || ' ' || ?", (search_fold("Unusualstraße"),))
+    with pytest.MonkeyPatch.context() as patch:
+        def rescanned(*_args: object) -> list[search_text.WordVariant]:
+            raise AssertionError("an in-place write must not rescan the vocabulary")
+        patch.setattr(search_text, "_scan_terms", rescanned)
+        assert len(search_page(archive, "unusualstrasse").results) == 1
     replacement = tmp_path / "replacement.sqlite3"
     with closing(sqlite3.connect(path)) as original, closing(sqlite3.connect(replacement)) as copied, copied:
         original.backup(copied)
@@ -329,3 +336,36 @@ def test_date_walk_for_frequent_words_matches_sorted_hits(tmp_path: Path, legacy
             walked = pages(query)
         assert walked == sorted_hits, query
     assert pages("cooperate")[0] == [9, 8]
+
+
+def test_desktop_rewarms_search_only_when_the_index_file_is_replaced(tmp_path: Path) -> None:
+    """Opening an archive and rebuilding its index warm search; ordinary publishes do not."""
+    from mailarchiver import gui_app
+
+    archive = natural_archive(tmp_path, ["body"], legacy=True)
+    warmed: list[Path] = []
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(gui_app, "warm_search", warmed.append)
+        api = gui_app.GuiApi(archive)
+        api.status()
+        api.status()
+        path = archive / "search.sqlite3"
+        with closing(sqlite3.connect(path)) as database, database:
+            database.execute("UPDATE message_fts SET content=content || ' more'")
+        api.invalidate_archive()
+        api.status()
+        for _attempt in range(100):
+            if warmed:
+                break
+            time.sleep(0.01)
+        assert warmed == [archive]
+        replacement = tmp_path / "rebuilt.sqlite3"
+        with closing(sqlite3.connect(path)) as original, closing(sqlite3.connect(replacement)) as copied:
+            original.backup(copied)
+        replacement.replace(path)
+        api.invalidate_archive()
+        for _attempt in range(100):
+            if len(warmed) == 2:
+                break
+            time.sleep(0.01)
+        assert warmed == [archive, archive]

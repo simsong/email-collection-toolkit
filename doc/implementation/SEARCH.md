@@ -234,9 +234,14 @@ A bounded process cache follows the index's path, inode, size and nanosecond
 timestamps, sampled across attachment/read-lock acquisition. WAL indexes bypass
 that cache. The full vocabulary scan takes 13–30 s on a 7.8 GB index, so each
 scan is also stored as JSON under the user cache folder (or
-`MAILARCHIVER_SEARCH_VOCABULARY_CACHE`), keyed by the same stamp, keeping the
-eight newest; scans are serialized, and the desktop app starts one in the
-background when a window first opens an archive. This keeps vocabulary changes and atomic replacements visible.
+`MAILARCHIVER_SEARCH_VOCABULARY_CACHE`), keeping the eight newest. Stored scans
+are keyed by index-file lineage (path, device, inode, birth time), not by every
+write: writers fold content before indexing it, so in-place writes add no
+exceptional spellings and an earlier scan of the same file remains a harmless
+superset. A rebuild or restore replaces the file and is rescanned once. Scans are
+serialized, and the desktop app starts one in the background whenever a window
+opens an archive or sees its index file replaced, so the first search after a
+rebuild does not wait for it.
 POSIX quote intent survives parsing for symbol-containing text; `search_literal`
 checks the normalized literal and its own word boundaries in each matching FTS table before counts, sorts
 or limits. Symbols-only quotes scan indexed text. Selectors and suggestions use

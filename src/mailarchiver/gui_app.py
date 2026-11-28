@@ -91,6 +91,7 @@ from .plugin_api import PluginManifest
 from .gui_processing import abort_processing, picker_page, picker_search, PickerSearchRequest, plugin_inventory, remember_interrupted_request, resume_request, save_identity, source_label, unfinished_work
 from .processing.api import ProcessorManifest
 from .processing.identities import IdentityFilter, IdentityMessages, ManualDecision
+from .search_text import index_lineage
 from .gui_service import (
     MessagePreview,
     MessageView,
@@ -995,12 +996,29 @@ class GuiApi:
         self._suggestion_closed = False
         self._tree_cache: dict[bool, list[dict[str, Any]]] = {}
         self._message_count: int | None = None
-        self._search_warmed = False
+        self._warm_lock = Lock()
+        self._warmed_lineage: tuple[str, int, int, int] | None = None
         self._ingest_window_lock = Lock()
         self._ingest_window_api: IngestWindowApi | None = None
 
     def set_window(self, window: Any) -> None:
         self.window = window
+
+    def _warm_search_if_replaced(self) -> None:
+        """Start the one-time vocabulary scan when a window opens an index or a rebuild replaces it.
+
+        In-place index writes keep the file's lineage and reuse its stored scan, so
+        ingest publishes never rescan; only a new file (open, rebuild, restore) does.
+        """
+        try:
+            lineage = index_lineage(self._archive() / "search.sqlite3")
+        except OSError:
+            return
+        with self._warm_lock:
+            if lineage == self._warmed_lineage:
+                return
+            self._warmed_lineage = lineage
+        Thread(target=warm_search, args=(self._archive(),), name="search-warmup", daemon=True).start()
 
     def invalidate_archive(self) -> None:
         """Discard derived view caches after a writer may have published."""
@@ -1015,18 +1033,17 @@ class GuiApi:
             self._preview_error = None
         self._tree_cache.clear()
         self._message_count = None
+        if self.archive is not None and _is_archive(self.archive):
+            self._warm_search_if_replaced()
 
     # JSON bridge results come from validated Pydantic models; values can be
     # nested objects, arrays, or scalars at this external JavaScript boundary.
     def status(self, *, opened_in_new_window: bool = False) -> dict[str, Any]:
         ready = self.archive is not None and _is_archive(self.archive)
+        if ready:
+            self._warm_search_if_replaced()
         if ready and self._message_count is None:
             self._message_count = searchable_message_count(self._archive())
-            if not self._search_warmed:
-                # Opening an index can need a one-time vocabulary scan; start it before the first
-                # search, once per window so repeated publishes during ingest do not rescan.
-                self._search_warmed = True
-                Thread(target=warm_search, args=(self._archive(),), name="search-warmup", daemon=True).start()
         return GuiStatus(
             archive=(
                 str(self.document.display_path)

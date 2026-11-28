@@ -110,8 +110,26 @@ def vocabulary_cache_directory() -> Path:
     return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "mailarchiver" / "search-vocabulary"
 
 
+def index_lineage(path: Path) -> tuple[str, int, int, int]:
+    """Identify one index file across in-place writes; a rebuild's replacement file differs."""
+    state = path.stat()
+    born = getattr(state, "st_birthtime_ns", None) or int(getattr(state, "st_birthtime", 0) * 1e9)
+    return str(path.resolve()), state.st_dev, state.st_ino, born
+
+
 def _stored_vocabulary_path(stamp: SearchIndexStamp, attachments: bool) -> Path:
-    identity = stamp.model_dump_json() + ("+attachments" if attachments else "")
+    """Key stored scans by file lineage, not by every write to that file.
+
+    Current writers fold content before indexing it, so in-place writes add no
+    exceptional spellings: a scan of an earlier state of the same file is a
+    superset of what the file can now contain, and extra alternatives match
+    nothing. A replaced file (rebuild or restore) has a new lineage and is rescanned.
+    """
+    try:
+        lineage = index_lineage(Path(stamp.path))
+    except OSError:
+        lineage = (stamp.path, stamp.device, stamp.inode, 0)
+    identity = repr(lineage) + ("+attachments" if attachments else "")
     return vocabulary_cache_directory() / f"{hashlib.sha256(identity.encode()).hexdigest()}.json"
 
 
@@ -129,7 +147,7 @@ def _write_stored_vocabulary(path: Path, vocabulary: SearchVocabulary) -> None:
         with tempfile.NamedTemporaryFile("wb", dir=path.parent, suffix=".tmp", delete=False) as handle:
             handle.write(vocabulary.model_dump_json().encode())
         Path(handle.name).replace(path)
-        # Each index change has a new stamp; keep only the most recent scans.
+        # Each rebuilt or restored index has a new lineage; keep only the most recent scans.
         stored = sorted(path.parent.glob("*.json"), key=lambda item: item.stat().st_mtime_ns, reverse=True)
         for stale in stored[STORED_VOCABULARIES:]:
             stale.unlink(missing_ok=True)
