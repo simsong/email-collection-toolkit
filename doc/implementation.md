@@ -39,7 +39,7 @@ than a second change log. Platform acceptance is stated alongside its evidence.
 - Standard MBOX and SHA-256 manifests are the canonical preservation record.
   Search indexes are rebuildable; manual decisions, configuration and history
   require backups of the whole archive.
-- Canonical writes use the writer lease and recoverable publication protocol.
+- Canonical writes use the [writer lease](implementation/ARCHIVE.md#writer-lock) and recoverable publication protocol.
   Interrupted work retains completed checkpoints; errors do not silently drop mail.
 - ClamAV runs in owned workers. Detections and scanner failures retain messages
   and evidence; no resident service or manual-review gate is introduced.

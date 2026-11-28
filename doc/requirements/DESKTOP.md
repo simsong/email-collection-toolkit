@@ -477,8 +477,9 @@ identifies all attached search windows for refresh.
 The OS lease is a nonblocking exclusive lock on
 `status/archive-write.lock`; diagnostic JSON in that file records the operation,
 PID, host, start time, version, and archive identity, but file presence never
-determines ownership and a process crash releases the lock. CLI ingest and
-search-index rebuild use the same lease. During Import, closing its owning search window transfers the same operation
+determines ownership and a process crash releases the lock. CLI ingest, Rebuild
+Databases, Sources and Document Options edits and the other writers listed in
+[Writer lock](../implementation/ARCHIVE.md#writer-lock) use the same lease. During Import, closing its owning search window transfers the same operation
 to another search window on that archive, preserving stop/completion signals and
 the writer lease. Only its last search window refuses Close until import finishes
 or suspends; the close callback returns promptly and explains that Quit suspends

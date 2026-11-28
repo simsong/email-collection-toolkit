@@ -185,7 +185,8 @@ retains the typed `WriterLease` for an active import. `WriterLease` uses
 nonblocking `flock` on supported POSIX systems against
 `status/archive-write.lock`. Its UTF-8 JSON is diagnostic only; the open OS lock
 is authoritative and is released automatically if a process dies. CLI ingest,
-GUI import, and search-index replacement enter through the same lock contract.
+GUI import, Rebuild Databases and configuration edits enter through the same lock
+contract; see [Writer lock](ARCHIVE.md#writer-lock) for both layers and their limits.
 `SearchWindow` is a typed record for the independent query, sort, selection,
 mailbox-filter, and geometry state that the JavaScript UI maintains. Preferences
 are written explicitly as UTF-8 and atomically replaced in the platform

@@ -57,6 +57,51 @@ The integrity adapter labels this pass **Verifying archived messages and saving
 checksums** in both its starting and completed progress events. It reads the
 whole archive locally; download-partition percentages do not measure this pass.
 
+## Writer lock
+
+Every write to an archive holds one cross-process lock; the code is
+`src/mailarchiver/writer_lock.py` (`WriterLease`). There are two layers.
+
+**Per-archive lock.** `WriterLease.acquire()` opens `status/archive-write.lock`
+inside the archive (creating `status/` with mode 0700 if needed, refusing
+symlinks and non-regular files) and takes a non-blocking exclusive lock on it:
+`flock(LOCK_EX | LOCK_NB)` on macOS and Linux, `LockFileEx` on Windows (which also
+pins the archive and `status` directories against rename). If another process holds
+it, acquisition fails at once with `ArchiveBusyError` ("archive is busy with another
+writer: …"); writers never wait. The holder then writes a JSON record into the file
+(operation, operation ID, PID, host, start time, application version, archive
+identity) so that message can name it. The record is diagnostic only: the open OS
+lock is the authority, the file's presence never means the archive is locked, and
+the record may remain after release. The OS releases the lock when the file is
+closed or the process exits for any reason, so a crash never leaves a stale lock.
+Creating a new archive takes the same lease with `create=True`; on Windows a
+`.mailarchiver-create.lock` beside the new archive also serializes creators.
+
+**Per-user application guard.** Each lease also holds a *shared* lock on
+`<temporary directory>/mailarchiver-writers-<uid>/application-write.lock` (a private,
+user-owned directory; `mailarchiver-writers/` on Windows). Installing an application
+update takes it *exclusively* (`WriterLease.reserve_update()`), so an update never
+installs while any archive is being written and no write starts during installation.
+ClamAV definition updates take the shared guard without an archive lease
+(`application_write_activity()`). Within one process a counter and mutex track
+active leases (`WriterLease.writers_active()`), and the GUI's `writer_activity()`
+lets Quit wait for short writes. See [Sparkle updates](../SPARKLE_UPDATES.md).
+
+**Who takes the lease.** Command-line and GUI imports (`run_ingest`, including
+Continue Importing… and Rescan Imports…), IMAP synchronization, `ect rebuild` and
+File → Rebuild Databases…, archive creation, SQLite journal recovery on open, the
+processor harness and `ect process`, identity and name-grouping edits, aborting a
+saved import, Document Options…, Default Lists… archive edits, and Sources tab
+edits to `config.yaml`. Readers (search, viewing, Revalidate Archive, metadata)
+take no lock. The `archive_identity` passed to `acquire()` is recorded in the
+diagnostic JSON only; the lock is the file inside the archive.
+
+**Limits.** The lock is advisory: it excludes only code that asks for it, not
+manual edits or other programs. `flock` is not dependable on some network file
+systems, so keep archives on local or directly attached storage. The application
+guard coordinates only processes of the same user that share a temporary
+directory.
+
 ## Technology decision
 
 The normalizer uses Python 3.12+, streaming I/O, RFC 5322/MIME parsing,
